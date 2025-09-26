@@ -12,3 +12,9 @@
 # LLaVA-ViT: Native ViT For Multimodal Large Language Models
 
 
+## Contributors
+Thanks so much to all of our amazing contributors!
+
+<!-- readme: collaborators,contributors -start -->
+<!-- readme: collaborators,contributors -end -->
+
