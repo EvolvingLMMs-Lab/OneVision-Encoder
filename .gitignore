@@ -1,0 +1,491 @@
+################################################################################
+# Universal Python / Data / ML / Web / Frontend / Docs .gitignore (Extremely Comprehensive)
+# Start by keeping this whole file; prune later once your project stabilizes.
+# Use .env.example or config.example.* for tracked templates.
+################################################################################
+
+########################################
+# User-requested explicit patterns
+########################################
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.pth
+*.ckpt
+*.mp4
+*.bin
+
+########################################
+# Python bytecode / interpreter artefacts
+########################################
+__pycache__/
+*.py[cod]
+*$py.class
+
+########################################
+# Compiled / extension modules
+########################################
+*.so
+*.pyd
+*.dll
+*.dylib
+*.a
+*.o
+*.obj
+*.out
+*.exe
+
+########################################
+# Build / packaging
+########################################
+build/
+dist/
+sdist/
+wheels/
+wheelhouse/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+MANIFEST
+*.spec          # PyInstaller spec files (regenerate as needed)
+*.manifest
+
+########################################
+# Virtual environments / dependency managers
+########################################
+.venv/
+venv/
+env/
+ENV/
+.conda/
+condaenv.*
+*.conda
+# Pipenv / Poetry / PDM / Hatch / Rye / UV
+Pipfile.lock
+poetry.lock
+.poetry/
+.pdm-build/
+.pdm-python
+pdm.lock
+.hatch/
+.hatch_build/
+.rye/
+.uv/
+# pyenv / direnv
+.python-version
+.envrc
+# PEP 582
+__pypackages__/
+
+########################################
+# Environment / secrets (track only templates)
+########################################
+.env
+.env.*
+*.env
+*.secret
+secrets/
+secret/
+*.key
+*.pem
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.csr
+*.enc
+
+########################################
+# Logs / runtime / temp
+########################################
+*.log
+log/
+logs/
+*.pid
+*.pid.lock
+*.seed
+*.tmp
+*.temp
+*.bak
+*.orig
+*.swp
+*.swo
+*.lock
+*.DS_Store?
+
+########################################
+# Testing / coverage / lint / type-check
+########################################
+.pytest_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.pyright/
+ruff_cache/
+.ruff_cache/
+.pylint.d/
+.bandit
+bandit.json
+.hypothesis/
+.prof
+*.prof
+*.lprof
+*.cprof
+*.profraw
+
+########################################
+# Jupyter / IPython
+########################################
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+.ipython/
+.jupyter/
+.python_history
+.history
+
+########################################
+# Data science / ML / training artefacts
+########################################
+# Common working dirs
+data/
+datasets/
+raw_data/
+processed_data/
+cache/
+cache_dir/
+cached/
+artifacts/
+artifacts_tmp/
+workspace/
+workdir/
+outputs/
+output/
+results/
+runs/
+experiments/
+tensorboard/
+tb_logs/
+lightning_logs/
+wandb/
+mlruns/
+ray_results/
+comet_ml/
+neptune/
+optuna/
+
+# Common data file formats (uncomment any you DO want to track)
+*.csv
+*.tsv
+*.parquet
+*.feather
+*.arrow
+*.orc
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.pkl
+*.pickle
+*.joblib
+*.mat
+*.rds
+*.jsonl
+*.msgpack
+
+# Model / weight formats
+*.pt
+*.pth
+*.ckpt
+*.weights
+*.safetensors
+*.onnx
+*.tflite
+*.pb
+*.mlmodel
+*.bin
+*.model
+
+# Tokenizer & vocab
+tokenizer.model
+sentencepiece.bpe.model
+merges.txt
+vocab.json
+
+# Hugging Face / Transformers caches
+.huggingface/
+huggingface/
+huggingface_cache/
+hf_cache/
+transformers_cache/
+.cache/huggingface/
+cache/huggingface/
+
+# Diffusion / SD style models
+diffusers_cache/
+sd_models/
+loras/
+vae/
+embeddings/
+
+########################################
+# Media / large asset files (adjust as needed)
+########################################
+media/
+assets/
+static/
+staticfiles/
+public/
+site_media/
+uploads/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.bmp
+*.webp
+*.tiff
+*.ico
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.mpg
+*.mpeg
+*.flv
+*.wav
+*.mp3
+*.ogg
+
+########################################
+# Documentation build outputs
+########################################
+docs/_build/
+_build/
+build_docs/
+site/
+mkdocs/site/
+mkdocs_build/
+.book/
+.docusaurus/
+.next/
+.out/
+.vitepress/dist/
+.storybook/
+storybook-static/
+.storybook-static/
+coverage-docs/
+
+########################################
+# Web frameworks / backends
+########################################
+*.pot
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+########################################
+# Frontend / Node ecosystem (if present)
+########################################
+node_modules/
+bower_components/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+dist-ssr/
+.eslintcache
+.stylelintcache
+
+########################################
+# Archives / compressed (beyond those explicitly listed)
+########################################
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.bz2
+*.xz
+*.7z
+*.rar
+
+########################################
+# Containers / Docker
+########################################
+Dockerfile.*.tmp
+.docker/
+.docker_tmp/
+docker-compose.override.yml
+
+########################################
+# Sphinx / LaTeX / doc tool artefacts
+########################################
+*.aux
+*.toc
+*.idx
+*.lof
+*.lot
+*.log
+*.fls
+*.out
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+
+########################################
+# Generated / codegen / API clients
+########################################
+generated/
+gen/
+autogen/
+.codegen/
+.openapi/
+openapi_generated/
+swagger_generated/
+
+########################################
+# Distributed / cluster training logs
+########################################
+slurm-*.out
+*.event*
+events.out.tfevents.*
+distributed_logs/
+cluster_logs/
+parallel_logs/
+
+########################################
+# Patches / backups
+########################################
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.diff
+patches/
+*.sync-conflict-*
+
+########################################
+# OS / filesystem noise
+########################################
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.fseventsd
+.turd
+.nfs*
+.metadata/
+
+########################################
+# Editors / IDE
+########################################
+# VS Code
+.vscode/
+.vscode-test/
+# JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+# Sublime
+*.sublime-project
+*.sublime-workspace
+# Eclipse / NetBeans
+.project
+.classpath
+.cproject
+.settings/
+.nb-gradle/
+# Vim
+*.swp
+*.swo
+.session
+# Emacs
+*~
+\#*\#
+.\#*
+.tramp
+# Misc
+.lldb
+*.tmproj
+*.tmproject
+*.code-workspace
+
+########################################
+# Merge / conflict artefacts
+########################################
+*.BACKUP.*
+*.BASE.*
+*.LOCAL.*
+*.REMOTE.*
+*.orig
+*.rej
+
+########################################
+# Misc junk / transient
+########################################
+*.tmp
+*.temp
+tmp/
+temp/
+~$*
+*.part
+*.crdownload
+*.download
+*.partial
+*.cache
+.cache/
+cache/
+
+########################################
+# Helpful reminders (NOT enforced)
+# Keep these tracked (do NOT ignore):
+#   requirements.txt / requirements/*.txt
+#   pyproject.toml / setup.cfg / setup.py
+#   README.md / CHANGELOG.md / LICENSE
+#   .env.example / config.example.yaml
+#   docs/ (except build outputs)
+########################################
+
+################################################################################
+# To keep an otherwise ignored file or empty directory:
+#   !path/to/file.ext
+#   Place a .gitkeep (or .keep) inside the directory and negate it:
+#   !data/.gitkeep
+################################################################################
+
+# Examples (uncomment if you decide to preserve folder structure):
+# !data/.gitkeep
+# !models/.gitkeep
+# !outputs/.gitkeep
+# !checkpoints/.gitkeep
