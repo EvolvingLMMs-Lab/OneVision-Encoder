@@ -1,0 +1,8 @@
+nimbus.host: "localhost"
+
+# In Storm 0.7.x, this is necessary in order to give workers time to
+# initialize. In Storm 0.8.0 and later, it may not be necessary because Storm
+# has added a separate, longer timeout for the initial launch of a worker.
+supervisor.worker.timeout.secs: 60
+
+topology.workers: 1

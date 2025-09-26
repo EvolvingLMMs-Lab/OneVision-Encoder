@@ -1,0 +1,24 @@
+#!/bin/bash
+set -e
+
+function error() {
+  local PARENT_LINENO="$1"
+  local MESSAGE="$2"
+  local CODE="${3:-1}"
+  if [[ -n "$MESSAGE" ]] ; then
+    echo "Error on or near line ${PARENT_LINENO}: ${MESSAGE}; exiting with status ${CODE}"
+  else
+    echo "Error on or near line ${PARENT_LINENO}; exiting with status ${CODE}"
+  fi
+  exit "${CODE}"
+}
+trap 'error ${LINENO}' ERR
+
+# Build the dependent Python eggs.
+pushd ../../petrel &>/dev/null
+rm -rf dist
+python setup.py bdist_egg &>/dev/null
+popd &>/dev/null
+
+# Build and submit the topology jar.
+petrel submit $@

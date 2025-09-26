@@ -1,0 +1,1 @@
+from .modeling_finetune import vit_base_patch16_224, vit_base_patch16_384, vit_large_patch16_224, vit_large_patch16_384, umt_vit_large_patch14_224
