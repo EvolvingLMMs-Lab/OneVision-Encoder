@@ -3,6 +3,8 @@ warnings.filterwarnings('ignore')
 
 import os
 import numpy as np
+import json
+from safetensors.torch import load_file
 # import torch
 from torch import distributed
 import warnings
@@ -69,11 +71,45 @@ def get_feature(videos, processor, forward_base_model):
                     output = forward_base_model(**inputs)  
                 outputs.append(output.last_hidden_state[1:])
             outputs = torch.cat(outputs, dim=1)
+    elif args.model_name == 'dino_v3':
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            outputs = [] 
+            for frame_idx in range(videos.shape[2]):
+                frame = videos[:, :,frame_idx,  :, :]
+                inputs = processor(images = frame, return_tensors='pt')
+                with torch.no_grad():  
+                    output = forward_base_model(**inputs)
+                    # print(output.last_hidden_state[5:].shape)  
+                outputs.append(output.last_hidden_state[:,5:,:])
+            outputs = torch.cat(outputs, dim=1)
     elif args.model_name == "languagebind":
         with torch.no_grad():  
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 output = forward_base_model.module.vision_model(pixel_values=videos)  
-        output=output.last_hidden_state[1:]     
+        output=output.last_hidden_state[1:]
+    elif args.model_name == "rice":
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            outputs = [] 
+            for frame_idx in range(videos.shape[2]):
+                frame = videos[:, :,frame_idx,  :, :]
+                # inputs = processor(images = frame, return_tensors='pt')
+                with torch.no_grad():  
+                    output = forward_base_model(frame)
+                    # print(output.last_hidden_state[5:].shape)  
+                outputs.append(output.last_hidden_state[:, 1:, :])
+            outputs = torch.cat(outputs, dim=1)
+
+    elif args.model_name == "ov_1_5_vit":
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            outputs = []
+            for frame_idx in range(videos.shape[2]):
+                frame = videos[:, :,frame_idx,  :, :]
+
+                with torch.no_grad():
+                    output = forward_base_model(frame)
+                outputs.append(output.last_hidden_state[:, 1:, :])
+            outputs = torch.cat(outputs, dim=1)
+
     else:
         with torch.no_grad():
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -180,15 +216,20 @@ class AttentionPoolingBlock(AttentiveBlock):
         return x
 
 class CustomModel(nn.Module):
-    def __init__(self, attentive_probe_model, 
+    def __init__(self, attentive_probe_model,
                  attentive_dim, num_classes,
                  init_scale=0.001):
         super(CustomModel, self).__init__()
         
-        self.attentive_probe_model = attentive_probe_model
+        # self.in_proj = nn.Linear(attentive_dim, 1024)
 
+        self.attentive_probe_model = attentive_probe_model
+        
+        
         self.fc_norm = nn.LayerNorm(attentive_dim)
+        # self.fc_norm = nn.LayerNorm(1024)
         self.head = nn.Linear(attentive_dim, num_classes)
+        # self.head = nn.Linear(1024, num_classes)
         
         self.apply(self._init_weights)
         self.head.weight.data.mul_(init_scale)
@@ -204,6 +245,8 @@ class CustomModel(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, features):
+        # print(features.shape)
+        # x = self.in_proj(features)
         x = self.attentive_probe_model(features)
         x = self.fc_norm(x)
         x = self.head(x)
@@ -271,7 +314,7 @@ def train_AdamW(args,
         
         cur_ap_model.train()
         optimizer.zero_grad()
-
+        # import pdb; pdb.set_trace()
         for data_iter_step, (videos, labels) in enumerate(
                             metric_logger.log_every(data_loader_train, args.print_freq, header,
                                                     args.world_size, args.batch_size)):
@@ -289,11 +332,15 @@ def train_AdamW(args,
             labels = labels.to(cur_device, non_blocking=True)
             labels = labels.view(-1)
             # base model export feature
-            outputs = get_feature(videos, processor, forward_base_model)
-            outputs = F.normalize(outputs, dim=-1)
-                        # print('output', outputs.shape)
+            with torch.no_grad():
+                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                    outputs = get_feature(videos, processor, forward_base_model)
+                    # print(outputs.shape)
+                    outputs = F.normalize(outputs, dim=-1)
+                    # print('output', outputs.shape)
             # attentive_probing
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                # import pdb; pdb.set_trace()
                 pred = cur_ap_model(outputs)
                 loss = criterion(pred, labels)
                 
@@ -360,7 +407,9 @@ def find_peak(args, lr, cur_device,
     else:
         processor = None
 
-    base_model = load_finetune_checkpoint(args, base_model)
+    if args.model_name != "dino_v3" and args.model_name != "ov_1_5_vit" and args.model_name != "rice":
+        print("have load ckpt")
+        base_model = load_finetune_checkpoint(args, base_model)
     
     base_model.to(cur_device)
     # for name, p in base_model.named_parameters():
@@ -494,6 +543,17 @@ def get_model(args):
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
+    elif args.model_name == "ov2":
+        from timm.models import create_model
+        import video_models.ov2
+        base_model = create_model(
+            args.model,
+            img_size=args.input_size,
+            pretrained=False,
+            num_classes=args.num_classes,
+            all_frames=args.num_frames,
+            tubelet_size=args.tubelet_size,
+            use_mean_pooling=True)
     elif args.model_name == "viclip":
         from timm.models import create_model
         import video_models.viclip
@@ -556,6 +616,34 @@ def get_model(args):
                 use_sdpa=True,
                 use_SiLU=False,
                 tight_SiLU=False)
+    elif args.model_name == 'univit':
+        from timm.models import create_model
+        import video_models.video_mlcd
+        # print("args.model", args.model)
+        print("load create univit")
+        base_model = create_model(
+            args.model,
+            img_size=224,
+            num_classes=512
+        )
+    elif args.model_name == 'cvpr':
+        from timm.models import create_model
+        import video_models.cvpr
+        # print("args.model", args.model)
+        print("load create cvpr_model")
+        base_model = create_model(
+            args.model,
+            # img_size=224,
+            # num_classes=512
+        )
+
+    elif args.model_name == "rice":
+        from modeling_rice_base import MLCDVisionModel
+        base_model = MLCDVisionModel.from_pretrained("/vlm/xiangan/pretrain_models/deepglint/rice-vit-large-patch14-560-v1")
+
+    elif args.model_name == "ov_1_5_vit":
+       from transformers import MLCDVisionModel
+       base_model = MLCDVisionModel.from_pretrained(args.finetune).cuda()
 
     elif args.model_name == 'mlcd':
         if args.model=="vit-bigG-patch14-448":
@@ -600,6 +688,11 @@ def get_model(args):
         base_model = AutoModel.from_pretrained(args.finetune, torch_dtype=torch.float32)
         processor = AutoImageProcessor.from_pretrained(args.finetune, torch_dtype=torch.float32)
         return base_model, processor
+    elif args.model_name == "dino_v3":
+        from transformers import AutoImageProcessor, AutoModel
+        base_model = AutoModel.from_pretrained(args.finetune, torch_dtype=torch.float32)
+        processor = AutoImageProcessor.from_pretrained(args.finetune, torch_dtype=torch.float32)
+        return base_model, processor
     elif args.model_name == "clip":
         from transformers import AutoProcessor, CLIPVisionModelWithProjection
         base_model = CLIPVisionModelWithProjection.from_pretrained(args.finetune, torch_dtype=torch.float32)
@@ -627,7 +720,7 @@ if __name__ == '__main__':
         'diving48': 48,
         'epic_verb': 97,
         'k600': 600,
-        'k710': 710,  
+        'k710': 710,
         'perception_test': 63,
         'ssv2': 174,
         'SSV2': 174,
@@ -658,7 +751,7 @@ if __name__ == '__main__':
     setup_for_distributed(args.global_rank == 0)
     setup_seed(seed=args.seed, cuda_deterministic=False)
 
-    if args.model_name == "siglip" or args.model_name == "dino_v2" or args.model_name == "clip":
+    if args.model_name == "siglip" or args.model_name == "dino_v2" or args.model_name == "clip" or args.model_name == "dino_v3":
         from ac_ap_dataloader_dali_no_norm import dali_dataloader
     print("create data loader start")
     data_loader_train = dali_dataloader(args.train_data_root_path,
@@ -674,7 +767,6 @@ if __name__ == '__main__':
                                         mean=args.mean,
                                         std=args.std,
                                         mode="train",
-                                        multi_views=args.multi_views,
                                         seed=args.seed,
                                         num_shots=args.num_shots)
     args.total_batch_size = args.world_size * args.batch_size
@@ -693,7 +785,6 @@ if __name__ == '__main__':
                                         mean=args.mean,
                                         std=args.std,
                                         mode="val",
-                                        multi_views=args.multi_views,
                                         seed=1024,
                                         num_shots=args.num_shots)
     args.num_val_steps_per_epoch = len(data_loader_val)
@@ -711,7 +802,9 @@ if __name__ == '__main__':
     
     print("best_lr: ", best_lr, "max_acc_top1: ", max_acc_top1, "max_acc_top5: ", max_acc_top5)
     if args.global_rank == 0:
+        
         args.save_path = os.path.join(args.save_report, "report_attentive_probe_{}_{}.txt".format(args.finetune.split("/")[-1], args.num_shots))
+        os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
         print("successfully save")
         with open(args.save_path, "a+") as writer:
             writer.write(str(args.data_set)+" "+str(max_acc_top1))
