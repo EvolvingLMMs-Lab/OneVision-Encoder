@@ -1,0 +1,73 @@
+model = dict(
+    type="TadTR",  # Done
+    projection=dict(
+        type="ConvSingleProj",
+        in_channels=2048,
+        out_channels=256,
+        num_convs=1,
+        conv_cfg=dict(kernel_size=1, padding=0),
+        norm_cfg=dict(type="GN", num_groups=32),
+        act_cfg=None,
+    ),
+    transformer=dict(
+        type="TadTRTransformer",
+        num_proposals=40,
+        num_classes=20,
+        with_act_reg=True,
+        roi_size=16,
+        roi_extend_ratio=0.25,
+        aux_loss=True,
+        position_embedding=dict(
+            type="PositionEmbeddingSine",
+            num_pos_feats=256,
+            temperature=10000,
+            offset=-0.5,
+            normalize=True,
+        ),
+        encoder=dict(
+            type="DeformableDETREncoder",
+            embed_dim=256,
+            num_heads=8,
+            num_points=4,
+            attn_dropout=0.1,
+            ffn_dim=1024,
+            ffn_dropout=0.1,
+            num_layers=4,
+            num_feature_levels=1,
+            post_norm=False,
+        ),
+        decoder=dict(
+            type="DeformableDETRDecoder",
+            embed_dim=256,
+            num_heads=8,
+            num_points=4,
+            attn_dropout=0.1,
+            ffn_dim=1024,
+            ffn_dropout=0.1,
+            num_layers=4,
+            num_feature_levels=1,
+            return_intermediate=True,
+        ),
+        loss=dict(
+            type="TadTRSetCriterion",
+            num_classes=20,
+            matcher=dict(
+                type="HungarianMatcher",
+                cost_class=6.0,
+                cost_bbox=5.0,
+                cost_giou=2.0,
+                cost_class_type="focal_loss_cost",  # ce_cost, focal_loss_cost
+                iou_type="iou",
+                use_multi_class=False,
+            ),
+            loss_class_type="focal_loss",  # ce_loss, focal_loss
+            weight_dict=dict(
+                loss_class=2.0,
+                loss_bbox=5.0,
+                loss_iou=2.0,
+                loss_actionness=4.0,
+            ),
+            use_multi_class=False,
+        ),
+    ),
+)
