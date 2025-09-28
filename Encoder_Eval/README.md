@@ -26,14 +26,29 @@ This repository provides a unified evaluation framework for benchmarking **video
 
 ## 🔧 Setup
 
-```bash
-# Clone the repo
-git clone git@github.com:FeilongTangmonash/Encoder_Eval.git
-cd Encoder_Eval
 
-# Install dependencies
-pip install -r requirements.txt
+### 1. Optional: Using Dockerfile for Environment Setup
+```bash
+docker build -t llava_vit_eval:25.09 .
 ```
+### 2. Or Load Docker Image
+```bash
+docker load -i /vlm/xiangan/docker_images/llava_vit_eval_tag_25.09.tar
+docker tag <image_id> llava_vit_eval:25.09
+```
+
+### 3. Run
+```
+# Run container with -w to set working directory directly to the mounted volume
+docker run -it --gpus all \
+    --ipc host --net host --privileged --cap-add IPC_LOCK \
+    --ulimit memlock=-1 --ulimit stack=67108864 --rm \
+    -v "$(cd .. && pwd)":/workspace/LLaVA-ViT \
+    -w /workspace/LLaVA-ViT/Encoder_Eval \
+    --name "llava_vit_eval_container" \
+    llava_vit_eval:25.09 /bin/bash
+```
+
 ## 🧱 code structure
 
 <pre>
