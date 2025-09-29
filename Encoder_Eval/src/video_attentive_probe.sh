@@ -29,7 +29,7 @@ BATCH_SIZE="${BATCH_SIZE:-32}"
 for SEED in 1
 do
     # for DATASET in ssv2 k400 k600 k700 hmdb51 ucf101 epic_verb epic_noun perception_test diving48 CharadesEgo  CharadesEgo_v1_only1st CharadesEgo_v1_only3rd
-    for DATASET in ssv2
+    for DATASET in k400
     do
         for NUM_SHOTS in 50
         do
