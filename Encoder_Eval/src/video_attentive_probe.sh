@@ -21,6 +21,7 @@ model="${model:-vit_large_patch16_224}"
 EMBEDDING_SIZE="${EMBEDDING_SIZE:-1024}"
 PATCH_SIZE="${PATCH_SIZE:-16}"
 NUM_FRAMES="${NUM_FRAMES:-8}"
+NUM_EPOCH="${NUM_EPOCH:-40}"
 INPUT_SIZE="${INPUT_SIZE:-224}"
 TUBELET_SIZE="${TUBELET_SIZE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
@@ -41,6 +42,7 @@ do
                 video_attentive_probe_all/ac_export_feature_and_attentive_probe_latest.py \
                 --embedding_size ${EMBEDDING_SIZE} \
                 --data_set ${DATASET} \
+                --default_epoch ${NUM_EPOCH} \
                 --seed ${SEED} \
                 --num_shots ${NUM_SHOTS} \
                 --num_step 8 \

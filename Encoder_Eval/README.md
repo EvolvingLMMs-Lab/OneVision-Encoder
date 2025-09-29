@@ -44,9 +44,23 @@ docker run -it --gpus all \
     --ipc host --net host --privileged --cap-add IPC_LOCK \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
     -v "$(cd .. && pwd)":/workspace/LLaVA-ViT \
+    -v /viteo_vit:/video_vit \
+    -v /vlm/:/vlm/ \
     -w /workspace/LLaVA-ViT/Encoder_Eval \
     --name "llava_vit_eval_container" \
     llava_vit_eval:25.09 /bin/bash
+```
+
+
+### 4. Example
+```
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+EPOCH=40 \
+NUM_GPUS=8 \
+OUTPUT=output \
+MODEL_NAME=ov_1_5_vit \
+FINETUNE=/video_vit/pretrain_models/ov_1_5_vit_mlcd_style/ \
+bash src/video_attentive_probe.sh
 ```
 
 ## 🧱 code structure
