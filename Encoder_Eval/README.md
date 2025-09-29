@@ -63,21 +63,20 @@ FINETUNE=/video_vit/pretrain_models/ov_1_5_vit_mlcd_style/ \
 bash src/video_attentive_probe.sh
 ```
 
-## 🧱 code structure
-
-<pre>
-video_vit/
-└── video_encoder_eval/
-    └── video_linear_probe/
-        └── checkpoint/
-            └── mlcd_base/
-                └── backbone_base224.pt
-</pre>
-
 
 ## 🚀 Usage
 We provide example scripts to perform a full evaluation of the UMT model using both the attentive probe and the linear probe methods. Simply run the commands below:
 ```
-bash src/video_attentive_probe.sh
-bash src/video_linear_probe.sh
+BATCH_SIZE=16 \
+INPUT_SIZE=224 \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+NUM_FRAMES=8 \
+NUM_GPUS=8 \
+OUTPUT=output \
+NUM_EPOCH=100 \
+MODEL_NAME=ov_1_5_vit \
+FINETUNE=/video_vit/pretrain_models/ov_1_5_vit_mlcd_style/ \
+bash src/video_attentive_probe.sh 
+
+# best_lr:  0.0001 max_acc_top1:  29.7684585492228 max_acc_top5:  61.61350388601036
 ```
