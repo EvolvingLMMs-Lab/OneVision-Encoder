@@ -585,7 +585,7 @@ def main():
                     # backbone_time = time.time()
                     output, ids_restore = backbone(head_input, list_I[head_id], list_P[head_id])
                     # decoder_time = time.time()
-                    output["masked_embeddings"], mask_pos = decoder_backbone(output["masked_embeddings"].detach(), ids_restore=ids_restore)
+                    output["masked_embeddings"], mask_pos = decoder_backbone(output["masked_embeddings"], ids_restore=ids_restore)
                 
                 with torch.no_grad():
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
@@ -636,6 +636,12 @@ def main():
 
         list_loss = []
         list_loss_float = []
+        list_loss_unmask = []
+        list_loss_mask = []
+        list_loss_float_unmask = []
+        list_loss_float_mask = []
+        list_grad_cos = []
+        
         # list_norm = []
         # list_prob = []
         
@@ -711,6 +717,8 @@ def main():
                             head_embedding = unmask_embedding
                             teacher_head_embedding = teacher_unmask_embedding
                             head_loss = llava_fc(head_embedding, teacher_head_embedding)
+                            list_loss_float_unmask.append(head_loss.float())
+                            list_loss_unmask.append(head_loss)
                             # print("unmasked_embeddings_head_loss", head_loss.item())
 
                         elif pfc_type == "masked_embeddings":
@@ -718,6 +726,8 @@ def main():
                             teacher_head_embedding = teacher_mask_embedding
                             # teacher_mask_embedding.reshape()
                             head_loss = llava_fc(head_embedding, teacher_head_embedding)
+                            list_loss_float_mask.append(head_loss.float())
+                            list_loss_mask.append(head_loss)
                             # print("masked_embeddings_head_loss", head_loss.item())
                     # mask_head_loss = pfc[i](mask_embedding.float(), teacher_mask_embedding.float())
                     # unmask_head_loss = pfc[i](unmask_embedding.float(), teacher_unmask_embedding.float())
@@ -751,8 +761,42 @@ def main():
                 list_loss.append(head_loss)
                 list_loss_float.append(head_loss.item())
 
-        sum(list_loss).backward()
+        loss_unmask = torch.stack(list_loss_float).mean()
+        loss_mask   = torch.stack(list_loss_mask).mean()   
 
+        total_loss = loss_unmask + loss_mask
+        # sum(list_loss).backward()
+
+        # ====== 梯度监控 ======
+        # 1) 计算 unmask (I 帧) loss 的梯度
+        opt.zero_grad()
+        loss_unmask.backward(retain_graph=True)
+        grad_I = []
+        for p in backbone.parameters():
+            if p.grad is not None:
+                grad_I.append(p.grad.detach().clone().flatten())
+        grad_I = torch.cat(grad_I)
+
+        # 2) 计算 mask (P 帧) loss 的梯度
+        opt.zero_grad()
+        loss_mask.backward(retain_graph=True)
+        grad_P = []
+        for p in backbone.parameters():
+            if p.grad is not None:
+                grad_P.append(p.grad.detach().clone().flatten())
+        grad_P = torch.cat(grad_P)
+
+        # 3) 计算余弦相似度和梯度范数
+        cos_sim = torch.dot(grad_I, grad_P) / (grad_I.norm() * grad_P.norm() + 1e-6)
+        norm_I = grad_I.norm()
+        norm_P = grad_P.norm()
+
+        list_grad_cos.append(cos_sim.float())
+        list_grad_cos.append(norm_I.float())
+        list_grad_cos.append(norm_P.float())
+
+        opt.zero_grad()
+        total_loss.backward()
         if global_step % args.backward_passes_per_step == 0:
             clip_grad_norm_(backbone.parameters(), max_norm=5, norm_type=2)
             # import pdb; pdb.set_trace()
@@ -767,7 +811,7 @@ def main():
         lr_scheduler.step()
         # import pdb; pdb.set_trace()
         batch_end_callback(
-            global_step, lr_scheduler, list_loss_float, args.batch_size
+            global_step, lr_scheduler, list_loss_float_mask, list_loss_float_unmask, list_grad_cos, args.batch_size
         )
 
         global_step += 1
@@ -840,7 +884,8 @@ def compute_norm(list_embeddings):
 
 def get_output(hidden_states, B, patches_per_frame, list_I, list_P):
     all_I, all_P = [], []
-
+    # print("get_output list_I", list_I)
+    # print("patches_per_frame", patches_per_frame)
     for b in range(B):
         I_patch_idx = []
         for i in list_I[b].tolist():   # 当前 batch 的 I 帧索引
@@ -1026,7 +1071,7 @@ class BatchEndCallBack(object):
 
         self.num_head = len(self.list_head_name)
         self.time_start = time.time()
-        self.list_loss_metric = [ScalaMetric() for x in self.list_head_name]
+        self.list_loss_metric = [[ScalaMetric(), ScalaMetric()] for x in self.list_head_name]
         self.init = False
         self.tic = 0
         self.summary = None
@@ -1041,13 +1086,16 @@ class BatchEndCallBack(object):
         self,
         global_step: int,
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
-        list_loss_float: List[float],
+        list_loss_float1: List[float],
+        list_loss_float2: List[float],
+        list_grad_cos: List[float],
         batch_size: int,
         # avg_norm,
         # prob,
     ):
         for i in range(self.num_head):
-            self.list_loss_metric[i].update(list_loss_float[i])
+            self.list_loss_metric[i][0].update(list_loss_float1[i])
+            self.list_loss_metric[i][1].update(list_loss_float2[i])
 
         if global_step > 0 and global_step % self.frequent == 0:
             # if rank == 0:
@@ -1108,14 +1156,18 @@ class BatchEndCallBack(object):
                         f"lr: {lr_scheduler.get_last_lr()[head_id + 1] :.8f}", "<20"
                     )
                     _ += format(
-                        f"loss: {self.list_loss_metric[head_id].avg :.2f}", "<20"
+                        f"mask loss: {self.list_loss_metric[head_id][0].avg :.4f}", "<20"
+                    )
+                    _ += format(
+                        f"unmask loss: {self.list_loss_metric[head_id][1].avg :.4f}", "<20"
                     )
 
                     loss_str_format += _
-                    self.list_loss_metric[head_id].reset()
+                    self.list_loss_metric[head_id][0].reset()
+                    self.list_loss_metric[head_id][1].reset()
 
                 msg = (
-                    "rank %.2f total %.2f its/s lr: %.8f step: %d/%d (%.2f%%) remain: %.2f hours %s "
+                    "rank %.2f total %.2f its/s lr: %.8f step: %d/%d (%.2f%%) remain: %.2f hours %s   grad_cos: %.4f   grad_I: %.4f   grad_P: %.4f   "
                     % (
                         speed,
                         speed_total,
@@ -1125,6 +1177,9 @@ class BatchEndCallBack(object):
                         (global_step / self.total_steps) * 100,
                         remaining_time_hours,
                         loss_str_format,
+                        list_grad_cos[0],
+                        list_grad_cos[1],
+                        list_grad_cos[2],
                         # avg_norm,
                         # prob[0],
                         # prob[1],
