@@ -6,6 +6,7 @@ from nvidia.dali.pipeline import Pipeline
 from nvidia.dali.plugin.pytorch import DALIGenericIterator, LastBatchPolicy
 import decord
 from nvidia.dali.pipeline import pipeline_def
+import cv2
 
 
 class DALIWarper(object):
@@ -52,9 +53,40 @@ class ExternalInputCallable:
         self.last_seen_epoch = None
         self.replace_example_info = self.file_list[0]
 
+        self.letterbox = source_params.get('letterbox', False)
+        self.canvas_h, self.canvas_w = source_params.get('canvas_size', (480, 854))
+        self.pad_value = source_params.get('pad_value', 0)
+    def _letterbox_frames(self, video_data):
+        """
+        video_data: (F, H, W, C) uint8
+        返回等比缩放后贴到 (canvas_h, canvas_w) 的黑边画布中心的帧
+        """
+        F, H, W, C = video_data.shape
+        target_h, target_w = self.canvas_h, self.canvas_w
 
+        # 计算统一缩放比例（等比缩放，完整放入画布）
+        scale = min(target_w / W, target_h / H)
+        new_w, new_h = int(round(W * scale)), int(round(H * scale))
+
+        # 预先创建画布
+        if C == 3:
+            canvas = np.full((F, target_h, target_w, 3), self.pad_value, dtype=np.uint8)
+        else:
+            canvas = np.full((F, target_h, target_w, C), self.pad_value, dtype=np.uint8)
+
+        # 居中偏移
+        off_x = (target_w - new_w) // 2
+        off_y = (target_h - new_h) // 2
+
+        # 逐帧缩放并贴到中心
+        for i in range(F):
+            # OpenCV 需要 BGR；我们只做几何变换，不改通道顺序
+            resized = cv2.resize(video_data[i], (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            canvas[i, off_y:off_y+new_h, off_x:off_x+new_w] = resized
+
+        return canvas
     def get_frame_id_list(self, video_path, sequence_length):
-        decord_vr = decord.VideoReader(video_path, num_threads=1, ctx=decord.cpu(0))
+        decord_vr = decord.VideoReader(video_path, num_threads=4, ctx=decord.cpu(0))
         duration = len(decord_vr)
 
         average_duration = duration // sequence_length
@@ -83,6 +115,9 @@ class ExternalInputCallable:
         video_data = decord_vr.get_batch(frame_id_list).asnumpy()            
         if self.use_rgb:
             video_data = video_data[:,:,:,::-1]
+        if self.letterbox:
+            # 注意：如果上面转成了 RGB，这里仍然保持 RGB；只做几何变换
+            video_data = self._letterbox_frames(video_data)
         return video_data
         
 
@@ -122,6 +157,8 @@ def dali_pipeline(mode, source_params):
     input_size = source_params['input_size']
     mean = source_params['mean']
     std = source_params['std']
+    letterbox = source_params.get('letterbox', False)
+
     if not source_params['multi_views']:
         if mode == "train":
             videos, labels = fn.external_source(
@@ -133,11 +170,13 @@ def dali_pipeline(mode, source_params):
                 layout = ["FHWC", "C"]
             )
             videos = videos.gpu()
-            videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, 
-                                interp_type=types.INTERP_LINEAR, device="gpu")
-            videos = fn.random_resized_crop(videos, size=[input_size, input_size], num_attempts=50, 
-                                            random_area=[0.9, 1.0], device="gpu")
-            
+
+            if not letterbox:
+                videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, 
+                                    interp_type=types.INTERP_LINEAR, device="gpu")
+                videos = fn.random_resized_crop(videos, size=[input_size, input_size], num_attempts=50, 
+                                                random_area=[0.9, 1.0], device="gpu")
+                
             brightness_contrast_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
             if brightness_contrast_probability:
                 videos = fn.brightness_contrast(videos, contrast=fn.random.uniform(range=(0.6, 1.4)),
@@ -154,6 +193,14 @@ def dali_pipeline(mode, source_params):
             videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout = "CFHW",
                                             mean=[m*255.0 for m in mean], std=[m*255.0 for m in std], device="gpu")
             labels = labels.gpu()
+            if not letterbox:
+                # 旧路径（保留）：缩放 + 随机裁剪
+                videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True,
+                                   interp_type=types.INTERP_LINEAR, device="gpu")
+                videos = fn.random_resized_crop(videos, size=[input_size, input_size],
+                                                num_attempts=50, random_area=[0.9, 1.0],
+                                                device="gpu")
+            # 如果 letterbox=True：不做几何变换（帧已在 CPU 端 letterbox 成 16:9 固定尺寸）
             return videos, labels
         else:
             videos, labels = fn.external_source(
@@ -165,11 +212,21 @@ def dali_pipeline(mode, source_params):
                 layout = ["FHWC", "C"]
             )
             videos = videos.gpu()
-            videos = fn.resize(videos, resize_shorter=input_size, antialias=True, 
-                                interp_type=types.INTERP_LINEAR, device="gpu")
-            videos = fn.crop(videos, crop=[input_size, input_size], device="gpu")
-            videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW",
-                                            mean = [m*255.0 for m in mean], std = [m*255.0 for m in std], device="gpu")
+
+            if not letterbox:
+                # 原来的验证路径：调整尺寸 + 中心裁剪
+                videos = fn.resize(videos, resize_shorter=input_size, antialias=True,
+                                   interp_type=types.INTERP_LINEAR, device="gpu")
+                videos = fn.crop(videos, crop=[input_size, input_size], device="gpu")
+            videos = fn.crop_mirror_normalize(
+                videos, dtype=types.FLOAT, output_layout="CFHW",
+                mean=[m*255.0 for m in mean], std=[m*255.0 for m in std], device="gpu"
+            )
+            #             videos = fn.resize(videos, resize_shorter=input_size, antialias=True, 
+            #                     interp_type=types.INTERP_LINEAR, device="gpu")
+            # videos = fn.crop(videos, crop=[input_size, input_size], device="gpu")
+            # videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW",
+            #                                 mean = [m*255.0 for m in mean], std = [m*255.0 for m in std], device="gpu")
             labels = labels.gpu()
             return videos, labels
     else:
@@ -319,6 +376,9 @@ def dali_dataloader(data_root_path,
         "multi_views": multi_views,
         "mean": mean,
         "std": std,
+        "letterbox": True,
+        "canvas_size": (315, 560),   # (H, W) 480p 的 16:9 画布（854x480）
+        "pad_value": 0               # 留边颜色（0=黑色）
     }
 
 
@@ -329,7 +389,7 @@ def dali_dataloader(data_root_path,
         seed = seed + rank,
         py_num_workers = dali_py_num_workers,
         py_start_method = 'spawn',
-        prefetch_queue_depth = 1,
+        prefetch_queue_depth = 2,
         mode = mode,
         source_params = source_params,
     )
