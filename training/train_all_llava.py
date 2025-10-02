@@ -12,7 +12,6 @@ from torch import distributed
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
 
-# from safetensors.torch import load_file
 import json
 from safetensors.torch import load_file
 from dataset import DATASET_REGISTRY, Property
@@ -527,13 +526,6 @@ def main():
             )
         list_dali_dataloader.append(train_iter)
 
-        # if dataset_config.frame_scales is not None:
-        #     # print("dataset_config.frame_scales", dataset_config.frame_scales)
-        #     for frame_scale in dataset_config.frame_scales:
-        #         list_head_name.append(
-        #             f"{dataset_config.name}_{frame_scale}"
-        #         )
-        # else:
         list_head_name.append(dataset_config.name)
     
 
@@ -580,8 +572,6 @@ def main():
                 
                 # import pdb; pdb.set_trace()
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    # TODO 检查一下mask写的对不对
-                    # print(list_I[head_id])
                     # backbone_time = time.time()
                     output, ids_restore = backbone(head_input, list_I[head_id], list_P[head_id])
                     # decoder_time = time.time()
@@ -604,9 +594,6 @@ def main():
                         # end_time = time.time()
                         teacher_output["masked_embeddings"] = teacher_output["masked_embeddings"][mask_pos].view(B, -1, D)
 
-                # print("backbone_time", decoder_time-backbone_time)
-                # print("decoder_time", teacher_time-decoder_time)
-                # print("teacher_time", end_time-teacher_time)
 
                 # print("output.shape", output["head_embeddings"][0].shape)
                 if isinstance(output, torch.Tensor):
@@ -640,10 +627,8 @@ def main():
         list_loss_mask = []
         list_loss_float_unmask = []
         list_loss_float_mask = []
-        list_grad_cos = []
-        
-        # list_norm = []
-        # list_prob = []
+
+
         
         # print("list_module_pfc", len(list_module_pfc))
         for head_id, pfc in enumerate(list_module_pfc):
@@ -658,58 +643,6 @@ def main():
                 teacher_mask_embedding = teacher_output["masked_embeddings"]
                 # print(head_backbone_output["x_without_class"].shape)
 
-                # with torch.no_grad():
-                    # x_without_class = head_backbone_output["x_without_class"]
-                    # batch_size, num_frames, num_tokens, embed_dim = x_without_class.shape
-                    # from torch.nn.functional import normalize
-                    
-                    # # 对每一帧，先对所有token取平均，得到每帧的平均表示
-                    # # [batch_size, num_frames, embed_dim]
-                    # frame_embeddings = torch.mean(x_without_class, dim=2)
-                    
-                    # # 归一化嵌入向量
-                    # frame_embeddings = normalize(frame_embeddings, p=2, dim=-1)
-                    
-                    # # 获取所有帧对的索引组合
-                    # frame_indices = torch.arange(num_frames, device=frame_embeddings.device)
-                    # i_indices, j_indices = torch.combinations(frame_indices, r=2).unbind(-1)
-                    # num_pairs = i_indices.shape[0]  # 帧对的数量
-                    
-                    # # 对所有batch和所有帧对一次性计算相似度
-                    # # 首先，为每个帧对选择对应的嵌入
-                    # # [batch_size, num_pairs, embed_dim]
-                    # emb_i = frame_embeddings[:, i_indices].reshape(batch_size, num_pairs, embed_dim)
-                    # emb_j = frame_embeddings[:, j_indices].reshape(batch_size, num_pairs, embed_dim)
-                    
-                    # # 计算余弦相似度 (内积，因为已经归一化)
-                    # # [batch_size, num_pairs]
-                    # similarities = torch.sum(emb_i * emb_j, dim=-1)
-                    
-                    # # 计算每个样本的平均相似度
-                    # # [batch_size]
-                    # mean_similarities = torch.mean(similarities, dim=1)
-                    
-                    # # 计算整个批次的平均相似度
-                    # batch_mean_similarity = torch.mean(mean_similarities)
-                    
-                    # # 重塑为一维张量 [batch_size * num_pairs]
-                    # all_similarities = similarities.reshape(-1)
-                    
-                    # # 记录相似度分布到直方图
-                    # tensorboard_logger.add_histogram("frame_similarities", all_similarities, global_step)
-                    
-                    # # 记录平均相似度
-                    # tensorboard_logger.add_scalar("mean_frame_similarity", batch_mean_similarity, global_step)
-
-
-                # assert isinstance(list_head_embedding, list)
-                # assert isinstance(dataset_config.label_select, list)
-
-                # frame_scales = dataset_config.frame_scales
-
-                # head_bs = head_label.size(0)
-                # print("pfc", len(pfc))
-                # import pdb; pdb.set_trace()
                 for i in range(len(pfc)):
                     llava_fc, pfc_type = pfc[i]
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
@@ -729,11 +662,7 @@ def main():
                             list_loss_float_mask.append(head_loss.float())
                             list_loss_mask.append(head_loss)
                             # print("masked_embeddings_head_loss", head_loss.item())
-                    # mask_head_loss = pfc[i](mask_embedding.float(), teacher_mask_embedding.float())
-                    # unmask_head_loss = pfc[i](unmask_embedding.float(), teacher_unmask_embedding.float())
-                    # print("head_loss", head_loss.item())
-                    # print("sorted_probs", sorted_probs[0])
-                    # print("sorted_probs.shape", sorted_probs[0].shape)
+
                     
                     list_loss.append(head_loss)
                     list_loss_float.append(head_loss.float())
@@ -741,59 +670,11 @@ def main():
                     # list_prob.append(sorted_probs)
                     
 
-            elif isinstance(head_backbone_output, torch.Tensor):
-                head_embedding = head_backbone_output
-                label_select = dataset_config.label_select
-                random_diff = dataset_config.random_diff
-                # print("head_label", head_label.shape)
-                # print("label_select, random_diff", label_select, random_diff)
-                head_label = head_label[
-                    :, 0 : 0 + random_diff
-                ]
-
-                if hasattr(dataset_config, "label_start"):
-                    head_label += dataset_config.label_start
-
-                head_loss, sorted_probs = pfc[0](head_embedding, head_label, random_diff)
-                # print("head_loss", head_loss.item())
-                # print("sorted_probs", sorted_probs)
-                # print("sorted_probs.shape", sorted_probs.shape)
-                list_loss.append(head_loss)
-                list_loss_float.append(head_loss.item())
 
         loss_unmask = torch.stack(list_loss_float).mean()
         loss_mask   = torch.stack(list_loss_mask).mean()   
 
         total_loss = loss_unmask + loss_mask
-        # sum(list_loss).backward()
-
-        # ====== 梯度监控 ======
-        # 1) 计算 unmask (I 帧) loss 的梯度
-        opt.zero_grad()
-        loss_unmask.backward(retain_graph=True)
-        grad_I = []
-        for p in backbone.parameters():
-            if p.grad is not None:
-                grad_I.append(p.grad.detach().clone().flatten())
-        grad_I = torch.cat(grad_I)
-
-        # 2) 计算 mask (P 帧) loss 的梯度
-        opt.zero_grad()
-        loss_mask.backward(retain_graph=True)
-        grad_P = []
-        for p in backbone.parameters():
-            if p.grad is not None:
-                grad_P.append(p.grad.detach().clone().flatten())
-        grad_P = torch.cat(grad_P)
-
-        # 3) 计算余弦相似度和梯度范数
-        cos_sim = torch.dot(grad_I, grad_P) / (grad_I.norm() * grad_P.norm() + 1e-6)
-        norm_I = grad_I.norm()
-        norm_P = grad_P.norm()
-
-        list_grad_cos.append(cos_sim.float())
-        list_grad_cos.append(norm_I.float())
-        list_grad_cos.append(norm_P.float())
 
         opt.zero_grad()
         total_loss.backward()
@@ -809,7 +690,7 @@ def main():
             opt.step()
             opt.zero_grad()
         lr_scheduler.step()
-        # import pdb; pdb.set_trace()
+
         batch_end_callback(
             global_step, lr_scheduler, list_loss_float_mask, list_loss_float_unmask, list_grad_cos, args.batch_size
         )
@@ -1167,7 +1048,7 @@ class BatchEndCallBack(object):
                     self.list_loss_metric[head_id][1].reset()
 
                 msg = (
-                    "rank %.2f total %.2f its/s lr: %.8f step: %d/%d (%.2f%%) remain: %.2f hours %s   grad_cos: %.4f   grad_I: %.4f   grad_P: %.4f   "
+                    "rank %.2f total %.2f its/s lr: %.8f step: %d/%d (%.2f%%) remain: %.2f hours %s "
                     % (
                         speed,
                         speed_total,
@@ -1177,9 +1058,6 @@ class BatchEndCallBack(object):
                         (global_step / self.total_steps) * 100,
                         remaining_time_hours,
                         loss_str_format,
-                        list_grad_cos[0],
-                        list_grad_cos[1],
-                        list_grad_cos[2],
                         # avg_norm,
                         # prob[0],
                         # prob[1],
@@ -1214,42 +1092,6 @@ class ScalaMetric(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
-
-
-
-
-# def RiceEncoder(model_path: str):
-#     # 1. 初始化
-#     model_dir = model_path
-#     config = Qwen2VLVisionConfig.from_pretrained(model_path)
-#     encoder = Qwen2VisionTransformerPretrainedModel._from_config(config)
-
-    
-#     # 1. 读取 index.json
-#     index_file = os.path.join(model_dir, "model.safetensors.index.json")
-#     with open(index_file, "r") as f:
-#         index = json.load(f)
-
-#     # 2. 找到所有分片文件名
-#     weight_map = index["weight_map"]  # dict: {param_name: filename}
-#     shards = sorted(set(weight_map.values()))  # 去重+排序
-#     print("找到的分片文件：", shards)
-
-#     # 3. 依次加载分片
-#     state_dict = {}
-#     for shard in shards:
-#         shard_path = os.path.join(model_dir, shard)
-#         state_dict.update(load_file(shard_path))
-
-#     # 3. 只保留 vision 模块的参数
-#     vision_state_dict = {k.replace("visual.", ""): v for k, v in state_dict.items() if k.startswith("visual.")}
-
-#     # 4. 加载权重
-#     encoder.load_state_dict(vision_state_dict, strict=False)
-#     # print("Missing keys:", missing)
-#     # print("Unexpected keys:", unexpected)
-
-#     return encoder
 
 
 def combine(data_batches):

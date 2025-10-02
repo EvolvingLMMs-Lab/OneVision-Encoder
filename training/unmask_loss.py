@@ -1,33 +1,3 @@
-# import os
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
-
-
-# # --------------------------------------------------------
-# # LayerNorm modules
-# # --------------------------------------------------------
-
-# class LayerNorm(nn.LayerNorm):
-#     def forward(self, x: torch.Tensor):
-#         orig_type = x.dtype
-#         x = F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
-#         return x.to(orig_type)
-
-# class UnmaskFC_V0(nn.Module):
-#     def __init__(self, teacher_dim=1024, student_dim=384):
-#         super(UnmaskFC_V0, self).__init__()
-#         # 这里你可以放模型层，比如全连接层等
-#         self.proj_teacher = nn.Linear(student_dim, teacher_dim)
-#         self.loss_fn = nn.MSELoss()
-
-#     def forward(self, embeddings, teacher_embeddings):
-#         # 使用内置的 MSELoss 更规范
-#         embeddings = self.proj_teacher(embeddings)
-#         loss = self.loss_fn(embeddings, teacher_embeddings)
-#         return loss
-
-
 import os
 import torch
 import torch.nn as nn

@@ -46,8 +46,8 @@ list_init_partial_fc = " ".join(list_init_partial_fc)
 model_name = "PretrainEncoder_small_patch16_224_v0"
 model_decoder_name = "PretrainDecoder_small_patch16_224_v0"
 embedding_size = 512
-lr = 0.0015
-num_sampled_data =  3_200_000
+lr = 0.001
+num_sampled_data =  6_500_000
 num_frames = 16
 
 image_size = 224
