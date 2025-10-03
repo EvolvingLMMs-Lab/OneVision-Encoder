@@ -12,7 +12,6 @@ from torch import distributed
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
 
-# from safetensors.torch import load_file
 import json
 from safetensors.torch import load_file
 from dataset import DATASET_REGISTRY, Property
@@ -527,13 +526,6 @@ def main():
             )
         list_dali_dataloader.append(train_iter)
 
-        # if dataset_config.frame_scales is not None:
-        #     # print("dataset_config.frame_scales", dataset_config.frame_scales)
-        #     for frame_scale in dataset_config.frame_scales:
-        #         list_head_name.append(
-        #             f"{dataset_config.name}_{frame_scale}"
-        #         )
-        # else:
         list_head_name.append(dataset_config.name)
     
 
@@ -580,12 +572,10 @@ def main():
                 
                 # import pdb; pdb.set_trace()
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    # TODO 检查一下mask写的对不对
-                    # print(list_I[head_id])
                     # backbone_time = time.time()
                     output, ids_restore = backbone(head_input, list_I[head_id], list_P[head_id])
                     # decoder_time = time.time()
-                    output["masked_embeddings"], mask_pos = decoder_backbone(output["masked_embeddings"].detach(), ids_restore=ids_restore)
+                    output["masked_embeddings"], mask_pos = decoder_backbone(output["masked_embeddings"], ids_restore=ids_restore)
                 
                 with torch.no_grad():
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
@@ -604,9 +594,6 @@ def main():
                         # end_time = time.time()
                         teacher_output["masked_embeddings"] = teacher_output["masked_embeddings"][mask_pos].view(B, -1, D)
 
-                # print("backbone_time", decoder_time-backbone_time)
-                # print("decoder_time", teacher_time-decoder_time)
-                # print("teacher_time", end_time-teacher_time)
 
                 # print("output.shape", output["head_embeddings"][0].shape)
                 if isinstance(output, torch.Tensor):
@@ -636,8 +623,12 @@ def main():
 
         list_loss = []
         list_loss_float = []
-        # list_norm = []
-        # list_prob = []
+        list_loss_unmask = []
+        list_loss_mask = []
+        list_loss_float_unmask = []
+        list_loss_float_mask = []
+
+
         
         # print("list_module_pfc", len(list_module_pfc))
         for head_id, pfc in enumerate(list_module_pfc):
@@ -652,58 +643,6 @@ def main():
                 teacher_mask_embedding = teacher_output["masked_embeddings"]
                 # print(head_backbone_output["x_without_class"].shape)
 
-                # with torch.no_grad():
-                    # x_without_class = head_backbone_output["x_without_class"]
-                    # batch_size, num_frames, num_tokens, embed_dim = x_without_class.shape
-                    # from torch.nn.functional import normalize
-                    
-                    # # 对每一帧，先对所有token取平均，得到每帧的平均表示
-                    # # [batch_size, num_frames, embed_dim]
-                    # frame_embeddings = torch.mean(x_without_class, dim=2)
-                    
-                    # # 归一化嵌入向量
-                    # frame_embeddings = normalize(frame_embeddings, p=2, dim=-1)
-                    
-                    # # 获取所有帧对的索引组合
-                    # frame_indices = torch.arange(num_frames, device=frame_embeddings.device)
-                    # i_indices, j_indices = torch.combinations(frame_indices, r=2).unbind(-1)
-                    # num_pairs = i_indices.shape[0]  # 帧对的数量
-                    
-                    # # 对所有batch和所有帧对一次性计算相似度
-                    # # 首先，为每个帧对选择对应的嵌入
-                    # # [batch_size, num_pairs, embed_dim]
-                    # emb_i = frame_embeddings[:, i_indices].reshape(batch_size, num_pairs, embed_dim)
-                    # emb_j = frame_embeddings[:, j_indices].reshape(batch_size, num_pairs, embed_dim)
-                    
-                    # # 计算余弦相似度 (内积，因为已经归一化)
-                    # # [batch_size, num_pairs]
-                    # similarities = torch.sum(emb_i * emb_j, dim=-1)
-                    
-                    # # 计算每个样本的平均相似度
-                    # # [batch_size]
-                    # mean_similarities = torch.mean(similarities, dim=1)
-                    
-                    # # 计算整个批次的平均相似度
-                    # batch_mean_similarity = torch.mean(mean_similarities)
-                    
-                    # # 重塑为一维张量 [batch_size * num_pairs]
-                    # all_similarities = similarities.reshape(-1)
-                    
-                    # # 记录相似度分布到直方图
-                    # tensorboard_logger.add_histogram("frame_similarities", all_similarities, global_step)
-                    
-                    # # 记录平均相似度
-                    # tensorboard_logger.add_scalar("mean_frame_similarity", batch_mean_similarity, global_step)
-
-
-                # assert isinstance(list_head_embedding, list)
-                # assert isinstance(dataset_config.label_select, list)
-
-                # frame_scales = dataset_config.frame_scales
-
-                # head_bs = head_label.size(0)
-                # print("pfc", len(pfc))
-                # import pdb; pdb.set_trace()
                 for i in range(len(pfc)):
                     llava_fc, pfc_type = pfc[i]
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
@@ -711,6 +650,8 @@ def main():
                             head_embedding = unmask_embedding
                             teacher_head_embedding = teacher_unmask_embedding
                             head_loss = llava_fc(head_embedding, teacher_head_embedding)
+                            list_loss_float_unmask.append(head_loss.float())
+                            list_loss_unmask.append(head_loss)
                             # print("unmasked_embeddings_head_loss", head_loss.item())
 
                         elif pfc_type == "masked_embeddings":
@@ -718,12 +659,10 @@ def main():
                             teacher_head_embedding = teacher_mask_embedding
                             # teacher_mask_embedding.reshape()
                             head_loss = llava_fc(head_embedding, teacher_head_embedding)
+                            list_loss_float_mask.append(head_loss.float())
+                            list_loss_mask.append(head_loss)
                             # print("masked_embeddings_head_loss", head_loss.item())
-                    # mask_head_loss = pfc[i](mask_embedding.float(), teacher_mask_embedding.float())
-                    # unmask_head_loss = pfc[i](unmask_embedding.float(), teacher_unmask_embedding.float())
-                    # print("head_loss", head_loss.item())
-                    # print("sorted_probs", sorted_probs[0])
-                    # print("sorted_probs.shape", sorted_probs[0].shape)
+
                     
                     list_loss.append(head_loss)
                     list_loss_float.append(head_loss.float())
@@ -731,28 +670,14 @@ def main():
                     # list_prob.append(sorted_probs)
                     
 
-            elif isinstance(head_backbone_output, torch.Tensor):
-                head_embedding = head_backbone_output
-                label_select = dataset_config.label_select
-                random_diff = dataset_config.random_diff
-                # print("head_label", head_label.shape)
-                # print("label_select, random_diff", label_select, random_diff)
-                head_label = head_label[
-                    :, 0 : 0 + random_diff
-                ]
 
-                if hasattr(dataset_config, "label_start"):
-                    head_label += dataset_config.label_start
+        loss_unmask = torch.stack(list_loss_float).mean()
+        loss_mask   = torch.stack(list_loss_mask).mean()   
 
-                head_loss, sorted_probs = pfc[0](head_embedding, head_label, random_diff)
-                # print("head_loss", head_loss.item())
-                # print("sorted_probs", sorted_probs)
-                # print("sorted_probs.shape", sorted_probs.shape)
-                list_loss.append(head_loss)
-                list_loss_float.append(head_loss.item())
+        total_loss = loss_unmask + loss_mask
 
-        sum(list_loss).backward()
-
+        opt.zero_grad()
+        total_loss.backward()
         if global_step % args.backward_passes_per_step == 0:
             clip_grad_norm_(backbone.parameters(), max_norm=5, norm_type=2)
             # import pdb; pdb.set_trace()
@@ -765,9 +690,9 @@ def main():
             opt.step()
             opt.zero_grad()
         lr_scheduler.step()
-        # import pdb; pdb.set_trace()
+
         batch_end_callback(
-            global_step, lr_scheduler, list_loss_float, args.batch_size
+            global_step, lr_scheduler, list_loss_float_mask, list_loss_float_unmask,args.batch_size
         )
 
         global_step += 1
@@ -840,7 +765,8 @@ def compute_norm(list_embeddings):
 
 def get_output(hidden_states, B, patches_per_frame, list_I, list_P):
     all_I, all_P = [], []
-
+    # print("get_output list_I", list_I)
+    # print("patches_per_frame", patches_per_frame)
     for b in range(B):
         I_patch_idx = []
         for i in list_I[b].tolist():   # 当前 batch 的 I 帧索引
@@ -1026,7 +952,7 @@ class BatchEndCallBack(object):
 
         self.num_head = len(self.list_head_name)
         self.time_start = time.time()
-        self.list_loss_metric = [ScalaMetric() for x in self.list_head_name]
+        self.list_loss_metric = [[ScalaMetric(), ScalaMetric()] for x in self.list_head_name]
         self.init = False
         self.tic = 0
         self.summary = None
@@ -1041,13 +967,15 @@ class BatchEndCallBack(object):
         self,
         global_step: int,
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
-        list_loss_float: List[float],
+        list_loss_float1: List[float],
+        list_loss_float2: List[float],
         batch_size: int,
         # avg_norm,
         # prob,
     ):
         for i in range(self.num_head):
-            self.list_loss_metric[i].update(list_loss_float[i])
+            self.list_loss_metric[i][0].update(list_loss_float1[i])
+            self.list_loss_metric[i][1].update(list_loss_float2[i])
 
         if global_step > 0 and global_step % self.frequent == 0:
             # if rank == 0:
@@ -1108,11 +1036,15 @@ class BatchEndCallBack(object):
                         f"lr: {lr_scheduler.get_last_lr()[head_id + 1] :.8f}", "<20"
                     )
                     _ += format(
-                        f"loss: {self.list_loss_metric[head_id].avg :.2f}", "<20"
+                        f"mask loss: {self.list_loss_metric[head_id][0].avg :.4f}", "<20"
+                    )
+                    _ += format(
+                        f"unmask loss: {self.list_loss_metric[head_id][1].avg :.4f}", "<20"
                     )
 
                     loss_str_format += _
-                    self.list_loss_metric[head_id].reset()
+                    self.list_loss_metric[head_id][0].reset()
+                    self.list_loss_metric[head_id][1].reset()
 
                 msg = (
                     "rank %.2f total %.2f its/s lr: %.8f step: %d/%d (%.2f%%) remain: %.2f hours %s "
@@ -1159,42 +1091,6 @@ class ScalaMetric(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
-
-
-
-
-# def RiceEncoder(model_path: str):
-#     # 1. 初始化
-#     model_dir = model_path
-#     config = Qwen2VLVisionConfig.from_pretrained(model_path)
-#     encoder = Qwen2VisionTransformerPretrainedModel._from_config(config)
-
-    
-#     # 1. 读取 index.json
-#     index_file = os.path.join(model_dir, "model.safetensors.index.json")
-#     with open(index_file, "r") as f:
-#         index = json.load(f)
-
-#     # 2. 找到所有分片文件名
-#     weight_map = index["weight_map"]  # dict: {param_name: filename}
-#     shards = sorted(set(weight_map.values()))  # 去重+排序
-#     print("找到的分片文件：", shards)
-
-#     # 3. 依次加载分片
-#     state_dict = {}
-#     for shard in shards:
-#         shard_path = os.path.join(model_dir, shard)
-#         state_dict.update(load_file(shard_path))
-
-#     # 3. 只保留 vision 模块的参数
-#     vision_state_dict = {k.replace("visual.", ""): v for k, v in state_dict.items() if k.startswith("visual.")}
-
-#     # 4. 加载权重
-#     encoder.load_state_dict(vision_state_dict, strict=False)
-#     # print("Missing keys:", missing)
-#     # print("Unexpected keys:", unexpected)
-
-#     return encoder
 
 
 def combine(data_batches):
