@@ -692,7 +692,7 @@ def main():
         lr_scheduler.step()
 
         batch_end_callback(
-            global_step, lr_scheduler, list_loss_float_mask, list_loss_float_unmask, list_grad_cos, args.batch_size
+            global_step, lr_scheduler, list_loss_float_mask, list_loss_float_unmask,args.batch_size
         )
 
         global_step += 1
@@ -969,7 +969,6 @@ class BatchEndCallBack(object):
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
         list_loss_float1: List[float],
         list_loss_float2: List[float],
-        list_grad_cos: List[float],
         batch_size: int,
         # avg_norm,
         # prob,
