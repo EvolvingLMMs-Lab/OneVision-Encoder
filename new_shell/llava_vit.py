@@ -11,7 +11,7 @@ nnode = 1
 node_rank = 0
 
 backward_passes_per_step = 1
-ckpt_interval = 4000
+ckpt_interval = 1000
 debug = 0
 
 
@@ -47,7 +47,7 @@ model_name = "PretrainEncoder_small_patch16_224_v0"
 model_decoder_name = "PretrainDecoder_small_patch16_224_v0"
 embedding_size = 512
 lr = 0.001
-num_sampled_data = 100 * 1_000_000
+num_sampled_data =  6_500_000
 num_frames = 16
 
 image_size = 224
