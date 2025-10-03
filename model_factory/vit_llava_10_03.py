@@ -379,17 +379,13 @@ def pretrain_encoder_small_patch16_224_v10_03(pretrained: bool = False, **kwargs
 @register_model
 def pretrain_decoder_small_patch16_224_v10_03(pretrained: bool = False, **kwargs):
     model = LlavaViTDecoder(
-        patch_size=14,
-        img_size=224,
-        hidden_size=192,
-        out_hidden_size=384,
-        head_dim=64,                 # 192 // 3
-        num_hidden_layers=12,
-        intermediate_size=768,       # 192 * 4
-        num_frames=16,
-        tubelet_size=1,
+        hidden_size=576,             # decoder hidden
+        encoder_hidden_size=576,     # must match encoder hidden_size
+        head_dim=96,
+        num_hidden_layers=2,
+        intermediate_size=1536,      # 384 * 4
+        feature_proj_dim=384,        # final feature dimension
         act_layer=nn.GELU,
-        predictor_embed_dim=384,
         use_gradient_checkpointing=False,
         **kwargs
     )
@@ -398,60 +394,61 @@ def pretrain_decoder_small_patch16_224_v10_03(pretrained: bool = False, **kwargs
     return model
 
 
-# ================= main test =================
+# ---------------- Main test: encoder + decoder ----------------
 if __name__ == "__main__":
     torch.manual_seed(42)
 
-    # config
-    batch = 4
+    batch = 2
     channels = 3
     t_frames = 8
     img_size = 224
     mask_ratio = 0.5
-    hidden = 576
 
-    # build random video
+    # 构造随机视频
     video = torch.randn(batch, channels, t_frames, img_size, img_size)
 
-    # model
-    model = pretrain_encoder_small_patch16_224_v10_03()
+    # 初始化模型
+    encoder = pretrain_encoder_small_patch16_224_v10_03()
+    decoder = pretrain_decoder_small_patch16_224_v10_03()
 
+    # 编码
     with torch.no_grad():
-        out = model(video)
+        enc_out = encoder(video, mask_ratio=mask_ratio)
 
-    visible_embeddings = out["visible_embeddings"]
-    mask = out["mask"]
-    ids_restore = out["ids_restore"]
-    visible_indices = out["visible_indices"]
-    n_visible = out["num_visible"]
-    full_seq_len = out["full_sequence_length"]
-    patch_grid = out["patch_grid"]
+    visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, 576)
+    mask = enc_out["mask"]                                 # (B, L_full)
+    ids_restore = enc_out["ids_restore"]                   # (B, L_full)
+    patch_grid = enc_out["patch_grid"]                     # (T, Hp, Wp)
+    n_visible = enc_out["num_visible"]
+    L_full = enc_out["full_sequence_length"]
 
-    print("=== Video Encoder Test ===")
-    print(f"video shape: {video.shape}")
-    print(f"patch grid (t, hp, wp): {patch_grid}")
-    print(f"full seq len: {full_seq_len}")
-    print(f"visible count: {n_visible}")
-    print(f"visible ratio (overall): {(mask.sum() / mask.numel()).item():.4f}")
-    print(f"visible_embeddings shape: {visible_embeddings.shape}")
-    print(f"mask shape: {mask.shape}")
-    print(f"ids_restore shape: {ids_restore.shape}")
-    print(f"visible_indices shape: {visible_indices.shape}")
-    print("first sample visible_indices (first 30):", visible_indices[0][:30].tolist())
+    print("=== Encoder Info ===")
+    print("video:", video.shape)
+    print("patch_grid:", patch_grid)
+    print("full_seq_len:", L_full)
+    print("visible_embeddings:", visible_embeddings.shape)
+    print("mask ratio actual:", (mask.sum() / mask.numel()).item())
+    print("ids_restore:", ids_restore.shape)
 
-    # verify ids_restore round-trip
-    # construct [visible, mask_tokens] then gather back
-    dummy_mask_tokens = torch.zeros(full_seq_len - n_visible, hidden)
-    cat0 = torch.cat([visible_embeddings[0], dummy_mask_tokens], dim=0)  # (full_seq_len, hidden)
-    restored0 = cat0[ids_restore[0]]
-    recon_visible = restored0[visible_indices[0]]
-    max_diff = (recon_visible - visible_embeddings[0]).abs().max().item()
-    print(f"ids_restore round-trip max diff: {max_diff:.6f}")
-
-    # single frame test
-    single_img = torch.randn(batch, channels, img_size, img_size)
+    # 解码
     with torch.no_grad():
-        out_single = model(single_img)
-    print("\n=== Single Frame Test ===")
-    print("visible_embeddings shape:", out_single["visible_embeddings"].shape)
-    print("mask sum:", out_single["mask"].sum().item(), "/", out_single["mask"].numel())
+        dec_out = decoder(
+            visible_embeddings=visible_embeddings,
+            ids_restore=ids_restore,
+            mask=mask,
+            patch_grid=patch_grid
+        )
+
+    decoded_full = dec_out["decoded_full"]
+    decoded_visible = dec_out["decoded_visible"]
+    decoded_masked = dec_out["decoded_masked"]
+
+    print("\n=== Decoder Info ===")
+    print("decoded_full:", decoded_full.shape)         # (B, L_full, D_out)
+    print("decoded_visible:", decoded_visible.shape)   # (B, N_vis, D_out)
+    print("decoded_masked:", decoded_masked.shape)     # (B, N_mask, D_out)
+    print("N_mask:", L_full - n_visible)
+
+    # 简单一致性检查（可见数 + 遮挡数 = 全长）
+    assert decoded_visible.size(1) + decoded_masked.size(1) == L_full, "visible+masked != full length"
+    print("\nChecks passed.")
