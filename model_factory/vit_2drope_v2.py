@@ -7,9 +7,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.checkpoint import checkpoint
-from torchvision.ops.misc import FrozenBatchNorm2d
 from .registry import MODEL_REGISTRY
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from timm.models.layers import DropPath, to_2tuple
 
 # From PyTorch internals
 def _ntuple(n):
