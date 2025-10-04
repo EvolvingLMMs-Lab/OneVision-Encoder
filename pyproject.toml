@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llava_vit"
+version = "0.0.0"
+description = ""
+authors = [{name=""}]
+dependencies = []
+
+[tool.setuptools]
+packages = ["model_factory", "training"]  # 或使用 find 命令式收集

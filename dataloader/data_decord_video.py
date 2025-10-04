@@ -82,22 +82,40 @@ class ExternalInputCallable:
             sequence_length,
             test_info):
 
-        decord_vr = decord.VideoReader(video_path, num_threads=8, ctx=decord.cpu(0))
+        # print(video_path)
+        decord_vr = decord.VideoReader(video_path, num_threads=1, ctx=decord.cpu(0))
         duration = len(decord_vr)
 
-        if self.mode in ["train"]:
-            try:
-                all_index = list(range(0, int(duration), 1))
-                i_index = vr.get_key_indices()
-                i_index = list(map(int, i_index))
-                i_set = set(int(i) for i in vr.get_key_indices())
-                p_index = [i for i in range(duration) if i not in i_set]
-                p_index = p_index[::4]
+        if self.mode in ["train", "val"]:
+            average_duration = duration // sequence_length
+            all_index = []
 
-            final_index = i_index + p_index
-            final_index.sort()
+            if average_duration > 0:
+                if self.mode == 'val':
+                    all_index = list(
+                        np.multiply(list(range(sequence_length)), average_duration) +
+                        np.ones(sequence_length, dtype=int) * (average_duration // 2)
+                    )
+                elif self.mode == 'train':
+                    all_index = list(
+                        np.multiply(list(range(sequence_length)), average_duration) +
+                        np.random.randint(average_duration, size=sequence_length)
+                    )
+                else:
+                    raise ValueError("mode should be train or val")
 
-                
+            elif duration > sequence_length:
+                if self.mode == 'val':
+                    all_index = list(range(sequence_length))
+                elif self.mode == 'train':
+                    all_index = list(
+                        np.sort(np.random.randint(duration, size=sequence_length))
+                    )
+                else:
+                    raise ValueError("mode should be train or val")
+
+            else:
+                all_index = [0] * (sequence_length - duration) + list(range(duration))
 
             frame_id_list = list(np.array(all_index))
             
@@ -157,14 +175,15 @@ class ExternalInputCallable:
         example_info = self.file_list[sample_idx]
         test_info = None
 
-        video_path, video_label = example_info[0], example_info[1]
+        video_path = example_info
+        video_label = 0
 
         try:
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
         except:
             print("Error: ", video_path)
-
-            video_path, video_label = self.replace_example_info
+            video_path = self.replace_example_info
+            video_label = 0
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
 
         if self.mode == "test":

@@ -21,11 +21,12 @@ from timm.utils import accuracy
 from torch import distributed, inf, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
-
+import model_factory
+from timm.models import create_model
 
 def get_feature(videos, processor, forward_base_model):
     # base model export feature
-    if args.model_name == 'pe' or args.model_name == 'ijepa' or args.model_name == "mlcd_base" or args.model_name == "mlcd":
+    if args.model_name == 'pe' or args.model_name == 'ijepa':
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = [] 
             for frame_idx in range(videos.shape[2]):
@@ -90,7 +91,7 @@ def get_feature(videos, processor, forward_base_model):
                 outputs.append(output.last_hidden_state[:, 1:, :])
             outputs = torch.cat(outputs, dim=1)
 
-    elif args.model_name == "ov_1_5_vit":
+    elif args.model_name in ["ov_1_5_vit", "mlcd_base", "mlcd"]:
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = []
             temporal_table = None
@@ -101,7 +102,10 @@ def get_feature(videos, processor, forward_base_model):
                 with torch.no_grad():
                     output = forward_base_model(frame)
 
-                feats = output.last_hidden_state[:, 1:, :]  # [B, N_patch, D]
+                if args.model_name == "ov_1_5_vit":
+                    feats = output.last_hidden_state[:, 1:, :]  # [B, N_patch, D]
+                else:
+                    feats = output[:, 1:, :]  # [B, N_patch, D]
 
                 # --- NEW: 加时间位置编码（正弦），首帧时一次性构建 ---
                 if temporal_table is None:
@@ -468,7 +472,7 @@ def get_args():
     parser.add_argument('--default_attentive_out_dim', default=768, type=int)
     parser.add_argument('--default_weight_decay', default=0.01, type=float)
     parser.add_argument('--default_min_lr', default=1e-7, type=float)
-    parser.add_argument('--default_lr_list', default=[1e-4], type=float)
+    parser.add_argument('--default_lr_list', default=[5e-4], type=float)
     parser.add_argument('--default_start_warmup_value', default=0.0, type=float)
     parser.add_argument('--clip_grad', default=5.0, type=float)
     parser.add_argument('--print_freq', default=10, type=int)
@@ -485,7 +489,7 @@ def get_model(args):
     print("create model start")
     if args.model_name == "umt":
         import video_models.umt
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -497,7 +501,7 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "videomae_v1":
         import video_models.videomae_v1
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -509,7 +513,7 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "videomae_v2":
         import video_models.videomae_v2
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -521,7 +525,7 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "vswift":
         import video_models.vswift
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -533,7 +537,7 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "ov2":
         import video_models.ov2
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -544,7 +548,7 @@ def get_model(args):
             use_mean_pooling=True)
     elif args.model_name == "viclip":
         import video_models.viclip
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             input_resolution=args.input_size,
@@ -558,7 +562,7 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "internvideo_v1":
         import video_models.internvidev1
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -570,7 +574,7 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "internvideo_v2":
         import video_models.internvideo_v2
-        from timm.models import create_model
+        
         base_model = create_model(
             args.model,
             pretrained=False,
@@ -606,7 +610,7 @@ def get_model(args):
                 tight_SiLU=False)
     elif args.model_name == 'univit':
         import video_models.video_mlcd
-        from timm.models import create_model
+        
 
         print("load create univit")
         base_model = create_model(
@@ -616,7 +620,7 @@ def get_model(args):
         )
     elif args.model_name == 'cvpr':
         import video_models.cvpr
-        from timm.models import create_model
+        
 
         print("load create cvpr_model")
         base_model = create_model(
@@ -640,15 +644,16 @@ def get_model(args):
             base_model = MLCDVisionModel.from_pretrained(args.finetune)
         elif args.model=="vit-large-patch14-336":
             base_model = CLIPVisionModel.from_pretrained(args.finetune)
+
     elif args.model_name == 'mlcd_base':
-        import video_models.mlcd_base
-        from timm.models import create_model
+        pretrained_cfg = {
+                "ckpt_path": args.finetune,
+        }
         base_model = create_model(
             args.model,
-            img_size=args.input_size,
-            pretrained=False,
-            num_classes=args.num_classes
-            )
+            pretrained=True,
+            pretrained_cfg=pretrained_cfg)
+
     elif args.model_name == 'languagebind':
         from languagebind import (LanguageBindVideo,
                                   LanguageBindVideoProcessor,
