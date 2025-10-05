@@ -8,8 +8,12 @@
 
 ---
 
+## 预训练建议
 
-# LLaVA-ViT
+1. 上规模 是最后一步，应该想尽一切办法在 scaling 前提升模型能力，而且必须有够泛化的现象出现
+2. 模型监督尽可能不要直接利用现有模型（如直接蒸馏现有模型），可以相对间接的利用，否则scaling 能力会受限
+3. 资源受限时，训练需要渐进，例如先训练低分辨率，低帧率，再逐步微调提升，参考 CLIPA
+
 
 ## 🔧 Setup
 
@@ -20,12 +24,14 @@ mkdir -p /video_vit
 mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-iyHiNUmePn.lb-0a25b0a7.cfs.bj.baidubce.com:/ /video_vit
 ```
 
-### 1. Optional: Using Dockerfile for Environment Setup
+### 1. Docker Build
+
+> #### Option 1: Build from Dockerfile
 ```bash
 docker build -t llava_vit:25.10 .
 ```
 
-### 1. Optional: Load Docker Image
+> #### Option 2: Load pre-built Docker image
 ```bash
 docker load -i /video_vit/docker_images/llava_vit_tag_25.10.tar && \
 docker tag $(docker images -q | head -n 1) llava_vit:25.10
@@ -46,7 +52,11 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
 # Inside the container, install the package in editable mode
 pip install -e .
 ```
-## Data Preparation
+
+
+## 🚀 Training
+
+### 1. Data Preparation
 
 ```
 mount -t tmpfs -o size=200G tmpfs /train_tmp
@@ -55,7 +65,7 @@ cd /train_tmp
 tar -xf ssv2.tar
 ```
 
-## 🚀 Training
+### 2. Training
 
 ```bash
 # Example command to start training
