@@ -8,9 +8,6 @@
 
 ---
 
-
-# LLaVA-ViT
-
 ## 🔧 Setup
 
 ```shell
