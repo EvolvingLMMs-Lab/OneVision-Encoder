@@ -21,6 +21,7 @@ def apply_rotary_pos_emb_vision(tensor, freqs):
     output = (tensor * cos) + (rotate_half(tensor) * sin)
     return output.to(orig_dtype)
 
+
 def apply_rotary_pos_emb_video_batched(q: torch.Tensor,
                                        k: torch.Tensor,
                                        freqs: torch.Tensor):
@@ -161,7 +162,6 @@ class ResidualAttentionBlockCausal(nn.Module):
         x = x + self.attn(self.ln_1(x), rotary_pos_emb=rotary_pos_emb, attention_mask=attention_mask)
         x = x + self.mlp(self.ln_2(x))
         return x
-
 
 
 class CrossAttention(nn.Module):
