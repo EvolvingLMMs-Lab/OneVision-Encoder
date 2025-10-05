@@ -3,8 +3,11 @@ import logging
 import os
 import sys
 import time
-from typing import List
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
 
+import numpy as np
 import torch
 from timm import create_model
 from torch import distributed
@@ -335,18 +338,21 @@ def main():
         log.info("Training already completed (global_step >= total_steps)")
         return
 
+    num_samples = 0
     # Main training loop
     while global_step < args.total_steps:
         list_data_batch = list_next_data_batch
         list_data = [x[0].cuda() for x in list_data_batch]
         list_loss = []
         list_loss_float = []
+        num_samples += list_data[head_id].size(0)
 
         for head_id, dataset_config in enumerate(args.list_dataset):
             head_input = list_data[head_id]
             
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                 # Run encoder with masking
+
                 enc_out = llava_vit_encoder_ddp(head_input, mask_ratio=args.mask_ratio)
 
                 # Extract encoder outputs
@@ -400,7 +406,8 @@ def main():
             global_step=global_step,
             lr_scheduler=lr_scheduler,
             list_loss_float=list_loss_float,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
+            num_samples=num_samples
         )
 
         global_step += 1
@@ -461,6 +468,9 @@ class BatchEndCallBack(object):
         self.step_times = []
         self.max_time_history = 100  # 保留最近100个step的时间来平均
         
+        # 累计样本数计数器
+        self.total_examples = 0
+        
         # Create TensorBoard writer if rank 0
         if rank == 0:
             self.tb_writer = tb_writer
@@ -473,6 +483,7 @@ class BatchEndCallBack(object):
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
         list_loss_float: List[float],  # 只需要一个loss列表
         batch_size: int,
+        num_samples=None,  # 新增参数，用于记录每个batch实际处理的样本数
     ):
         for i in range(self.num_head):
             self.list_loss_metric[i].update(list_loss_float[i])
@@ -527,12 +538,20 @@ class BatchEndCallBack(object):
                             lr_scheduler.get_last_lr()[head_id + 1],
                             global_step
                         )
-                    
+                        
+                        self.tb_writer.add_scalar(
+                            f"samples vs. loss/{name}", 
+                            self.list_loss_metric[head_id].avg,
+                            num_samples,
+                        )
+
                     loss_str_format += f"\n{f'name: {name}':<50}{f'lr: {lr_scheduler.get_last_lr()[head_id + 1]:.8f}':<20}"
                     loss_str_format += f"{f'loss: {self.list_loss_metric[head_id].avg:.4f}':<20}"
                     self.list_loss_metric[head_id].reset()
 
-                msg = f"{header}{progress}{time_info}{loss_str_format}"
+                # 添加样本数信息到日志
+                examples_info = f"samples: {self.total_examples}"
+                msg = f"{header}{progress}{time_info} {examples_info}{loss_str_format}"
 
                 if rank == 0:
                     logging.info(msg)
@@ -566,6 +585,7 @@ class ScalaMetric(object):
 
 
 def save_video_as_gif(tensor, path, fps=10, mean=None, std=None):
+    import imageio
     """
     Save a video tensor as a GIF file with proper denormalization.
     
@@ -576,11 +596,7 @@ def save_video_as_gif(tensor, path, fps=10, mean=None, std=None):
         mean: Mean values used for normalization [R, G, B]
         std: Standard deviation values used for normalization [R, G, B]
     """
-    import os
-    from pathlib import Path
 
-    import imageio
-    import numpy as np
 
     # Make sure the directory exists
     Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
@@ -625,8 +641,7 @@ def _sanitize_for_json(v):
     return str(v)
 
 def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, rank: int = 0):
-    from datetime import datetime
-    from typing import Any, Dict
+
     """
     打印并记录训练参数。
     - logger: 你的 log 实例（支持 .info）
