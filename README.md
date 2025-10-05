@@ -9,38 +9,65 @@
 ---
 
 
-# LLaVA-ViT: Native ViT For Multimodal Large Language Models
+# LLaVA-ViT
 
 ## 🔧 Setup
 
+```shell
+# Mount NFS
+
+mkdir -p /video_vit
+mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-iyHiNUmePn.lb-0a25b0a7.cfs.bj.baidubce.com:/ /video_vit
+```
 
 ### 1. Optional: Using Dockerfile for Environment Setup
 ```bash
-docker build -t llava_vit_eval:25.09 .
+docker build -t llava_vit:25.10 .
 ```
-### 2. Or Load Docker Image
+
+### 1. Optional: Load Docker Image
 ```bash
-docker load -i /vlm/xiangan/docker_images/llava_vit_eval_tag_25.09.tar
-docker tag <image_id> llava_vit_eval:25.09
+docker load -i /video_vit/docker_images/llava_vit_tag_25.10.tar && \
+docker tag $(docker images -q | head -n 1) llava_vit:25.10
 ```
 
-### 3. Run
+### 2. Run
 ```
-mkdir -p /video_vit
-mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-iyHiNUmePn.lb-0a25b0a7.cfs.bj.baidubce.com:/ /video_vit
-
 # Run container with -w to set working directory directly to the mounted volume
 docker run -it --gpus all \
     --ipc host --net host --privileged --cap-add IPC_LOCK \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
     -v "$(pwd)":/workspace/LLaVA-ViT \
     -v /video_vit:/video_vit \
-    -v /vlm/:/vlm/ \
     -w /workspace/LLaVA-ViT/ \
-    --name "llava_vit_eval_container" \
-    llava_vit_eval:25.09 /bin/bash
+    --name "llava_vit__container" \
+    llava_vit:25.10 /bin/bash
+
+# Inside the container, install the package in editable mode
+pip install -e .
 ```
 
+## 🚀 Quick Start
+
+```bash
+# Example command to start training
+python training/train_predict_10_04.py \
+    --model_name_or_path "google/vit-base-patch16-224-in21k" \
+    --data_path /video_vit/dataset/ssv2_tmpfs.txt \
+    --output_dir output_onevision_vit_base_10_04 \
+    --num_frames 8 \
+```
+
+## 🚀 Evaluation
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+EPOCH=40 \
+NUM_GPUS=8 \
+OUTPUT=output \
+MODEL_NAME=ov_1_5_vit \
+FINETUNE=/video_vit/pretrain_models/ov_1_5_vit_mlcd_style/ \
+bash src/video_attentive_probe.sh
+```
 
 ## Contributors
 Thanks so much to all of our amazing contributors!

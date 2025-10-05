@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir --extra-index-url https://pypi.nvidia.com --upgra
     && pip install --no-cache-dir decord==0.6.0 \
     && pip install --no-cache-dir timm \
     && pip install --no-cache-dir transformers==4.53.1 \
-    && pip install --no-cache-dir tensorboard \
+    && pip install --no-cache-dir tensorboard
 
 # (Optional) Set working directory
 WORKDIR /workspace
