@@ -64,7 +64,7 @@ DATASETS=ssv2 \
 MODEL_FAMILY=llava_vit \
 MODEL_NAME=pretrain_encoder_small_patch16_224_v10_03 \
 CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/date_25_10_05_first_success_training/encoder_checkpoint_125000.pt \
-EMBEDDING_SIZE=384 \
+EMBEDDING_SIZE=576 \
 NUM_EPOCH=100 \
 bash video_attentive_probe.sh
 ```
