@@ -12,31 +12,82 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from ac_ap_dataloader_dali import dali_dataloader
-from all_utils import (MetricLogger,
-                       load_finetune_checkpoint, setup_for_distributed,
-                       setup_seed)
+from all_utils import (MetricLogger, load_finetune_checkpoint,
+                       setup_for_distributed, setup_seed)
 from timm.loss import LabelSmoothingCrossEntropy
+from timm.models import create_model
 from timm.models.layers import DropPath, trunc_normal_
 from timm.utils import accuracy
 from torch import distributed, inf, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
+
 import model_factory
-from timm.models import create_model
+
+
+def get_args():
+    parser = argparse.ArgumentParser('Extract features using the videomae model', add_help=False)
+    parser.add_argument('--train_data_root_path', default="/video_vit/fewshot_video/ActionRecognition")
+    parser.add_argument('--train_data_csv_path', default="/video_vit/fewshot_video/ActionRecognition")
+    parser.add_argument('--val_data_root_path', default='/video_vit/eval_data/val/')
+    parser.add_argument('--val_data_csv_path', default='/video_vit/eval_data/annotation/')
+    parser.add_argument('--save_report', default="fewshot_video_report/ActionRecognition")
+
+    parser.add_argument('--dataset', default="ssv2")
+    parser.add_argument('--num_shots', default=10, type=int)
+    parser.add_argument("--seed", default=1, type=int)
+    parser.add_argument("--num_step", default=8, type=int)
+    parser.add_argument('--multi_views', default=False)
+
+    parser.add_argument("--batch_size", default=32, type=int)
+    parser.add_argument('--model_family', default='')
+    parser.add_argument('--model_name', default='')
+    parser.add_argument('--ckpt_path', default='')
+    parser.add_argument("--num_frames", default=8, type=int)
+    parser.add_argument("--input_size", default=224, type=int)
+    parser.add_argument("--tubelet_size", default=1, type=int)
+    parser.add_argument("--embedding_size", default=768, type=int)
+
+    # default
+    parser.add_argument('--model_key', default='model|module', type=str)
+    parser.add_argument('--mean', nargs=3, default=[0.485, 0.456, 0.406], type=float)
+    parser.add_argument('--std', nargs=3, default=[0.229, 0.224, 0.225], type=float)
+    parser.add_argument('--dali_num_threads', default=8, type=int)
+    parser.add_argument('--dali_py_num_workers', default=14, type=int)
+    parser.add_argument('--short_side_size', default=256, type=int)
+    parser.add_argument('--use_rgb', default=False)
+    parser.add_argument('--smoothing', default=0.1, type=float)
+
+    # default
+    parser.add_argument('--default_warmup_epochs', default=0, type=int)
+    parser.add_argument('--default_epoch', default=20, type=int)
+    parser.add_argument('--default_attentive_head', default=16, type=int)
+    parser.add_argument('--default_attentive_out_dim', default=768, type=int)
+    parser.add_argument('--default_weight_decay', default=0.01, type=float)
+    parser.add_argument('--default_min_lr', default=1e-7, type=float)
+    parser.add_argument('--default_lr_list', default=[1e-4], type=float)
+    parser.add_argument('--default_start_warmup_value', default=0.0, type=float)
+    parser.add_argument('--clip_grad', default=5.0, type=float)
+    parser.add_argument('--print_freq', default=10, type=int)
+    parser.add_argument('--eval_freq', default=10, type=int)
+
+    parser.add_argument('--using_normlize', action='store_true')
+    return parser.parse_args()
+
 
 
 def get_feature(videos, processor, forward_base_model):
     # base model export feature
-    if args.model_name == 'pe' or args.model_name == 'ijepa':
+    if args.model_family == 'pe' or args.model_family == 'ijepa':
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = [] 
             for frame_idx in range(videos.shape[2]):
                 frame = videos[:, :,frame_idx,  :, :]
-                with torch.no_grad():  
-                    output = forward_base_model(frame)  
+                with torch.no_grad():
+                    output = forward_base_model(frame)
                 outputs.append(output)
             outputs = torch.cat(outputs, dim=1)
-    elif args.model_name == 'clip':
+    elif args.model_family == 'clip':
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = [] 
             for frame_idx in range(videos.shape[2]):
@@ -46,7 +97,7 @@ def get_feature(videos, processor, forward_base_model):
                     output = forward_base_model(**inputs) 
                 outputs.append(output.last_hidden_state[1:])
             outputs = torch.cat(outputs, dim=1)    
-    elif args.model_name == 'siglip':
+    elif args.model_family == 'siglip':
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = [] 
             for frame_idx in range(videos.shape[2]):
@@ -57,7 +108,7 @@ def get_feature(videos, processor, forward_base_model):
                     output = forward_base_model.module.vision_model(inputs)  
                 outputs.append(output.last_hidden_state[1:])
             outputs = torch.cat(outputs, dim=1)
-    elif args.model_name == 'dino_v2':
+    elif args.model_family == 'dino_v2':
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = [] 
             for frame_idx in range(videos.shape[2]):
@@ -67,7 +118,7 @@ def get_feature(videos, processor, forward_base_model):
                     output = forward_base_model(**inputs)  
                 outputs.append(output.last_hidden_state[1:])
             outputs = torch.cat(outputs, dim=1)
-    elif args.model_name == 'dino_v3':
+    elif args.model_family == 'dino_v3':
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = []
             for frame_idx in range(videos.shape[2]):
@@ -77,12 +128,12 @@ def get_feature(videos, processor, forward_base_model):
                     output = forward_base_model(**inputs)
                 outputs.append(output.last_hidden_state[:, 5:, :])
             outputs = torch.cat(outputs, dim=1)
-    elif args.model_name == "languagebind":
+    elif args.model_family == "languagebind":
         with torch.no_grad():
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 output = forward_base_model.module.vision_model(pixel_values=videos)
         output=output.last_hidden_state[1:]
-    elif args.model_name == "rice":
+    elif args.model_family == "rice":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = []
             for frame_idx in range(videos.shape[2]):
@@ -92,13 +143,13 @@ def get_feature(videos, processor, forward_base_model):
                 outputs.append(output.last_hidden_state[:, 1:, :])
             outputs = torch.cat(outputs, dim=1)
 
-    elif args.model_name == "llava_vit":
+    elif args.model_family == "llava_vit":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
                 enc_out = forward_base_model(videos, mask_ratio=0.5)
                 outputs = enc_out["visible_embeddings"]
 
-    elif args.model_name in ["ov_1_5_vit", "mlcd_base", "mlcd"]:
+    elif args.model_family in ["ov_1_5_vit", "mlcd_base", "mlcd"]:
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = []
             temporal_table = None
@@ -109,7 +160,7 @@ def get_feature(videos, processor, forward_base_model):
                 with torch.no_grad():
                     output = forward_base_model(frame)
 
-                if args.model_name == "ov_1_5_vit":
+                if args.model_family == "ov_1_5_vit":
                     feats = output.last_hidden_state[:, 1:, :]  # [B, N_patch, D]
                 else:
                     feats = output[:, 1:, :]  # [B, N_patch, D]
@@ -282,7 +333,6 @@ def train_AdamW(
     if total_iters <= 0:
         raise ValueError("total_iters 计算为 0，请确认 args.default_epoch 与 steps_per_epoch 设置正确。")
 
-    # 只在需要衰减时建立 scheduler
     if min_lr < lr:
         scheduler = LinearLR(
             optimizer,
@@ -293,7 +343,6 @@ def train_AdamW(
     else:
         scheduler = None  # 不降学习率
 
-    # 损失
     if args.smoothing > 0.0:
         criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing).to(cur_device)
     else:
@@ -320,14 +369,12 @@ def train_AdamW(
             videos = videos.to(cur_device, non_blocking=True)
             labels = labels.to(cur_device, non_blocking=True).view(-1)
 
-            # 特征提取（冻结 backbone）
             with torch.no_grad():
                 with torch.cuda.amp.autocast(enabled=use_bf16, dtype=torch.bfloat16):
                     feats = get_feature(videos, processor, forward_base_model)
                     if args.using_normlize:
                         feats = F.normalize(feats, dim=-1)
 
-            # 前向 + loss
             with torch.cuda.amp.autocast(enabled=use_bf16, dtype=torch.bfloat16):
                 preds = cur_ap_model(feats)
                 loss = criterion(preds, labels)
@@ -418,7 +465,7 @@ def find_peak(args, lr, cur_device, base_model, data_loader_train, data_loader_v
     else:
         processor = None
 
-    if args.model_name != "dino_v3" and args.model_name != "ov_1_5_vit" and args.model_name != "rice":
+    if args.model_family != "dino_v3" and args.model_family != "ov_1_5_vit" and args.model_family != "rice":
         print("have load ckpt")
         base_model = load_finetune_checkpoint(args, base_model)
 
@@ -445,67 +492,15 @@ def find_peak(args, lr, cur_device, base_model, data_loader_train, data_loader_v
     return acc_top1, acc_top5
 
 
-def get_args():
-    parser = argparse.ArgumentParser('Extract features using the videomae model', add_help=False)
-    parser.add_argument('--train_data_root_path', default="fewshot_video/ActionRecognition")
-    parser.add_argument('--train_data_csv_path', default="fewshot_video/ActionRecognition")
-    parser.add_argument('--val_data_root_path', default='/mnt2/video_pretrain_dataset')
-    parser.add_argument('--val_data_csv_path', default='/mnt2/video_pretrain_dataset/annotation')
-    parser.add_argument('--save_report', default="fewshot_video_report/ActionRecognition")
-
-    parser.add_argument('--data_set', default="ssv2")
-    parser.add_argument('--num_shots', default=10, type=int)
-    parser.add_argument("--seed", default=1, type=int)
-    parser.add_argument("--num_step", default=8, type=int)
-    parser.add_argument('--multi_views', default=False)
-
-    parser.add_argument("--batch_size", default=32, type=int)
-    parser.add_argument('--model_name', default='umt')
-    parser.add_argument('--model', default='vit_base_patch16_224')
-    parser.add_argument('--patch_size', default=16, type=int)
-    parser.add_argument('--finetune', default='checkpoint/umt/umt-B-16____K710_65W_epoch200.pth')
-    parser.add_argument("--num_frames", default=8, type=int)
-    parser.add_argument("--input_size", default=224, type=int)
-    parser.add_argument("--tubelet_size", default=1, type=int)
-    parser.add_argument("--embedding_size", default=768, type=int)
-
-    # default
-    parser.add_argument('--model_key', default='model|module', type=str)
-    parser.add_argument('--mean', nargs=3, default=[0.485, 0.456, 0.406], type=float)
-    parser.add_argument('--std', nargs=3, default=[0.229, 0.224, 0.225], type=float)
-    parser.add_argument('--dali_num_threads', default=8, type=int)
-    parser.add_argument('--dali_py_num_workers', default=14, type=int)
-    parser.add_argument('--short_side_size', default=256, type=int)
-    parser.add_argument('--use_rgb', default=False)
-    parser.add_argument('--smoothing', default=0.1, type=float)
-
-    # default
-    parser.add_argument('--default_warmup_epochs', default=0, type=int)
-    parser.add_argument('--default_epoch', default=20, type=int)
-    parser.add_argument('--default_attentive_head', default=16, type=int)
-    parser.add_argument('--default_attentive_out_dim', default=768, type=int)
-    parser.add_argument('--default_weight_decay', default=0.01, type=float)
-    parser.add_argument('--default_min_lr', default=1e-7, type=float)
-    parser.add_argument('--default_lr_list', default=[1e-4], type=float)
-    parser.add_argument('--default_start_warmup_value', default=0.0, type=float)
-    parser.add_argument('--clip_grad', default=5.0, type=float)
-    parser.add_argument('--print_freq', default=10, type=int)
-    parser.add_argument('--eval_freq', default=10, type=int)
-
-    parser.add_argument('--using_normlize', action='store_true')
-    return parser.parse_args()
-
-
 def mkdir_os(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
 def get_model(args):
-    print("create model start")
-    if args.model_name == "umt":
+    if args.model_family == "umt":
         import video_models.umt
         base_model = create_model(
-            args.model,
+            args.model_name,
             img_size=args.input_size,
             pretrained=False,
             num_classes=args.num_classes,
@@ -513,10 +508,10 @@ def get_model(args):
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_name == "videomae_v1":
+    elif args.model_family == "videomae_v1":
         import video_models.videomae_v1
         base_model = create_model(
-            args.model,
+            args.model_name,
             img_size=args.input_size,
             pretrained=False,
             num_classes=args.num_classes,
@@ -524,10 +519,10 @@ def get_model(args):
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_name == "videomae_v2":
+    elif args.model_family == "videomae_v2":
         import video_models.videomae_v2
         base_model = create_model(
-            args.model,
+            args.model_name,
             img_size=args.input_size,
             pretrained=False,
             num_classes=args.num_classes,
@@ -535,10 +530,10 @@ def get_model(args):
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_name == "vswift":
+    elif args.model_family == "vswift":
         import video_models.vswift
         base_model = create_model(
-            args.model,
+            args.model_name,
             img_size=args.input_size,
             pretrained=False,
             num_classes=args.num_classes,
@@ -546,20 +541,20 @@ def get_model(args):
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_name == "ov2":
+    elif args.model_family == "ov2":
         import video_models.ov2
         base_model = create_model(
-            args.model,
+            args.model_name,
             img_size=args.input_size,
             pretrained=False,
             num_classes=args.num_classes,
             all_frames=args.num_frames,
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
-    elif args.model_name == "viclip":
+    elif args.model_family == "viclip":
         import video_models.viclip
         base_model = create_model(
-            args.model,
+            args.model_name,
             input_resolution=args.input_size,
             pretrained=False,
             kernel_size=args.tubelet_size,
@@ -569,10 +564,10 @@ def get_model(args):
             checkpoint_num=0,
             dropout=0.0)
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_name == "internvideo_v1":
+    elif args.model_family == "internvideo_v1":
         import video_models.internvidev1
         base_model = create_model(
-            args.model,
+            args.model_name,
             img_size=args.input_size,
             pretrained=False,
             num_classes=args.num_classes,
@@ -580,10 +575,10 @@ def get_model(args):
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_name == "internvideo_v2":
+    elif args.model_family == "internvideo_v2":
         import video_models.internvideo_v2
         base_model = create_model(
-            args.model,
+            args.model_name,
             pretrained=False,
             num_classes=args.num_classes,
             num_frames=args.num_frames,
@@ -592,8 +587,8 @@ def get_model(args):
             checkpoint_num=0,
         )
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_name == "vjepa":
-        if args.model=="vit_large":
+    elif args.model_family == "vjepa":
+        if args.model_name=="vit_large":
             from video_models.vjepa.modeling_finetune import vit_large
             base_model = vit_large(
                 img_size=args.input_size,
@@ -615,92 +610,92 @@ def get_model(args):
                 use_sdpa=True,
                 use_SiLU=False,
                 tight_SiLU=False)
-    elif args.model_name == 'univit':
+    elif args.model_family == 'univit':
         import video_models.video_mlcd
         print("load create univit")
         base_model = create_model(
-            args.model,
+            args.model_name,
             img_size=224,
             num_classes=512
         )
-    elif args.model_name == 'cvpr':
+    elif args.model_family == 'cvpr':
         import video_models.cvpr
         print("load create cvpr_model")
         base_model = create_model(
-            args.model,
+            args.model_name,
             # img_size=224,
             # num_classes=512
         )
 
-    elif args.model_name == "rice":
+    elif args.model_family == "rice":
         from modeling_rice_base import MLCDVisionModel
         base_model = MLCDVisionModel.from_pretrained("/vlm/xiangan/pretrain_models/deepglint/rice-vit-large-patch14-560-v1")
 
-    elif args.model_name == "ov_1_5_vit":
+    elif args.model_family == "ov_1_5_vit":
        from transformers import MLCDVisionModel
-       base_model = MLCDVisionModel.from_pretrained(args.finetune).cuda()
+       base_model = MLCDVisionModel.from_pretrained(args.ckpt_path).cuda()
 
-    elif args.model_name == 'llava_vit':
+    elif args.model_family == 'llava_vit':
         base_model = create_model(
-            args.model,
+            args.model_name,
             pretrained=True,
-            ckpt_path=args.finetune)
+            ckpt_path=args.ckpt_path)
 
-    elif args.model_name == 'mlcd':
-        if args.model=="vit-bigG-patch14-448":
-            base_model = MLCDVisionModel.from_pretrained(args.finetune)
-        elif args.model=="vit-bigG-patch14-224":
-            base_model = MLCDVisionModel.from_pretrained(args.finetune)
-        elif args.model=="vit-large-patch14-336":
-            base_model = CLIPVisionModel.from_pretrained(args.finetune)
+    elif args.model_family == 'mlcd':
+        if args.model_name=="vit-bigG-patch14-448":
+            base_model = MLCDVisionModel.from_pretrained(args.ckpt_path)
+        elif args.model_name=="vit-bigG-patch14-224":
+            base_model = MLCDVisionModel.from_pretrained(args.ckpt_path)
+        elif args.model_name=="vit-large-patch14-336":
+            base_model = CLIPVisionModel.from_pretrained(args.ckpt_path)
 
-    elif args.model_name == 'mlcd_base':
+    elif args.model_family == 'mlcd_base':
         pretrained_cfg = {
-                "ckpt_path": args.finetune,
+                "ckpt_path": args.ckpt_path,
         }
         base_model = create_model(
-            args.model,
+            args.model_name,
             pretrained=True,
             pretrained_cfg=pretrained_cfg)
 
-    elif args.model_name == 'languagebind':
+    elif args.model_family == 'languagebind':
         from languagebind import (LanguageBindVideo,
                                   LanguageBindVideoProcessor,
                                   LanguageBindVideoTokenizer)
-        base_model = LanguageBindVideo.from_pretrained(args.finetune)
-        tokenizer = LanguageBindVideoTokenizer.from_pretrained(args.finetune)
-        processor = LanguageBindVideoProcessor(args.model.config, tokenizer)
+        base_model = LanguageBindVideo.from_pretrained(args.ckpt_path)
+        tokenizer = LanguageBindVideoTokenizer.from_pretrained(args.ckpt_path)
+        processor = LanguageBindVideoProcessor(args.model_name.config, tokenizer)
         return base_model, processor
-    elif args.model_name == 'pe':
+    elif args.model_family == 'pe':
         import core.vision_encoder.pe as pe
         import core.vision_encoder.transforms as transforms
-        base_model = pe.CLIP.from_config(args.finetune, pretrained=True)  # Downloads from HF
+        base_model = pe.CLIP.from_config(args.ckpt_path, pretrained=True)  # Downloads from HF
         processor = transforms.get_image_transform(base_model.image_size)
         return base_model, processor
-    elif args.model_name == "ijepa":
+    elif args.model_family == "ijepa":
         from transformers import AutoModel, AutoProcessor
-        base_model = AutoModel.from_pretrained(args.finetune)
-        processor = AutoProcessor.from_pretrained(args.finetune)
+        base_model = AutoModel.from_pretrained(args.ckpt_path)
+        processor = AutoProcessor.from_pretrained(args.ckpt_path)
         return base_model, processor
-    elif args.model_name == "siglip":
+    elif args.model_family == "siglip":
         from transformers import AutoModel, AutoProcessor, AutoTokenizer
-        base_model = AutoModel.from_pretrained(args.finetune, torch_dtype=torch.float32)
-        processor = AutoProcessor.from_pretrained(args.finetune, torch_dtype=torch.float32)
+        base_model = AutoModel.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
+        processor = AutoProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
         return base_model, processor
-    elif args.model_name == "dino":
+    elif args.model_family == "dino":
         from transformers import AutoImageProcessor, AutoModel
-        base_model = AutoModel.from_pretrained(args.finetune, torch_dtype=torch.float32)
-        processor = AutoImageProcessor.from_pretrained(args.finetune, torch_dtype=torch.float32)
+        base_model = AutoModel.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
+        processor = AutoImageProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
         return base_model, processor
-    elif args.model_name == "dino_v3":
+    elif args.model_family == "dino_v3":
         from transformers import AutoImageProcessor, AutoModel
-        base_model = AutoModel.from_pretrained(args.finetune, torch_dtype=torch.float32)
-        processor = AutoImageProcessor.from_pretrained(args.finetune, torch_dtype=torch.float32)
+        base_model = AutoModel.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
+        processor = AutoImageProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
         return base_model, processor
-    elif args.model_name == "clip":
+    elif args.model_family == "clip":
         from transformers import AutoProcessor, CLIPVisionModelWithProjection
-        base_model = CLIPVisionModelWithProjection.from_pretrained(args.finetune, torch_dtype=torch.float32)
-        processor = AutoProcessor.from_pretrained(args.finetune, torch_dtype=torch.float32)
+        base_model = CLIPVisionModelWithProjection.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
+        processor = AutoProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
         return base_model, processor
     else:
         raise RuntimeError
@@ -730,7 +725,7 @@ if __name__ == '__main__':
         'SSV2': 174,
         }
 
-    args.num_classes = nb_classes_map[args.data_set]
+    args.num_classes = nb_classes_map[args.dataset]
 
     try:
         args.rank = int(os.environ["RANK"])
@@ -755,12 +750,12 @@ if __name__ == '__main__':
     setup_for_distributed(args.global_rank == 0)
     setup_seed(seed=args.seed, cuda_deterministic=False)
 
-    if args.model_name == "siglip" or args.model_name == "dino_v2" or args.model_name == "clip" or args.model_name == "dino_v3":
+    if args.model_family == "siglip" or args.model_family == "dino_v2" or args.model_family == "clip" or args.model_family == "dino_v3":
         from ac_ap_dataloader_dali_no_norm import dali_dataloader
     print("create data loader start")
     data_loader_train = dali_dataloader(args.train_data_root_path,
                                         args.train_data_csv_path,
-                                        args.data_set,
+                                        args.dataset,
                                         dali_num_threads=args.dali_num_threads,
                                         dali_py_num_workers=args.dali_py_num_workers,
                                         batch_size=args.batch_size,
@@ -778,7 +773,7 @@ if __name__ == '__main__':
 
     data_loader_val = dali_dataloader(args.val_data_root_path,
                                         args.val_data_csv_path,
-                                        args.data_set,
+                                        args.dataset,
                                         dali_num_threads=4,
                                         dali_py_num_workers=8,
                                         batch_size=args.batch_size,
@@ -793,8 +788,8 @@ if __name__ == '__main__':
                                         num_shots=args.num_shots)
     args.num_val_steps_per_epoch = len(data_loader_val)
     print("create data loader end")
-
     best_lr, max_acc_top1, max_acc_top5 = 0, 0, 0
+
     for lr in args.default_lr_list:
         base_model = get_model(args)
 
@@ -803,13 +798,12 @@ if __name__ == '__main__':
         if max_acc_top1 < acc_top1:
             best_lr, max_acc_top1, max_acc_top5 = lr, acc_top1, acc_top5
 
-    
     print("best_lr: ", best_lr, "max_acc_top1: ", max_acc_top1, "max_acc_top5: ", max_acc_top5)
     if args.global_rank == 0:
-        
-        args.save_path = os.path.join(args.save_report, "report_attentive_probe_{}_{}.txt".format(args.finetune.split("/")[-1], args.num_shots))
+
+        args.save_path = os.path.join(args.save_report, "report_attentive_probe_{}_{}.txt".format(args.ckpt_path.split("/")[-1], args.num_shots))
         os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
         print("successfully save")
         with open(args.save_path, "a+") as writer:
-            writer.write(str(args.data_set)+" "+str(max_acc_top1))
+            writer.write(str(args.dataset)+" "+str(max_acc_top1))
             writer.write("\n")

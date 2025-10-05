@@ -1,16 +1,14 @@
-import torch
-from torch import nn
-import torch.nn.functional as F
-
-import torch.distributed as dist
-import os
-import numpy as np
-import random
-from collections import OrderedDict
-import time
-from collections import defaultdict
-from collections import deque
 import datetime
+import os
+import random
+import time
+from collections import OrderedDict, defaultdict, deque
+
+import numpy as np
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
+from torch import nn
 
 
 def unwrap_module(model):
@@ -150,15 +148,15 @@ def load_state_dict(model,
 
 
 def load_finetune_checkpoint(args, video_model):
-    checkpoint = torch.load(args.finetune, map_location='cpu')
-    print("Load ckpt from %s" % args.finetune)
-    if args.model_name == 'internvideo_v1':
-        if args.finetune:
-            checkpoint = torch.load(args.finetune, map_location='cpu')
+    checkpoint = torch.load(args.ckpt_path, map_location='cpu')
+    print("Load ckpt from %s" % args.ckpt_path)
+    if args.model_family == 'internvideo_v1':
+        if args.ckpt_path:
+            checkpoint = torch.load(args.ckpt_path, map_location='cpu')
             if 'state_dict' in checkpoint.keys():
                 checkpoint = checkpoint['state_dict']
 
-            print("\nLoad ckpt from %s" % args.finetune)
+            print("\nLoad ckpt from %s" % args.ckpt_path)
             checkpoint_model = None
             for model_key in args.model_key.split('|'):
                 if model_key in checkpoint:
@@ -249,7 +247,7 @@ def load_finetune_checkpoint(args, video_model):
             load_state_dict(base_model,
                                 checkpoint_model,
                                 prefix=args.model_prefix)
-    if args.model_name == 'ijepa':
+    if args.model_family == 'ijepa':
         pretrained_dict = checkpoint['encoder']
         for k, v in pretrained_dict.items():
             video_model.state_dict()[k[len("module."):]].copy_(v)
@@ -274,14 +272,14 @@ def load_finetune_checkpoint(args, video_model):
         # checkpoint_model = clean_state
         # video_model.load_state_dict(checkpoint_model, strict=False)
         return video_model
-    if args.model_name == "rope" or args.model_name == "mlcd_base":
-        state_dict = torch.load(args.finetune, "cpu")
+    if args.model_family == "rope" or args.model_family == "mlcd_base":
+        state_dict = torch.load(args.ckpt_path, "cpu")
         state_dict = {
             k.replace("_orig_mod.", ""): v for k, v in state_dict.items()
         }
         video_model.load_state_dict(state_dict, strict=True)
         return video_model
-    if args.model_name == "vjepa":
+    if args.model_family == "vjepa":
     #     def load_pretrained(
     # encoder,
     # pretrained,
@@ -309,13 +307,13 @@ def load_finetune_checkpoint(args, video_model):
     if checkpoint_model is None:
         checkpoint_model = checkpoint
     
-    if args.model_name == "mlcd_video":
-        backbone_file = args.finetune
+    if args.model_family == "mlcd_video":
+        backbone_file = args.ckpt_path
         backbone_state = torch.load(backbone_file, )
         unwrap_module(video_model).load_state_dict(backbone_state)
         checkpoint_model = video_model
 
-    if args.model_name == 'videomae_v1' or args.model_name == 'videomae_v2':
+    if args.model_family == 'videomae_v1' or args.model_family == 'videomae_v2':
         # videomae check
         for old_key in list(checkpoint_model.keys()):
             if old_key.startswith('_orig_mod.'):
@@ -335,7 +333,7 @@ def load_finetune_checkpoint(args, video_model):
             new_dict[key] = checkpoint_model[key]
     checkpoint_model = new_dict
 
-    if args.model_name == 'dino_v2':
+    if args.model_family == 'dino_v2':
         new_state_dict = OrderedDict()
         for k, v in checkpoint.items():
             if "mlp.w12" in k:
@@ -355,7 +353,7 @@ def load_finetune_checkpoint(args, video_model):
             new_state_dict[new_k] = v
         checkpoint_model = new_state_dict
 
-    if args.model_name == 'viclip':
+    if args.model_family == 'viclip':
         all_keys = list(checkpoint_model.keys())
         vision_dict = OrderedDict()
         tex_dict = OrderedDict()
@@ -374,7 +372,7 @@ def load_finetune_checkpoint(args, video_model):
 
 
 
-    if args.model_name == 'viclip':
+    if args.model_family == 'viclip':
         def inflate_weight(weight_2d, time_dim, center=True):
             print('Init center: {center}')
             if weight_2d.ndim != 4:

@@ -34,39 +34,43 @@ docker tag $(docker images -q | head -n 1) llava_vit:25.10
 ### 2. Run
 ```
 # Run container with -w to set working directory directly to the mounted volume
-docker run -it --gpus all \
-    --ipc host --net host --privileged --cap-add IPC_LOCK \
+docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
     -v "$(pwd)":/workspace/LLaVA-ViT \
     -v /video_vit:/video_vit \
+    -v /train_tmp:/train_tmp \
     -w /workspace/LLaVA-ViT/ \
-    --name "llava_vit__container" \
+    --name "llava_vit_container" \
     llava_vit:25.10 /bin/bash
 
 # Inside the container, install the package in editable mode
 pip install -e .
 ```
+## Data Preparation
 
-## 🚀 Quick Start
+```
+mount -t tmpfs -o size=200G tmpfs /train_tmp
+cp -r /video_vit/pretrain_video_datas/ssv2.tar /train_tmp/
+cd /train_tmp
+tar -xf ssv2.tar
+```
+
+## 🚀 Training
 
 ```bash
 # Example command to start training
-python training/train_predict_10_04.py \
-    --model_name_or_path "google/vit-base-patch16-224-in21k" \
-    --data_path /video_vit/dataset/ssv2_tmpfs.txt \
-    --output_dir output_onevision_vit_base_10_04 \
-    --num_frames 8 \
+torchrun -m --nproc_per_node 8 training.train_predict_10_04
 ```
 
 ## 🚀 Evaluation
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
-EPOCH=40 \
-NUM_GPUS=8 \
-OUTPUT=output \
-MODEL_NAME=ov_1_5_vit \
-FINETUNE=/video_vit/pretrain_models/ov_1_5_vit_mlcd_style/ \
-bash src/video_attentive_probe.sh
+DATASETS=ssv2 \
+MODEL_FAMILY=llava_vit \
+MODEL_NAME=pretrain_encoder_small_patch16_224_v10_03 \
+CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/date_25_10_05_first_success_training/encoder_checkpoint_125000.pt \
+EMBEDDING_SIZE=576 \
+NUM_EPOCH=100 \
+bash video_attentive_probe.sh
 ```
 
 ## Contributors
