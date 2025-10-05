@@ -67,7 +67,7 @@ pip install -e .
 
 ```bash
 # Example command to start training
-torchrun -m --nproc_per_node 8 training.train_predict_10_04
+torchrun -m --nproc_per_node 8 training.train_predict_10_06
 ```
 
 ## 🚀 Evaluation

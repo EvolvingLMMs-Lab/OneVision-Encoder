@@ -6,8 +6,8 @@ This module defines the Property class for configuring dataset parameters
 and contains predefined dataset configurations.
 本模块定义了用于配置数据集参数的Property类，并包含预定义的数据集配置。
 """
-import glob
 import os
+from typing import List
 
 from easydict import EasyDict
 
@@ -28,8 +28,8 @@ class Property(EasyDict):
     def __init__(
         self,
         # num_class: int,          # Total number of classes / 类别总数
-        num_example: int,        # Total number of examples / 样本总数
-        prefix: str,             # Data path prefix / 数据路径前缀
+        num_example: int,          # Total number of examples / 样本总数
+        prefix: List[str],             # Data path prefix / 数据路径前缀
         name: str,               # Dataset name / 数据集名称
         # label_select: int = 0,   # Label selection index / 标签选择索引
         # label_start: int = 0,    # Label starting offset / 标签起始偏移
@@ -58,9 +58,7 @@ class Property(EasyDict):
         self.shard_id = shard_id
         self.dali_type = dali_type
         self.pfc_type = pfc_type
-
         self.list_mp4 = list_mp4
-        
 
         # Validate dali_type to ensure it's a supported type
         # 验证dali_type以确保它是受支持的类型
