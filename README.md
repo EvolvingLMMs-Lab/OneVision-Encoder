@@ -49,7 +49,7 @@ pip install -e .
 
 ## 🚀 Training
 
-> ### Data Preparation
+### 1. Data Preparation
 
 ```
 mount -t tmpfs -o size=200G tmpfs /train_tmp
@@ -58,7 +58,7 @@ cd /train_tmp
 tar -xf ssv2.tar
 ```
 
-> ### Training
+### 2. Training
 
 ```bash
 # Example command to start training
