@@ -29,8 +29,6 @@ docker build -t llava_vit:25.10 .
 
 > #### Option 2: Load pre-built Docker image
 ```bash
-### 1. Optional: Load Docker Image
-```bash
 docker load -i /video_vit/docker_images/llava_vit_tag_25.10.tar && \
 docker tag $(docker images -q | head -n 1) llava_vit:25.10
 ```
