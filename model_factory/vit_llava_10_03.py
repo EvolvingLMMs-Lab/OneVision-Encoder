@@ -350,7 +350,7 @@ class LlavaViTDecoder(nn.Module):
 
 
 @register_model
-def pretrain_encoder_small_patch16_224_v10_03(pretrained: bool = False, **kwargs):
+def pretrain_encoder_small_patch16_224_v10_03(pretrained: bool = False, ckpt_path=None,**kwargs):
     model = LlavaViTEncoder(
         patch_size=16,
         hidden_size=576,
@@ -361,7 +361,11 @@ def pretrain_encoder_small_patch16_224_v10_03(pretrained: bool = False, **kwargs
         use_gradient_checkpointing=False,
     )
     if pretrained:
-        pass
+        assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
+        state_dict = torch.load(ckpt_path, map_location='cpu')
+        # replace _orig_mod. in keys
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=True)
     return model
 
 

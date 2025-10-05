@@ -418,11 +418,11 @@ class VisualTransformer(nn.Module):
 @register_model
 def RoPE2d_ViT_S_16_512(pretrained=False, **kwargs):
     model = VisualTransformer(
-        patch_size=16, 
-        width=384, 
+        patch_size=16,
+        width=384,
         layers=12,
-        heads=6, 
-        mlp_ratio=4, 
+        heads=6,
+        mlp_ratio=4,
         output_dim=512
     )
     return model
@@ -430,11 +430,11 @@ def RoPE2d_ViT_S_16_512(pretrained=False, **kwargs):
 @register_model
 def RoPE2d_ViT_B_16_1024(pretrained=False, **kwargs):
     model = VisualTransformer(
-        patch_size=16, 
-        width=768, 
+        patch_size=16,
+        width=768,
         layers=12,
-        heads=12, 
-        mlp_ratio=4, 
+        heads=12,
+        mlp_ratio=4,
         output_dim=1024
     )
     return model

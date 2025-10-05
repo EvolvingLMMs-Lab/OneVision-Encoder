@@ -1,8 +1,6 @@
 import importlib
 import os
 
-from .registry import MODEL_REGISTRY
-
 current_directory = os.path.dirname(__file__)
 
 for filename in os.listdir(current_directory):
