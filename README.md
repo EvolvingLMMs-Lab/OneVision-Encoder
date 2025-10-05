@@ -49,8 +49,7 @@ pip install -e .
 
 ## 🚀 Training
 
-> [!TIP]
-> Data Preparation
+> ### Data Preparation
 
 ```
 mount -t tmpfs -o size=200G tmpfs /train_tmp
@@ -58,6 +57,8 @@ cp -r /video_vit/pretrain_video_datas/ssv2.tar /train_tmp/
 cd /train_tmp
 tar -xf ssv2.tar
 ```
+
+> ### Training
 
 ```bash
 # Example command to start training
