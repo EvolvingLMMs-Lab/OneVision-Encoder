@@ -172,6 +172,7 @@ workspace/
 workdir/
 outputs/
 output/
+output_*/
 results/
 runs/
 experiments/
