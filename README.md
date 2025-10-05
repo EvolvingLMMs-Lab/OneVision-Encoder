@@ -38,7 +38,15 @@ docker tag $(docker images -q | head -n 1) llava_vit:25.10
 ```
 
 ### 2. Run
+
+
 ```
+mount -t tmpfs -o size=200G tmpfs /train_tmp
+cp -r /video_vit/pretrain_video_datas/ssv2.tar /train_tmp/
+cd /train_tmp
+tar -xf ssv2.tar
+```
+
 # Run container with -w to set working directory directly to the mounted volume
 docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
@@ -56,16 +64,6 @@ pip install -e .
 
 ## 🚀 Training
 
-### 1. Data Preparation
-
-```
-mount -t tmpfs -o size=200G tmpfs /train_tmp
-cp -r /video_vit/pretrain_video_datas/ssv2.tar /train_tmp/
-cd /train_tmp
-tar -xf ssv2.tar
-```
-
-### 2. Training
 
 ```bash
 # Example command to start training
