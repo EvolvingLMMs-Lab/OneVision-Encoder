@@ -20,11 +20,15 @@ mkdir -p /video_vit
 mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-iyHiNUmePn.lb-0a25b0a7.cfs.bj.baidubce.com:/ /video_vit
 ```
 
-### 1. Optional: Using Dockerfile for Environment Setup
+### 1. Docker Build
+
+> #### Option 1: Build from Dockerfile
 ```bash
 docker build -t llava_vit:25.10 .
 ```
 
+> #### Option 2: Load pre-built Docker image
+```bash
 ### 1. Optional: Load Docker Image
 ```bash
 docker load -i /video_vit/docker_images/llava_vit_tag_25.10.tar && \
