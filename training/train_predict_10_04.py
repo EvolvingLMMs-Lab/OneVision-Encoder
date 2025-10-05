@@ -28,12 +28,11 @@ parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--local_rank", type=int, default=0)
 parser.add_argument("--image_size", default="224")
 parser.add_argument("--num_sampled_data", type=int, default=16000000)
-parser.add_argument("--opt", default="adamw")
 parser.add_argument("--output", default="output")
 parser.add_argument("--output_decoder", default="output_decoder")
 
-parser.add_argument("--init_backbone", default="")
-parser.add_argument("--init_decoder_backbone", default="")
+parser.add_argument("--init_encoder", default="")
+parser.add_argument("--init_decoder", default="")
 
 parser.add_argument("--frequent", type=int, default=10)
 parser.add_argument("--warmup_ratio", type=float, default=0.1)
@@ -218,6 +217,8 @@ def main():
     # Initialize models
     llava_vit_encoder = create_model(args.model_name_encoder).cuda().train()
     llava_vit_decoder = create_model(args.model_name_decoder).cuda().train()
+    # llava_vit_encoder = torch.compile(llava_vit_encoder)
+    # llava_vit_decoder = torch.compile(llava_vit_decoder)
 
     # Initialize teacher model and load pre-trained weights
     llava_vit_teacher = create_model("mlcd_rope2d_vit_s_16").cuda().eval()
@@ -231,15 +232,15 @@ def main():
         param.requires_grad = False
 
     # Load initial weights for encoder and decoder if specified
-    if args.init_backbone:
-        log.info(f"Initializing encoder from {args.init_backbone}")
-        state_dict = torch.load(args.init_backbone, "cpu")
+    if args.init_encoder:
+        log.info(f"Initializing encoder from {args.init_encoder}")
+        state_dict = torch.load(args.init_encoder, "cpu")
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
         llava_vit_encoder.load_state_dict(state_dict, strict=False)
 
-    if args.init_decoder_backbone:
-        log.info(f"Initializing decoder from {args.init_decoder_backbone}")
-        state_dict = torch.load(args.init_decoder_backbone, "cpu")
+    if args.init_decoder:
+        log.info(f"Initializing decoder from {args.init_decoder}")
+        state_dict = torch.load(args.init_decoder, "cpu")
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
         llava_vit_decoder.load_state_dict(state_dict, strict=False)
 
