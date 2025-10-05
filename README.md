@@ -47,11 +47,11 @@ docker run -it --gpus all \
 pip install -e .
 ```
 
-## 🚀 Quick Start
+## 🚀 Training
 
 ```bash
 # Example command to start training
-python training/train_predict_10_04.py \
+ training/train_predict_10_04.py \
     --model_name_or_path "google/vit-base-patch16-224-in21k" \
     --data_path /video_vit/dataset/ssv2_tmpfs.txt \
     --output_dir output_onevision_vit_base_10_04 \
@@ -60,13 +60,13 @@ python training/train_predict_10_04.py \
 
 ## 🚀 Evaluation
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
-EPOCH=40 \
-NUM_GPUS=8 \
-OUTPUT=output \
-MODEL_NAME=ov_1_5_vit \
-FINETUNE=/video_vit/pretrain_models/ov_1_5_vit_mlcd_style/ \
-bash src/video_attentive_probe.sh
+DATASETS=ssv2 \
+MODEL_FAMILY=llava_vit \
+MODEL_NAME=pretrain_encoder_small_patch16_224_v10_03 \
+CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/date_25_10_05_first_success_training/encoder_checkpoint_125000.pt \
+EMBEDDING_SIZE=384 \
+NUM_EPOCH=100 \
+bash video_attentive_probe.sh
 ```
 
 ## Contributors

@@ -13,13 +13,12 @@ PORT="${PORT:-32509}"            # 主节点端口 (MASTER_PORT)
 
 
 # ============== Output & Model Defaults ==============
-OUTPUT="${OUTPUT:-/path/to/output}"              # 训练/评估产物输出目录
-MODEL_NAME="${MODEL_NAME:-ov_1_5_vit}"           # 逻辑模型名称（自定义 tag）
-MODEL="${MODEL:-vit_large_patch16_224}"
-FINETUNE="${FINETUNE:-/path/to/ckpt}"            # 微调初始权重 / 预训练 ckpt 路径
+OUTPUT="${OUTPUT:-output}"              # 训练/评估产物输出目录
+MODEL_FAMILY="${MODEL_FAMILY:-NULL}"           # 逻辑模型名称（自定义 tag）
+MODEL_NAME="${MODEL_NAME:-NULL}"
+CKPT_PATH="${CKPT_PATH:-model.pt}"            # 微调初始权重 / 预训练 ckpt 路径
 
 EMBEDDING_SIZE="${EMBEDDING_SIZE:-1024}"
-PATCH_SIZE="${PATCH_SIZE:-16}"
 NUM_FRAMES="${NUM_FRAMES:-8}"
 NUM_EPOCH="${NUM_EPOCH:-40}"
 INPUT_SIZE="${INPUT_SIZE:-224}"
@@ -27,7 +26,7 @@ TUBELET_SIZE="${TUBELET_SIZE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 
 # 如果外部没传，则给默认
-DATASETS="${DATASETS:-k400}"
+DATASETS="${DATASETS:-ssv2}"
 # 去掉所有空格（防止有人写成 "k400, ssv2,k600"）
 DATASETS="${DATASETS// /}"
 # 拆成数组
@@ -49,7 +48,7 @@ do
                 --node_rank="${RANK}" --master_addr="${ADDR}" --master_port="${PORT}" \
                 video_attentive_probe_all/ac_export_feature_and_attentive_probe_latest.py \
                 --embedding_size ${EMBEDDING_SIZE} \
-                --data_set ${DATASET} \
+                --dataset ${DATASET} \
                 --default_epoch ${NUM_EPOCH} \
                 --seed ${SEED} \
                 --num_shots ${NUM_SHOTS} \
@@ -60,13 +59,12 @@ do
                 --val_data_csv_path ${VAL_DATA_CSV_PATH} \
                 --save_report ${OUTPUT} \
                 --batch_size ${BATCH_SIZE} \
+                --model_family ${MODEL_FAMILY} \
                 --model_name ${MODEL_NAME} \
-                --model ${MODEL} \
-                --finetune ${FINETUNE} \
+                --ckpt_path ${CKPT_PATH} \
                 --num_frames ${NUM_FRAMES} \
                 --input_size ${INPUT_SIZE} \
-                --tubelet_size ${TUBELET_SIZE} \
-                --patch_size ${PATCH_SIZE}
+                --tubelet_size ${TUBELET_SIZE}
         done
     done
 done
