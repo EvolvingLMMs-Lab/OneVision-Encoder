@@ -35,7 +35,7 @@ parser.add_argument("--output_decoder", default="output_decoder")
 parser.add_argument("--init_backbone", default="")
 parser.add_argument("--init_decoder_backbone", default="")
 
-parser.add_argument("--frequent", type=int, default=100)
+parser.add_argument("--frequent", type=int, default=10)
 parser.add_argument("--warmup_ratio", type=float, default=0.1)
 parser.add_argument("--weight_decay", type=float, default=0.05)
 parser.add_argument("--workers", type=int, default=2)
@@ -82,7 +82,6 @@ torch.cuda.set_device(local_rank)
 torch.backends.cudnn.benchmark = True
 
 os.makedirs(args.output, exist_ok=True)
-os.makedirs(args.output_decoder, exist_ok=True)
 
 if rank == 0:
     log = logging.getLogger()
