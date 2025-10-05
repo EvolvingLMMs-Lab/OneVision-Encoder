@@ -23,7 +23,7 @@ torch._dynamo.config.optimize_ddp = False
 parser = argparse.ArgumentParser(description="Video Distillation Training Script")
 parser.add_argument("--backward_passes_per_step", type=int, default=1)
 parser.add_argument("--debug", type=int, default=0)
-parser.add_argument("--dataloader-type", default="dali")
+
 parser.add_argument("--list_batch_size", nargs='+', default=["128"])
 parser.add_argument("--list_dataset", nargs='+', default=["ssv2_tmpfs"])
 
