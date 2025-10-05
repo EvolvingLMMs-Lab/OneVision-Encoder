@@ -87,60 +87,81 @@ class VideoRotaryEmbeddingSimple(nn.Module):
         return freqs
 
 
-class VisionSdpaAttention(nn.Module):
+class VisionSdpaAttentionCausal(nn.Module):
     """
-    Accepts batched rotary (B,L,D/2) for per-sample variable visible tokens (same L across batch here).
+    扩展版本：支持 attention_mask (B,L,L) bool, True=不允许注意。
+    用法与之前基本一致，只是多一个参数。
     """
-    def __init__(self, hidden_size, num_attention_heads=16, attn_dropout=0.0):
+    def __init__(self, hidden_size, num_attention_heads, attn_dropout=0.0):
         super().__init__()
         assert hidden_size % num_attention_heads == 0
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
         self.head_dim = hidden_size // num_attention_heads
-        self.in_proj = nn.Linear(hidden_size, hidden_size * 3, bias=True)
-        self.out_proj = nn.Linear(hidden_size, hidden_size, bias=True)
+        self.in_proj = nn.Linear(hidden_size, hidden_size * 3)
+        self.out_proj = nn.Linear(hidden_size, hidden_size)
         self.attn_dropout = attn_dropout
 
-    def forward(self, hidden_states, rotary_pos_emb=None):
-        # hidden_states: (L, B, C)
+    def forward(self, hidden_states, rotary_pos_emb=None, attention_mask=None):
+        # hidden_states: (L,B,C)
         L, B, C = hidden_states.shape
-        qkv = self.in_proj(hidden_states)  # (L,B,3C)
-        qkv = qkv.view(L, B, 3, self.num_attention_heads, self.head_dim).permute(2, 1, 0, 3, 4)
+        qkv = self.in_proj(hidden_states).view(L, B, 3, self.num_attention_heads, self.head_dim).permute(2,1,0,3,4)
         q, k, v = qkv.unbind(0)  # (B,L,H,D)
 
+        # 应用 RoPE（批维广播）
         if rotary_pos_emb is not None:
-            q, k = apply_rotary_pos_emb_video_batched(q, k, rotary_pos_emb)  # (B,L,H,D)
+            if rotary_pos_emb.dim() == 2:
+                rotary_pos_emb = rotary_pos_emb.unsqueeze(0)  # (1,L,D/2)
+            cos = rotary_pos_emb.cos()
+            sin = rotary_pos_emb.sin()
+            cos = torch.cat([cos, cos], dim=-1).unsqueeze(2)  # (B,L,1,D)
+            sin = torch.cat([sin, sin], dim=-1).unsqueeze(2)
 
-        q = q.permute(0, 2, 1, 3).contiguous()  # (B,H,L,D)
-        k = k.permute(0, 2, 1, 3).contiguous()
-        v = v.permute(0, 2, 1, 3).contiguous()
+            def rotate_half(x):
+                x1 = x[..., : x.shape[-1] // 2]
+                x2 = x[..., x.shape[-1] // 2 :]
+                return torch.cat((-x2, x1), dim=-1)
+            q = (q * cos) + (rotate_half(q) * sin)
+            k = (k * cos) + (rotate_half(k) * sin)
 
-        attn = F.scaled_dot_product_attention(
+        # (B,H,L,D)
+        q = q.permute(0,2,1,3)
+        k = k.permute(0,2,1,3)
+        v = v.permute(0,2,1,3)
+
+        if attention_mask is not None:
+            # attention_mask: (B,L,L) True=禁止
+            # PyTorch 允许 (B,1,L,L) 或 (B,L,L)
+            attn_mask = attention_mask.unsqueeze(1)  # (B,1,L,L)
+        else:
+            attn_mask = None
+
+        attn_out = torch.nn.functional.scaled_dot_product_attention(
             q, k, v,
-            attn_mask=None,
+            attn_mask=attn_mask,
             dropout_p=self.attn_dropout if self.training else 0.0
         )  # (B,H,L,D)
+        attn_out = attn_out.permute(2,0,1,3).contiguous().view(L,B,C)
+        return self.out_proj(attn_out)
 
-        attn = attn.permute(2, 0, 1, 3).contiguous().view(L, B, C)
-        return self.out_proj(attn)
 
-
-class ResidualAttentionBlock(nn.Module):
-    def __init__(self, hidden_size, num_attention_heads, intermediate_size, act_layer=nn.GELU):
+class ResidualAttentionBlockCausal(nn.Module):
+    def __init__(self, hidden_size, num_attention_heads, intermediate_size, act_layer=nn.GELU, attn_dropout=0.0):
         super().__init__()
-        self.ln_1 = LayerNorm(hidden_size)
-        self.attn = VisionSdpaAttention(hidden_size, num_attention_heads)
-        self.ln_2 = LayerNorm(hidden_size)
-        self.mlp = nn.Sequential(OrderedDict([
-            ("c_fc", nn.Linear(hidden_size, intermediate_size)),
-            ("act", act_layer()),
-            ("c_proj", nn.Linear(intermediate_size, hidden_size)),
-        ]))
+        self.ln_1 = nn.LayerNorm(hidden_size)
+        self.attn = VisionSdpaAttentionCausal(hidden_size, num_attention_heads, attn_dropout=attn_dropout)
+        self.ln_2 = nn.LayerNorm(hidden_size)
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_size, intermediate_size),
+            act_layer(),
+            nn.Linear(intermediate_size, hidden_size),
+        )
 
-    def forward(self, x, rotary_pos_emb=None):
-        x = x + self.attn(self.ln_1(x), rotary_pos_emb=rotary_pos_emb)
+    def forward(self, x, rotary_pos_emb=None, attention_mask=None):
+        x = x + self.attn(self.ln_1(x), rotary_pos_emb=rotary_pos_emb, attention_mask=attention_mask)
         x = x + self.mlp(self.ln_2(x))
         return x
+
 
 
 class CrossAttention(nn.Module):
@@ -196,42 +217,34 @@ class AttentionPoolingBlock(AttentiveBlock):
         return out.squeeze(1)
 
 
-class Transformer(nn.Module):
-    def __init__(
-        self,
-        hidden_size,
-        num_hidden_layers,
-        num_attention_heads,
-        intermediate_size,
-        act_layer=nn.GELU,
-        gradient_checkpointing=False,
-    ):
+class TransformerCausal(nn.Module):
+    def __init__(self,
+                 hidden_size,
+                 num_hidden_layers,
+                 num_attention_heads,
+                 intermediate_size,
+                 act_layer=nn.GELU,
+                 gradient_checkpointing=False,
+                 attn_dropout=0.0):
         super().__init__()
-        self.hidden_size = hidden_size
-        self.num_hidden_layers = num_hidden_layers
-        self.num_attention_heads = num_attention_heads
-        self.intermediate_size = intermediate_size
-        self.grad_checkpointing = gradient_checkpointing
-
         self.layers = nn.ModuleList([
-            ResidualAttentionBlock(
+            ResidualAttentionBlockCausal(
                 hidden_size,
                 num_attention_heads,
                 intermediate_size,
-                act_layer=act_layer
-            )
-            for _ in range(num_hidden_layers)
+                act_layer=act_layer,
+                attn_dropout=attn_dropout
+            ) for _ in range(num_hidden_layers)
         ])
+        self.grad_checkpointing = gradient_checkpointing
 
-    def enable_gradient_checkpointing(self, enabled=True):
-        self.grad_checkpointing = enabled
-
-    def forward(self, x, rotary_pos_emb=None):
+    def forward(self, x, rotary_pos_emb=None, attention_mask=None):
         for blk in self.layers:
+            blk: ResidualAttentionBlockCausal
             if self.grad_checkpointing and not torch.jit.is_scripting():
-                def custom_forward(t):
-                    return blk(t, rotary_pos_emb=rotary_pos_emb)
-                x = checkpoint(custom_forward, x)
+                def cf(t):
+                    return blk(t, rotary_pos_emb=rotary_pos_emb, attention_mask=attention_mask)
+                x = torch.utils.checkpoint.checkpoint(cf, x)
             else:
-                x = blk(x, rotary_pos_emb=rotary_pos_emb)
+                x = blk(x, rotary_pos_emb=rotary_pos_emb, attention_mask=attention_mask)
         return x

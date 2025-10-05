@@ -21,11 +21,13 @@ from timm.utils import accuracy
 from torch import distributed, inf, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
+import model_factory
+from timm.models import create_model
 
 
 def get_feature(videos, processor, forward_base_model):
     # base model export feature
-    if args.model_name == 'pe' or args.model_name == 'ijepa' or args.model_name == "mlcd_base" or args.model_name == "mlcd":
+    if args.model_name == 'pe' or args.model_name == 'ijepa':
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = [] 
             for frame_idx in range(videos.shape[2]):
@@ -78,7 +80,7 @@ def get_feature(videos, processor, forward_base_model):
     elif args.model_name == "languagebind":
         with torch.no_grad():
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                output = forward_base_model.module.vision_model(pixel_values=videos)  
+                output = forward_base_model.module.vision_model(pixel_values=videos)
         output=output.last_hidden_state[1:]
     elif args.model_name == "rice":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -90,7 +92,13 @@ def get_feature(videos, processor, forward_base_model):
                 outputs.append(output.last_hidden_state[:, 1:, :])
             outputs = torch.cat(outputs, dim=1)
 
-    elif args.model_name == "ov_1_5_vit":
+    elif args.model_name == "llava_vit":
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                enc_out = forward_base_model(videos, mask_ratio=0.5)
+                outputs = enc_out["visible_embeddings"]
+
+    elif args.model_name in ["ov_1_5_vit", "mlcd_base", "mlcd"]:
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = []
             temporal_table = None
@@ -101,7 +109,10 @@ def get_feature(videos, processor, forward_base_model):
                 with torch.no_grad():
                     output = forward_base_model(frame)
 
-                feats = output.last_hidden_state[:, 1:, :]  # [B, N_patch, D]
+                if args.model_name == "ov_1_5_vit":
+                    feats = output.last_hidden_state[:, 1:, :]  # [B, N_patch, D]
+                else:
+                    feats = output[:, 1:, :]  # [B, N_patch, D]
 
                 # --- NEW: 加时间位置编码（正弦），首帧时一次性构建 ---
                 if temporal_table is None:
@@ -123,6 +134,7 @@ def get_feature(videos, processor, forward_base_model):
 
             outputs = torch.cat(outputs, dim=1)  # [B, T*N_patch, D]
     return outputs
+
 
 class CrossAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.0, proj_drop=0.0, attn_head_dim=None, out_dim=None):
@@ -178,6 +190,7 @@ class CrossAttention(nn.Module):
         out = self.proj_drop(out)
         return out
 
+
 class AttentiveBlock(nn.Module):
     
     def __init__(self, dim, num_heads, qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
@@ -201,6 +214,7 @@ class AttentiveBlock(nn.Module):
         x = self.cross_attn(x_q, k=x_k, v=x_v)
         return x
 
+
 class AttentionPoolingBlock(AttentiveBlock):
     def forward(self, x):
         x_q = x.mean(1, keepdim=True)
@@ -208,6 +222,7 @@ class AttentionPoolingBlock(AttentiveBlock):
         x = super().forward(x_q, x_kv, pos_q, pos_k, bool_masked_pos=None, rel_pos_bias=None)
         x = x.squeeze(1)
         return x
+
 
 class CustomModel(nn.Module):
     def __init__(self, attentive_probe_model,
@@ -235,6 +250,7 @@ class CustomModel(nn.Module):
         x = self.fc_norm(x)
         x = self.head(x)
         return x
+
 
 def train_AdamW(
     args,
@@ -359,6 +375,7 @@ def train_AdamW(
         last_val_stats = {"acc1": 0.0, "acc5": 0.0}
     return last_val_stats["acc1"], last_val_stats["acc5"]
 
+
 @torch.no_grad()
 def validation_one_epoch(
     args, model, cur_device,
@@ -427,6 +444,7 @@ def find_peak(args, lr, cur_device, base_model, data_loader_train, data_loader_v
     acc_top1, acc_top5 = train_AdamW(args, lr, cur_ap_model, cur_device, base_model, data_loader_train, data_loader_val, processor)
     return acc_top1, acc_top5
 
+
 def get_args():
     parser = argparse.ArgumentParser('Extract features using the videomae model', add_help=False)
     parser.add_argument('--train_data_root_path', default="fewshot_video/ActionRecognition")
@@ -477,6 +495,7 @@ def get_args():
     parser.add_argument('--using_normlize', action='store_true')
     return parser.parse_args()
 
+
 def mkdir_os(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -485,7 +504,6 @@ def get_model(args):
     print("create model start")
     if args.model_name == "umt":
         import video_models.umt
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -497,7 +515,6 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "videomae_v1":
         import video_models.videomae_v1
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -509,7 +526,6 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "videomae_v2":
         import video_models.videomae_v2
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -521,7 +537,6 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "vswift":
         import video_models.vswift
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -533,7 +548,6 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "ov2":
         import video_models.ov2
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -544,7 +558,6 @@ def get_model(args):
             use_mean_pooling=True)
     elif args.model_name == "viclip":
         import video_models.viclip
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             input_resolution=args.input_size,
@@ -558,7 +571,6 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "internvideo_v1":
         import video_models.internvidev1
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             img_size=args.input_size,
@@ -570,7 +582,6 @@ def get_model(args):
         base_model.forward= base_model.forward_features_attentive_probe
     elif args.model_name == "internvideo_v2":
         import video_models.internvideo_v2
-        from timm.models import create_model
         base_model = create_model(
             args.model,
             pretrained=False,
@@ -606,8 +617,6 @@ def get_model(args):
                 tight_SiLU=False)
     elif args.model_name == 'univit':
         import video_models.video_mlcd
-        from timm.models import create_model
-
         print("load create univit")
         base_model = create_model(
             args.model,
@@ -616,8 +625,6 @@ def get_model(args):
         )
     elif args.model_name == 'cvpr':
         import video_models.cvpr
-        from timm.models import create_model
-
         print("load create cvpr_model")
         base_model = create_model(
             args.model,
@@ -633,6 +640,12 @@ def get_model(args):
        from transformers import MLCDVisionModel
        base_model = MLCDVisionModel.from_pretrained(args.finetune).cuda()
 
+    elif args.model_name == 'llava_vit':
+        base_model = create_model(
+            args.model,
+            pretrained=True,
+            ckpt_path=args.finetune)
+
     elif args.model_name == 'mlcd':
         if args.model=="vit-bigG-patch14-448":
             base_model = MLCDVisionModel.from_pretrained(args.finetune)
@@ -640,15 +653,16 @@ def get_model(args):
             base_model = MLCDVisionModel.from_pretrained(args.finetune)
         elif args.model=="vit-large-patch14-336":
             base_model = CLIPVisionModel.from_pretrained(args.finetune)
+
     elif args.model_name == 'mlcd_base':
-        import video_models.mlcd_base
-        from timm.models import create_model
+        pretrained_cfg = {
+                "ckpt_path": args.finetune,
+        }
         base_model = create_model(
             args.model,
-            img_size=args.input_size,
-            pretrained=False,
-            num_classes=args.num_classes
-            )
+            pretrained=True,
+            pretrained_cfg=pretrained_cfg)
+
     elif args.model_name == 'languagebind':
         from languagebind import (LanguageBindVideo,
                                   LanguageBindVideoProcessor,

@@ -7,9 +7,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.checkpoint import checkpoint
-from torchvision.ops.misc import FrozenBatchNorm2d
-from .registry import MODEL_REGISTRY
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from timm.models.layers import DropPath, to_2tuple
+from timm.models.registry import register_model
 
 # From PyTorch internals
 def _ntuple(n):
@@ -27,44 +26,12 @@ to_4tuple = _ntuple(4)
 
 
 def rotate_half(x):
-    """
-    旋转输入张量的半个隐藏维度。
-
-    参数:
-        x (torch.Tensor): 输入张量。
-
-    返回:
-        torch.Tensor: 在最后一个维度上将前后一半交换并取负的张量。
-
-    过程:
-    1. 将输入张量的最后一个维度分为两半。
-    2. 将后一半取负并与前一半交换位置。
-    3. 返回合并后的张量。
-    """
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
 
 def apply_rotary_pos_emb_vision(tensor: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
-    """
-    在视觉领域中对给定张量应用旋转位置嵌入。
-
-    参数:
-        tensor (torch.Tensor): 需要应用旋转位置嵌入的输入张量。
-        freqs (torch.Tensor): 用于计算余弦和正弦的频率值。
-
-    返回:
-        torch.Tensor: 应用了旋转位置嵌入的张量。
-    
-    过程:
-    1. 保存输入张量的原始数据类型。
-    2. 将张量转换为浮点类型以进行计算。
-    3. 计算频率的余弦和正弦值。
-    4. 调整余弦和正弦张量的形状以匹配输入张量。
-    5. 通过组合余弦和正弦变换的结果，计算输出张量。
-    6. 将输出张量转换回原始数据类型。
-    """
     orig_dtype = tensor.dtype
     tensor = tensor.float()
     cos = freqs.cos()
@@ -77,44 +44,12 @@ def apply_rotary_pos_emb_vision(tensor: torch.Tensor, freqs: torch.Tensor) -> to
 
 
 class VisionRotaryEmbedding(nn.Module):
-    """
-    VisionRotaryEmbedding 类用于计算视觉模型中的旋转嵌入。
-
-    这种嵌入方法通过结合序列位置和频率信息，为视觉模型提供了位置编码的能力。
-    它通过计算给定维度的倒数频率来实现位置编码，并在前向传播时根据输入序列长度生成频率矩阵。
-
-    属性:
-    inv_freq (torch.Tensor): 计算得到的倒数频率向量，大小为 (dim/2,)。
-
-    方法:
-    __init__(dim: int, theta: float = 10000.0):
-        初始化 VisionRotaryEmbedding 类，计算倒数频率。
-
-    forward(seqlen: int) -> torch.Tensor:
-        根据输入的序列长度返回频率矩阵。
-    """
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
-        """
-        初始化 VisionRotaryEmbedding 类。
-
-        参数:
-        dim (int): 要嵌入的维度大小。
-        theta (float): 控制频率范围的参数，默认为 10000.0。
-        """
         super().__init__()
         inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, seqlen: int) -> torch.Tensor:
-        """
-        根据给定的序列长度计算旋转嵌入。
-
-        参数:
-        seqlen (int): 输入序列的长度。
-
-        返回:
-        torch.Tensor: 生成的频率矩阵，大小为 (seqlen, dim/2)。
-        """
         seq = torch.arange(seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
         freqs = torch.outer(seq, self.inv_freq)
         return freqs
@@ -141,7 +76,6 @@ class VisionSdpaAttention(nn.Module):
 ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
         batch_size = hidden_states.shape[1]
-
         # Compute Q, K, V matrices
         # Shape: [seq_length, batch_size, dim * 3]
         qkv = self.in_proj(hidden_states)
@@ -151,7 +85,6 @@ class VisionSdpaAttention(nn.Module):
         qkv = qkv.permute(2, 1, 0, 3, 4)
         # Each of shape: [batch_size, seq_length, num_heads, head_dim]
         q, k, v = qkv.unbind(0)
-
         q = apply_rotary_pos_emb_vision(q, rotary_pos_emb)
         k = apply_rotary_pos_emb_vision(k, rotary_pos_emb)
         attention_mask = None
@@ -161,7 +94,6 @@ class VisionSdpaAttention(nn.Module):
         # q (batch_size, num_heads, seq_length, head_dim)
         # k (batch_size, num_heads, seq_length, head_dim)
         # v (batch_size, num_heads, seq_length, head_dim)
-
         attn_output = F.scaled_dot_product_attention(q, k, v, attention_mask, dropout_p=0.0)
         attn_output = attn_output.permute(2, 0, 1, 3).contiguous()  # [seq_length, batch_size, num_heads, head_dim]
         attn_output = attn_output.view(seq_length, batch_size, -1)  # [seq_length, batch_size, embedding_dim]
@@ -203,9 +135,7 @@ class ResidualAttentionBlock(nn.Module):
             self.attn = VisionSdpaAttention(d_model, n_head)
         else:
             self.attn = nn.MultiheadAttention(d_model, n_head)
-
         self.ln_attn = LayerNorm(d_model) if scale_attn else nn.Identity()
-
         self.ln_2 = LayerNorm(d_model)
         mlp_width = int(d_model * mlp_ratio)
         self.mlp = nn.Sequential(OrderedDict([
@@ -286,24 +216,18 @@ class VisualTransformer(nn.Module):
     ):
         super().__init__()
         self.spatial_merge_size = 1
-
         self.patch_size = to_2tuple(patch_size)
         self.output_dim = output_dim
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
-
         scale = width ** -0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
-
         self.ln_pre = LayerNorm(width)
-
-        self.transformer = Transformer(width, layers, heads, mlp_ratio, act_layer=act_layer, attn_type='vision', drop_path=drop_path)
-
+        self.transformer = Transformer(
+            width, layers, heads, mlp_ratio, act_layer=act_layer, attn_type='vision', drop_path=drop_path)
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
-
         self.vision_rotary_embedding = VisionRotaryEmbedding(width // heads // 2)
         self.class_pos_emb = nn.Parameter(torch.randn(1, width // heads // 2))
-
 
 
     def rot_pos_emb(self, grid_thw):
@@ -336,11 +260,6 @@ class VisualTransformer(nn.Module):
         return rotary_pos_emb
 
 
-    def lock(self, unlocked_groups=0, freeze_bn_stats=False):
-        assert unlocked_groups == 0, 'partial locking not currently supported for this model'
-        for param in self.parameters():
-            param.requires_grad = False
-
     @torch.jit.ignore
     def set_grad_checkpointing(self, enable=False):
         self.transformer.grad_checkpointing = enable
@@ -351,163 +270,122 @@ class VisualTransformer(nn.Module):
         # twh = (1, 24, 24)
         rotary_pos_emb = self.rot_pos_emb(torch.tensor([twh], device=x.device))
         rotary_pos_emb = torch.cat([self.class_pos_emb, rotary_pos_emb], dim=0)
-
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         x = torch.cat(
             [self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device),
              x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        # x = x + self.positional_embedding.to(x.dtype)
         x = self.ln_pre(x)
-
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x, rotary_pos_emb=rotary_pos_emb)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
-        x = self.ln_post(x[:, 0, :])
 
-        if self.proj is not None:
-            x = x @ self.proj
-
+        # x = self.ln_post(x[:, 0, :])
+        # if self.proj is not None:
+        #     x = x @ self.proj
         return x
 
 
-# def ViT_B_32():
-#     vision_transformer = VisualTransformer(
-#         image_size=224, patch_size=32, width=768,
-#         layers=12, heads=12, mlp_ratio=4, output_dim=512)
-#     return vision_transformer
-
-# def ViT_S_16():
-#     vision_transformer = VisualTransformer(
-#         input_resolution=224, patch_size=16, width=384,
-#         layers=12, heads=6, output_dim=512)
-#     return vision_transformer
-
-
-# def ViT_S_14(input_resolution=224, embedding_size=512):
-#     vision_transformer = VisualTransformer(
-#         image_size=input_resolution, patch_size=14, width=384,
-#         layers=12, heads=6, mlp_ratio=4, output_dim=embedding_size)
-#     return vision_transformer
-
-
-# def ViT_L_14_1024(input_resolution=336):
-#     vision_transformer = VisualTransformer(
-#         image_size=input_resolution, patch_size=14, width=1024,
-#         layers=24, heads=16, mlp_ratio=4, output_dim=1024)
-#     return vision_transformer
-
-
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_B_16_1024(VisualTransformer):
-    """ViT_B_16_1024
-    创建一个带二维旋转位置编码的ViT-B模型。
-    使用16x16的patch，12层，12个头，输出维度1024。
-    返回:
-    VisualTransformer: 配置的ViT模型实例。
+def _build_rope2d_vit(patch_size: int,
+                      width: int,
+                      layers: int,
+                      heads: int,
+                      mlp_ratio: int,
+                      output_dim: int,
+                      pretrained: bool = False,
+                      pretrained_cfg: dict | None = None,
+                      **kwargs):
     """
-    def __init__(self):
-        super().__init__(
-            patch_size=16, width=768, layers=12,
-            heads=12, mlp_ratio=4, output_dim=1024)
-
-
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_B_14_1024(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=14, width=768, layers=12,
-            heads=12, mlp_ratio=4, output_dim=1024)
-
-
-# def ViT_S_14(input_resolution=224, embedding_size=512):
-#     vision_transformer = VisualTransformer(
-#         image_size=input_resolution, patch_size=14, width=384,
-#         layers=12, heads=6, mlp_ratio=4, output_dim=embedding_size)
-#     return vision_transformer
-
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_S_14_1024(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=14, width=384, layers=12,
-            heads=6, mlp_ratio=4, output_dim=1024)
-
-
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_S_16_512(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=16, width=384, layers=12,
-            heads=6, mlp_ratio=4, output_dim=512)
-
-
-
-# @MODEL_REGISTRY.register()
-# class RoPE2d_ViT_B_16_1024_dp01(VisualTransformer):
-#     """ViT_B_16_1024
-#     创建一个带二维旋转位置编码的ViT-B模型。
-#     使用16x16的patch，12层，12个头，输出维度1024。
-#     返回:
-#     VisualTransformer: 配置的ViT模型实例。
-#     """
-#     def __init__(self):
-#         super().__init__(
-#             patch_size=16, width=768, layers=12,
-#             heads=12, mlp_ratio=4, output_dim=1024, drop_path=0.1)
-
-
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_g_32_1024(VisualTransformer):
-    """ViT_B_16_1024
-    创建一个带二维旋转位置编码的ViT-B模型。
-    使用16x16的patch，12层，12个头，输出维度1024。
-    返回:
-    VisualTransformer: 配置的ViT模型实例。
+    通用构建函数，方便集中加上 RoPE 相关参数或后处理。
     """
-    def __init__(self):
-        super().__init__(
-            patch_size=32, width=1408, layers=40,
-            heads=16, mlp_ratio=4, output_dim=1024)
+    model = VisualTransformer(
+        patch_size=patch_size,
+        width=width,
+        layers=layers,
+        heads=heads,
+        mlp_ratio=mlp_ratio,
+        output_dim=output_dim,
+    )
+
+    if pretrained:
+        state_dict = torch.load(pretrained_cfg['ckpt_path'], map_location='cpu')
+        # replace _orig_mod. in keys
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=True)
+
+    return model
 
 
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_g_14_1024(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=14, width=1408, layers=40,
-            heads=16, mlp_ratio=4.363636363636363, output_dim=1024)
+@register_model
+def mlcd_rope2d_vit_b_16_1024(pretrained: bool = False, **kwargs):
+    """
+    ViT-B: patch 16, 12 层, 12 头, width=768, 输出 1024
+    """
+    return _build_rope2d_vit(
+        patch_size=16,
+        width=768,
+        layers=12,
+        heads=12,
+        mlp_ratio=4,
+        output_dim=1024,
+        pretrained=pretrained,
+        **kwargs
+    )
 
 
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_bigG_14_1024(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=14, width=1664, layers=48,
-            heads=16, mlp_ratio=4.9231, output_dim=1024)
+@register_model
+def mlcd_rope2d_vit_b_14_1024(pretrained: bool = False, **kwargs):
+    return _build_rope2d_vit(
+        patch_size=14,
+        width=768,
+        layers=12,
+        heads=12,
+        mlp_ratio=4,
+        output_dim=1024,
+        pretrained=pretrained,
+        **kwargs
+    )
 
 
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_SO400M(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=14, width=1152, layers=27,
-            heads=16, mlp_ratio=3.73612, output_dim=1024)
+@register_model
+def mlcd_rope2d_vit_s_14_1024(pretrained: bool = False, **kwargs):
+    return _build_rope2d_vit(
+        patch_size=14,
+        width=384,
+        layers=12,
+        heads=6,
+        mlp_ratio=4,
+        output_dim=1024,
+        pretrained=pretrained,
+        **kwargs
+    )
 
 
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_L_14_1024(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=14, width=1024, layers=24,
-            heads=16, mlp_ratio=4, output_dim=1024)
+@register_model
+def mlcd_rope2d_vit_s_16(pretrained: bool = False, **kwargs):
+    return _build_rope2d_vit(
+        patch_size=16,
+        width=384,
+        layers=12,
+        heads=6,
+        mlp_ratio=4,
+        output_dim=512,
+        pretrained=pretrained,
+        **kwargs
+    )
 
 
-@MODEL_REGISTRY.register()
-class RoPE2d_ViT_t_2_1024(VisualTransformer):
-    def __init__(self):
-        super().__init__(
-            patch_size=2, width=128, layers=12,
-            heads=8, mlp_ratio=4, output_dim=1024)
+@register_model
+def mlcd_rope2d_vit_l_14(pretrained: bool = False, **kwargs):
+    return _build_rope2d_vit(
+        patch_size=14,
+        width=1024,
+        layers=24,
+        heads=16,
+        mlp_ratio=4,
+        output_dim=1024,
+        pretrained=pretrained,
+        **kwargs
+    )

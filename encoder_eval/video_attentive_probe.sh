@@ -1,5 +1,5 @@
-TRAIN_DATA_ROOT_PATH="${TRAIN_DATA_ROOT_PATH:-/video_vit/video_encoder_eval/video_linear_probe/fewshot_video/ActionRecognition}"
-TRAIN_DATA_CSV_PATH="${TRAIN_DATA_CSV_PATH:-/video_vit/video_encoder_eval/video_linear_probe/fewshot_video/ActionRecognition}"
+TRAIN_DATA_ROOT_PATH="${TRAIN_DATA_ROOT_PATH:-/video_vit/fewshot_video/ActionRecognition}"
+TRAIN_DATA_CSV_PATH="${TRAIN_DATA_CSV_PATH:-/video_vit/fewshot_video/ActionRecognition}"
 VAL_DATA_ROOT_PATH="${VAL_DATA_ROOT_PATH:-/video_vit/eval_data/val/}"
 VAL_DATA_CSV_PATH="${VAL_DATA_CSV_PATH:-/video_vit/eval_data/annotation/}"
 
@@ -15,9 +15,9 @@ PORT="${PORT:-32509}"            # 主节点端口 (MASTER_PORT)
 # ============== Output & Model Defaults ==============
 OUTPUT="${OUTPUT:-/path/to/output}"              # 训练/评估产物输出目录
 MODEL_NAME="${MODEL_NAME:-ov_1_5_vit}"           # 逻辑模型名称（自定义 tag）
+MODEL="${MODEL:-vit_large_patch16_224}"
 FINETUNE="${FINETUNE:-/path/to/ckpt}"            # 微调初始权重 / 预训练 ckpt 路径
 
-model="${model:-vit_large_patch16_224}"
 EMBEDDING_SIZE="${EMBEDDING_SIZE:-1024}"
 PATCH_SIZE="${PATCH_SIZE:-16}"
 NUM_FRAMES="${NUM_FRAMES:-8}"
@@ -26,11 +26,19 @@ INPUT_SIZE="${INPUT_SIZE:-224}"
 TUBELET_SIZE="${TUBELET_SIZE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 
+# 如果外部没传，则给默认
+DATASETS="${DATASETS:-k400}"
+# 去掉所有空格（防止有人写成 "k400, ssv2,k600"）
+DATASETS="${DATASETS// /}"
+# 拆成数组
+IFS=',' read -r -a DATASET_ARRAY <<< "$DATASETS"
+
 for SEED in 1
 do
     # for DATASET in ssv2 k400 k600 k700 hmdb51 ucf101 epic_verb epic_noun perception_test diving48 CharadesEgo  CharadesEgo_v1_only1st CharadesEgo_v1_only3rd
-    for DATASET in k400
+    for DATASET in "${DATASET_ARRAY[@]}";
     do
+        echo "当前 SEED=$SEED, DATASET=$DATASET"
         for NUM_SHOTS in 50
         do
             echo "SEED: $SEED"
@@ -53,7 +61,7 @@ do
                 --save_report ${OUTPUT} \
                 --batch_size ${BATCH_SIZE} \
                 --model_name ${MODEL_NAME} \
-                --model ${model} \
+                --model ${MODEL} \
                 --finetune ${FINETUNE} \
                 --num_frames ${NUM_FRAMES} \
                 --input_size ${INPUT_SIZE} \
