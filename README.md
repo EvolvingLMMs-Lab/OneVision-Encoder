@@ -87,9 +87,19 @@ pip install -e .
 ```
 
 ## 🚀 Training
+
+1. Sigle Node
+
 ```bash
 # Example command to start training
 torchrun -m --nproc_per_node 8 training.train_predict_10_06
+```
+
+2. Multi Node
+
+```bash
+# Example command to start training
+pdsh -w ip0,ip1,ip2,ip3 'cd /workspace/LLaVA-ViT && torchrun --nproc_per_node=8 --nnodes=4 --node_rank=%n --master_addr=ip0 --master_port=12345 -m training.train_predict_10_06'
 ```
 
 ## 🚀 Evaluation
