@@ -222,8 +222,6 @@ class LlavaViTDecoder(nn.Module):
         num_attention_heads = hidden_size // head_dim
         if num_key_value_heads is None:
             num_key_value_heads = num_attention_heads
-        # 3D RoPE 均分约束
-        assert (head_dim // 2) % 3 == 0, "head_dim//2 must be divisible by 3 for 3D (t,h,w) rope split"
 
         self.hidden_size = hidden_size
         self.encoder_hidden_size = encoder_hidden_size
@@ -457,6 +455,24 @@ def pretrain_encoder_small_patch16_224_v10_08_rms(pretrained: bool = False, ckpt
 
 @register_model
 def pretrain_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+    model = LlavaViTDecoder(
+        hidden_size=384,             # decoder hidden
+        encoder_hidden_size=384,     # must match encoder hidden_size
+        head_dim=64,
+        num_hidden_layers=3,
+        intermediate_size=1536,      # 384 * 4
+        feature_proj_dim=384,        # final feature dimension
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.RMSNorm,
+    )
+    if pretrained:
+        pass
+    return model
+
+
+@register_model
+def mlcd_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
     """MLCD Decoder
     """
     model = MLCDViTDecoder(

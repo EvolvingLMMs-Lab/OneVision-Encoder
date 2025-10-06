@@ -46,11 +46,13 @@ cd /train_tmp
 tar -xf ssv2.tar
 ```
 
+#### 1. Sigle Node
 ```
 # Run container with -w to set working directory directly to the mounted volume
 docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
     -v "$(pwd)":/workspace/LLaVA-ViT \
+    -v /vlm:/vlm \
     -v /video_vit:/video_vit \
     -v /train_tmp:/train_tmp \
     -w /workspace/LLaVA-ViT/ \
@@ -60,14 +62,44 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
 # Inside the container, install the package in editable mode
 pip install -e .
 ```
+#### 2. Multi Node
 
+> [!IMPORTANT]
+> 多机必须使用预编译的镜像，且镜像必须一致
+
+```
+# Run container with -w to set working directory directly to the mounted volume
+docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
+    --ulimit memlock=-1 --ulimit stack=67108864 --rm \
+    -v "$(pwd)":/workspace/LLaVA-ViT \
+    -v /vlm:/vlm \
+    -v /video_vit:/video_vit \
+    -v /train_tmp:/train_tmp \
+    -w /workspace/LLaVA-ViT/ \
+    --name "llava_vit_container" \
+    -e NCCL_TIMEOUT=1800 \
+    -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
+    -e NCCL_SOCKET_IFNAME=eth0 -e NCCL_IB_GID_INDEX=3 -e NCCL_IB_DISABLE=0 -e NCCL_IB_HCA="mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1" -e NCCL_NET_GDR_LEVEL=2 -e NCCL_IB_QPS_PER_CONNECTION=4 -e NCCL_IB_TC=160 -e NCCL_IB_TIMEOUT=22 -e NCCL_CROSS_NIC=1 -e NCCL_MIN_NCHANNELS=8 -e NCCL_MAX_NCHANNELS=16 \
+    llava_vit:25.10 bash -c "service ssh restart; bash; "
+
+# Inside the container, install the package in editable mode
+pip install -e .
+```
 
 ## 🚀 Training
 
+1. Sigle Node
 
 ```bash
 # Example command to start training
 torchrun -m --nproc_per_node 8 training.train_predict_10_06
+```
+
+2. Multi Node
+
+```bash
+# Example command to start training
+pdsh -w 172.16.5.[34,35] 'cd /workspace/LLaVA-ViT && torchrun --nproc_per_node=8 --nnodes=4 --node_rank=%n --master_addr=172.16.5.34 --master_port=12345 -m training.train_predict_10_06'
 ```
 
 ## 🚀 Evaluation
@@ -76,8 +108,10 @@ DATASETS=ssv2 \
 MODEL_FAMILY=llava_vit \
 MODEL_NAME=pretrain_encoder_small_patch16_224_v10_03 \
 CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/date_25_10_05_first_success_training/encoder_checkpoint_125000.pt \
-EMBEDDING_SIZE=576 \
+EMBEDDING_SIZE=384 \
 NUM_EPOCH=100 \
+BATCH_SIZE=4 \
+LR=2e-4 \
 bash video_attentive_probe.sh
 ```
 
