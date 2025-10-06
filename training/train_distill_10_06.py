@@ -25,12 +25,12 @@ parser.add_argument("--backward_passes_per_step", type=int, default=1)
 parser.add_argument("--debug", type=int, default=0)
 
 parser.add_argument("--list_batch_size", nargs='+', default=["128"])
-parser.add_argument("--list_dataset", nargs='+', default=["ssv2_tmpfs"])
+parser.add_argument("--list_dataset", nargs='+', default=["distill_mlcd_coyo_laion"])
 
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--local_rank", type=int, default=0)
 parser.add_argument("--image_size", default="224")
-parser.add_argument("--num_sampled_data", type=int, default=16000000)
+parser.add_argument("--num_sampled_data", type=int, default=1_000_000_000)
 parser.add_argument("--output", default="output")
 parser.add_argument("--output_decoder", default="output_decoder")
 
@@ -57,9 +57,9 @@ parser.add_argument("--vis_interval", type=int, default=10,
                     help="How often to save visualizations")
 
 # Add the model name arguments
-parser.add_argument("--model_name_encoder", default="pretrain_encoder_small_patch16_224_v10_03",
+parser.add_argument("--model_name_encoder", default="pretrain_encoder_small_patch16_224_v10_08_rms",
                     help="Model name for the encoder architecture")
-parser.add_argument("--model_name_decoder", default="pretrain_decoder_small_patch16_224_v10_03",
+parser.add_argument("--model_name_decoder", default="mlcd_decoder_small_patch16_224_v10_08_rms",
                     help="Model name for the decoder architecture")
 parser.add_argument("--model_name_teacher", default="mlcd_vit_s_16_512px",
                     choices=[
@@ -166,7 +166,7 @@ def load_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler):
             step = int(file.split("_")[-1].split(".")[0])
             if step > latest_step:
                 latest_step = step
-    
+
     if latest_step == -1:
         log.info("No checkpoint found, starting from scratch")
         return None
@@ -283,11 +283,12 @@ def main():
 
     for head_id, dataset_config in enumerate(args.list_dataset):
         if args.debug:
+
             from dataloader.data_v2_video import SyntheticDataIter
             train_iter = SyntheticDataIter(args.batch_size, args.image_size[0], local_rank)
         elif dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video import dali_dataloader
 
+            from dataloader.data_decord_video import dali_dataloader
             num_workers = 4
             train_iter = dali_dataloader(
                 file_list=dataset_config.prefix,
@@ -302,6 +303,18 @@ def main():
                 shard_id=dataset_config.shard_id,
                 num_shards=dataset_config.num_shards,
             )
+        elif dataset_config.dali_type == "origin":
+
+            from dataloader.data_v2 import MultiRecDALIWarper
+            print("dataset_config.prefix", dataset_config.prefix)
+            train_iter = MultiRecDALIWarper(
+                list_prefix=dataset_config.prefix,
+                batch_size=args.list_batch_size[head_id],
+                image_size=args.image_size,
+                workers=args.workers,
+                shard_id=dataset_config.shard_id,
+                num_shards=dataset_config.num_shards
+        )
         else:
             raise NotImplementedError(f"Dataloader type {dataset_config.dali_type} not implemented")
 
@@ -357,34 +370,20 @@ def main():
 
                 # Extract encoder outputs
                 visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, D)
-                mask = enc_out["mask"]                                 # (B, L_full)
-                ids_restore = enc_out["ids_restore"]                   # (B, L_full)
-                patch_grid = enc_out["patch_grid"]                     # (T, Hp, Wp)
 
                 # Run decoder
-                dec_out = llava_vit_decoder_ddp(
-                    visible_embeddings=visible_embeddings,
-                    ids_restore=ids_restore,
-                    mask=mask,
-                    patch_grid=patch_grid
-                )
+                dec_out = llava_vit_decoder_ddp(visible_embeddings)
+
                 decoded_full = dec_out["decoded_full"]  # Full sequence of decoded tokens
 
             # Get teacher model output
             with torch.no_grad():
-                # Reshape [b, c, t, h, w] to [b*t, c, h, w]
-                b, c, t, h, w = head_input.shape
-                head_input_reshaped = head_input.reshape(b*t, c, h, w)
-                
                 # Get teacher embeddings and reshape back
-                teacher_output = llava_vit_teacher(head_input_reshaped)[:, 1:, :]  # Skip CLS token
-                teacher_output = teacher_output.reshape(b, t*teacher_output.shape[1], -1)
-                
+                teacher_output = llava_vit_teacher(head_input)[:, 1:, :]  # Skip CLS token
+
                 # Shift teacher output by removing the first frame for proper supervision
                 # Only compute loss on the first (n-1) frames
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                teacher_output = teacher_output[:, teacher_output.shape[1]//t:, :]  # Remove first frame features
-                decoded_full = decoded_full[:, :-(decoded_full.shape[1]//t), :]  # Use only first (n-1) frames
                 loss = mse_loss(decoded_full, teacher_output)
 
             list_loss.append(loss)
