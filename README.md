@@ -46,7 +46,7 @@ cd /train_tmp
 tar -xf ssv2.tar
 ```
 
-> #### Option 1: Sigle Node
+#### 1. Sigle Node
 ```
 # Run container with -w to set working directory directly to the mounted volume
 docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
@@ -62,7 +62,7 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
 # Inside the container, install the package in editable mode
 pip install -e .
 ```
-> #### Option 2: Multi Node
+#### 2. Multi Node
 
 > [!IMPORTANT]
 > 多机必须使用预编译的镜像，且镜像必须一致
