@@ -18,20 +18,24 @@ class LlavaViTEncoder(nn.Module):
         use_gradient_checkpointing=False,
         attn_dropout=0.0,
         use_causal_temporal=True,   # 新增开关：是否启用时间因果
+        norm_cls=nn.RMSNorm,
     ):
         super().__init__()
-        self.tubelet_size = 1
+
         assert hidden_size % head_dim == 0
         num_attention_heads = hidden_size // head_dim
         if num_key_value_heads is None:
             num_key_value_heads = num_attention_heads
+
         self.hidden_size = hidden_size
         self.head_dim = head_dim
         self.num_attention_heads = num_attention_heads
         self.num_key_value_heads = num_key_value_heads
+
         self.use_causal_temporal = use_causal_temporal
         self.attn_dropout = attn_dropout
         self.patch_size = to_2tuple(patch_size)
+
         self.conv1 = nn.Conv2d(
             3, hidden_size,
             kernel_size=patch_size,
@@ -40,7 +44,7 @@ class LlavaViTEncoder(nn.Module):
         )
         scale = hidden_size ** -0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(hidden_size))
-        self.ln_pre = nn.LayerNorm(hidden_size)
+        self.ln_pre = norm_cls(hidden_size)
 
         # 使用带 causal mask 的 Transformer
         self.transformer = TransformerCausal(
@@ -50,7 +54,8 @@ class LlavaViTEncoder(nn.Module):
             intermediate_size=intermediate_size,
             act_layer=act_layer,
             gradient_checkpointing=use_gradient_checkpointing,
-            attn_dropout=attn_dropout
+            attn_dropout=attn_dropout,
+            norm_cls=norm_cls,
         )
 
         self.half_head_dim = head_dim // 2
@@ -86,13 +91,6 @@ class LlavaViTEncoder(nn.Module):
         return visible_indices, visible_mask, ids_restore
 
     def _build_causal_temporal_mask(self, visible_indices, patches_per_frame):
-        """
-        visible_indices: (B, N_vis) 已排序
-        返回 attention_mask: (B, N_vis, N_vis)  True=不允许(attend)，False=允许
-        规则：
-          - 同一帧内全可见（双向），即不屏蔽
-          - 不能看未来帧 ⇒ 对于 query i, 若 key j 属于未来帧 (frame_j > frame_i) 则屏蔽
-        """
         B, N = visible_indices.shape
         frame_ids = visible_indices // patches_per_frame  # (B,N)
         # frame_ids[:,None,:] -> (B,1,N); frame_ids[:,:,None] -> (B,N,1)
@@ -123,13 +121,20 @@ class LlavaViTEncoder(nn.Module):
         tokens = feats.reshape(batch, total_patches, self.hidden_size)
 
         # masking
-        visible_indices, visible_mask_bool, ids_restore = self.mask_mae_style(
-            batch_size=batch,
-            t_frames=t_frames,
-            patches_per_frame=patches_per_frame,
-            mask_ratio=mask_ratio,
-            device=device
-        )
+        if t_frames == 1:
+            # 全部可见，不进行随机遮挡
+            visible_indices = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)  # (B, L)
+            visible_mask_bool = torch.ones(batch, total_patches, dtype=torch.bool, device=device)        # (B, L)
+            ids_restore = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)      # (B, L)
+        else:
+            # masking
+            visible_indices, visible_mask_bool, ids_restore = self.mask_mae_style(
+                batch_size=batch,
+                t_frames=t_frames,
+                patches_per_frame=patches_per_frame,
+                mask_ratio=mask_ratio,
+                device=device
+            )
         n_visible = visible_indices.shape[1]
 
         gather_index = visible_indices.unsqueeze(-1).expand(-1, -1, self.hidden_size)
@@ -137,7 +142,7 @@ class LlavaViTEncoder(nn.Module):
 
         # RoPE (full -> select)
         freqs_full = self.video_rope(
-            t=t_frames // self.tubelet_size,
+            t=t_frames,
             h=h_patches,
             w=w_patches,
             device=device,
@@ -210,12 +215,15 @@ class LlavaViTDecoder(nn.Module):
         use_gradient_checkpointing=False,
         attn_dropout=0.0,
         use_causal_temporal=True,   # 新增：与 encoder 一致的时间单向注意力开关
+        norm_cls=nn.RMSNorm,
     ):
         super().__init__()
         assert hidden_size % head_dim == 0, "hidden_size must be divisible by head_dim"
         num_attention_heads = hidden_size // head_dim
         if num_key_value_heads is None:
             num_key_value_heads = num_attention_heads
+        # 3D RoPE 均分约束
+        assert (head_dim // 2) % 3 == 0, "head_dim//2 must be divisible by 3 for 3D (t,h,w) rope split"
 
         self.hidden_size = hidden_size
         self.encoder_hidden_size = encoder_hidden_size
@@ -240,7 +248,7 @@ class LlavaViTDecoder(nn.Module):
         self.video_rope = VideoRotaryEmbeddingSplit466(head_dim)
 
         # LayerNorm + Transformer (使用支持 attention_mask 的 Causal 版本)
-        self.ln_in = nn.LayerNorm(hidden_size)
+        self.ln_in = norm_cls(hidden_size)
         self.transformer = TransformerCausal(
             hidden_size=hidden_size,
             num_hidden_layers=num_hidden_layers,
@@ -249,6 +257,7 @@ class LlavaViTDecoder(nn.Module):
             act_layer=act_layer,
             gradient_checkpointing=use_gradient_checkpointing,
             attn_dropout=attn_dropout,
+            norm_cls=norm_cls,
         )
 
         # 输出特征投影（比如对齐 teacher 维）
@@ -347,8 +356,86 @@ class LlavaViTDecoder(nn.Module):
         }
 
 
+class MLCDViTDecoder(nn.Module):
+    """ 简化版 Decoder，仅支持全量输入（不区分可见/遮挡），用于快速验证 ViT Encoder 特征质量。
+    """
+    def __init__(
+        self,
+        hidden_size=384,
+        encoder_hidden_size=384,
+        head_dim=48,
+        num_hidden_layers=8,
+        intermediate_size=1536,
+        act_layer=nn.GELU,
+        num_key_value_heads=None,
+        feature_proj_dim=None,
+        use_gradient_checkpointing=False,
+        attn_dropout=0.0,
+        use_causal_temporal=True,
+        norm_cls=nn.RMSNorm,
+    ):
+        super().__init__()
+        assert hidden_size % head_dim == 0
+        if num_key_value_heads is None:
+            num_key_value_heads = hidden_size // head_dim
+        self.hidden_size = hidden_size
+        self.encoder_hidden_size = encoder_hidden_size
+        self.head_dim = head_dim
+        self.num_attention_heads = hidden_size // head_dim
+        self.num_key_value_heads = num_key_value_heads
+        self.use_causal_temporal = use_causal_temporal
+
+        self.proj_in = nn.Linear(encoder_hidden_size, hidden_size) if encoder_hidden_size != hidden_size else nn.Identity()
+        self.video_rope = VideoRotaryEmbeddingSplit466(head_dim)
+        self.ln_in = norm_cls(hidden_size)
+        self.transformer = TransformerCausal(
+            hidden_size=hidden_size,
+            num_hidden_layers=num_hidden_layers,
+            num_attention_heads=self.num_attention_heads,
+            intermediate_size=intermediate_size,
+            act_layer=act_layer,
+            gradient_checkpointing=use_gradient_checkpointing,
+            attn_dropout=attn_dropout,
+            norm_cls=norm_cls,
+        )
+        if feature_proj_dim is not None and feature_proj_dim != hidden_size:
+            self.feature_head = nn.Linear(hidden_size, feature_proj_dim)
+            self.out_feature_dim = feature_proj_dim
+        else:
+            self.feature_head = nn.Identity()
+            self.out_feature_dim = hidden_size
+
+    def forward(
+        self,
+        full_embeddings: torch.Tensor,   # (B, L_full, encoder_hidden_size) 已经是完整序列
+    ):
+        batch_size, seq_len, hidden_dim = full_embeddings.shape
+        x_full = self.proj_in(full_embeddings)  # (B,L,H)
+        h_patches = w_patches = int(seq_len ** 0.5)
+
+        freqs_full = self.video_rope(
+            t=1, h=h_patches, w=w_patches,
+            device=x_full.device,
+            dtype=x_full.dtype
+        )
+
+        x_in = self.ln_in(x_full).permute(1, 0, 2)          # (L,B,H)
+        x_out = self.transformer(
+            x_in,
+            rotary_pos_emb=freqs_full,
+            attention_mask=None
+        ).permute(1, 0, 2)                                   # (B,L,H)
+        x_out = self.feature_head(x_out)
+
+        return {
+            "decoded_full": x_out
+        }
+
+
 @register_model
-def pretrain_encoder_small_patch16_224_v10_03(pretrained: bool = False, ckpt_path=None,**kwargs):
+def pretrain_encoder_small_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
         patch_size=16,
         hidden_size=384,
@@ -357,6 +444,7 @@ def pretrain_encoder_small_patch16_224_v10_03(pretrained: bool = False, ckpt_pat
         intermediate_size=1536,
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
+        norm_cls=nn.RMSNorm,
     )
     if pretrained:
         assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
@@ -368,12 +456,14 @@ def pretrain_encoder_small_patch16_224_v10_03(pretrained: bool = False, ckpt_pat
 
 
 @register_model
-def pretrain_decoder_small_patch16_224_v10_03(pretrained: bool = False, **kwargs):
-    model = LlavaViTDecoder(
+def pretrain_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+    """MLCD Decoder
+    """
+    model = MLCDViTDecoder(
         hidden_size=384,             # decoder hidden
         encoder_hidden_size=384,     # must match encoder hidden_size
         head_dim=64,
-        num_hidden_layers=3,
+        num_hidden_layers=4,
         intermediate_size=1536,      # 384 * 4
         feature_proj_dim=384,        # final feature dimension
         act_layer=nn.GELU,
@@ -387,58 +477,30 @@ def pretrain_decoder_small_patch16_224_v10_03(pretrained: bool = False, **kwargs
 # ---------------- Main test: encoder + decoder ----------------
 if __name__ == "__main__":
     torch.manual_seed(42)
+    B = 2
+    C = 3
+    T = 1
+    S = 224
 
-    batch = 2
-    channels = 3
-    t_frames = 8
-    img_size = 224
-    mask_ratio = 0.5
+    video = torch.randn(B, C, T, S, S)
 
-    # 构造随机视频
-    video = torch.randn(batch, channels, t_frames, img_size, img_size)
+    encoder = pretrain_encoder_small_patch16_224_v10_08_rms()
+    decoder = pretrain_decoder_small_patch16_224_v10_08_rms()
 
-    # 初始化模型
-    encoder = pretrain_encoder_small_patch16_224_v10_03()
-    decoder = pretrain_decoder_small_patch16_224_v10_03()
-
-    # 编码
     with torch.no_grad():
-        enc_out = encoder(video, mask_ratio=mask_ratio)
+        enc_out = encoder(video)
 
-    visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, 576)
-    mask = enc_out["mask"]                                 # (B, L_full)
-    ids_restore = enc_out["ids_restore"]                   # (B, L_full)
-    patch_grid = enc_out["patch_grid"]                     # (T, Hp, Wp)
-    n_visible = enc_out["num_visible"]
-    L_full = enc_out["full_sequence_length"]
+    embeddings = enc_out["visible_embeddings"]         # (B, L, 360)
+    print("=== Encoder ===")
+    print("video:", tuple(video.shape))
+    print("embeddings:", tuple(embeddings.shape))
 
-    print("=== Encoder Info ===")
-    print("video:", video.shape)
-    print("patch_grid:", patch_grid)
-    print("full_seq_len:", L_full)
-    print("visible_embeddings:", visible_embeddings.shape)
-    print("mask ratio actual:", (mask.sum() / mask.numel()).item())
-    print("ids_restore:", ids_restore.shape)
-
-    # 解码
     with torch.no_grad():
-        dec_out = decoder(
-            visible_embeddings=visible_embeddings,
-            ids_restore=ids_restore,
-            mask=mask,
-            patch_grid=patch_grid
-        )
+        dec_out = decoder(embeddings)
 
-    decoded_full = dec_out["decoded_full"]
-    decoded_visible = dec_out["decoded_visible"]
-    decoded_masked = dec_out["decoded_masked"]
+    decoded_full = dec_out["decoded_full"]     # (B, L, 384)
 
-    print("\n=== Decoder Info ===")
-    print("decoded_full:", decoded_full.shape)         # (B, L_full, D_out)
-    print("decoded_visible:", decoded_visible.shape)   # (B, N_vis, D_out)
-    print("decoded_masked:", decoded_masked.shape)     # (B, N_mask, D_out)
-    print("N_mask:", L_full - n_visible)
-
-    # 简单一致性检查（可见数 + 遮挡数 = 全长）
-    assert decoded_visible.size(1) + decoded_masked.size(1) == L_full, "visible+masked != full length"
-    print("\nChecks passed.")
+    print("\n=== Decoder ===")
+    print("decoded_full:", tuple(decoded_full.shape))
+    assert decoded_full.size(1) == embeddings.size(1)
+    print("\nDone.")

@@ -789,7 +789,9 @@ if __name__ == '__main__':
     args.num_val_steps_per_epoch = len(data_loader_val)
     print("create data loader end")
     best_lr, max_acc_top1, max_acc_top5 = 0, 0, 0
-
+    
+    if isinstance(args.default_lr_list, float):
+        args.default_lr_list = [args.default_lr_list]
     for lr in args.default_lr_list:
         base_model = get_model(args)
 
