@@ -1,10 +1,9 @@
-from collections import OrderedDict
-
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn import LayerNorm
 from torch.utils.checkpoint import checkpoint
+from typing import Callable
 
 
 def rotate_half(x):
@@ -56,35 +55,75 @@ class VisionRotaryEmbedding(nn.Module):
         return torch.outer(seq, self.inv_freq)
 
 
-class VideoRotaryEmbeddingSimple(nn.Module):
+class VideoRotaryEmbeddingSplit466(nn.Module):
+    """
+    3D (T,H,W) Rotary 频率构造，按 4:6:6 切分 head_dim//2。
+    t_size : 4 * base
+    h_size : 6 * base
+    w_size : 6 * base
+    base = (head_dim//2) // 16
+    """
     def __init__(self, head_dim: int, base: float = 10000.0):
         super().__init__()
-        assert head_dim % 2 == 0, "head_dim must be even"
+        assert head_dim % 2 == 0, "head_dim must be even for rotary."
+        assert head_dim % 16 == 0, "head_dim must be divisible by 16 (requested)."
         half = head_dim // 2
-        assert half % 3 == 0, "head_dim//2 must be divisible by 3 (t/h/w equal split)"
-        self.axis_size = half // 3
+        assert half % 16 == 0, "head_dim//2 must also be divisible by 16 to split into 4:6:6."
+
         self.head_dim = head_dim
+        self.half = half
+        self.base = base
+
+        unit = half // 16
+        self.t_size = 4 * unit
+        self.h_size = 6 * unit
+        self.w_size = 6 * unit
+
+        # 为每个轴单独构建 inv_freq（各自归一化到自身尺度）
         self.register_buffer(
-            "inv_freq",
-            1.0 / (base ** (torch.arange(0, self.axis_size, dtype=torch.float32) / self.axis_size)),
+            "inv_freq_t",
+            1.0 / (base ** (torch.arange(self.t_size, dtype=torch.float32) / self.t_size)),
+            persistent=False
+        )
+        self.register_buffer(
+            "inv_freq_h",
+            1.0 / (base ** (torch.arange(self.h_size, dtype=torch.float32) / self.h_size)),
+            persistent=False
+        )
+        self.register_buffer(
+            "inv_freq_w",
+            1.0 / (base ** (torch.arange(self.w_size, dtype=torch.float32) / self.w_size)),
             persistent=False
         )
 
+    @torch.no_grad()
     def forward(self, t: int, h: int, w: int, device=None, dtype=torch.float32):
+        """
+        返回:
+            freqs: (L, half) 其中 L = t*h*w
+        """
         if device is None:
-            device = self.inv_freq.device
-        inv = self.inv_freq.to(device=device, dtype=dtype)
-        ft = torch.outer(torch.arange(t, device=device, dtype=dtype), inv)  # (t,a)
-        fh = torch.outer(torch.arange(h, device=device, dtype=dtype), inv)  # (h,a)
-        fw = torch.outer(torch.arange(w, device=device, dtype=dtype), inv)  # (w,a)
+            device = self.inv_freq_t.device
 
-        t_ids = torch.arange(t, device=device).repeat_interleave(h * w)
-        h_base = torch.arange(h, device=device).repeat_interleave(w)
-        h_ids = h_base.repeat(t)
-        w_base = torch.arange(w, device=device).repeat(h)
-        w_ids = w_base.repeat(t)
+        inv_t = self.inv_freq_t.to(device=device, dtype=dtype)
+        inv_h = self.inv_freq_h.to(device=device, dtype=dtype)
+        inv_w = self.inv_freq_w.to(device=device, dtype=dtype)
 
-        freqs = torch.cat([ft[t_ids], fh[h_ids], fw[w_ids]], dim=-1)  # (L, head_dim//2)
+        # 各轴外积
+        ft = torch.outer(torch.arange(t, device=device, dtype=dtype), inv_t)  # (t, t_size)
+        fh = torch.outer(torch.arange(h, device=device, dtype=dtype), inv_h)  # (h, h_size)
+        fw = torch.outer(torch.arange(w, device=device, dtype=dtype), inv_w)  # (w, w_size)
+
+        # 展平序列索引 (与之前风格一致)
+        L = t * h * w
+        t_ids = torch.arange(t, device=device).repeat_interleave(h * w)     # (L,)
+        h_base = torch.arange(h, device=device).repeat_interleave(w)        # (h*w,)
+        h_ids = h_base.repeat(t)                                            # (L,)
+        w_base = torch.arange(w, device=device).repeat(h)                   # (h*w,)
+        w_ids = w_base.repeat(t)                                            # (L,)
+
+        freqs = torch.cat([ft[t_ids], fh[h_ids], fw[w_ids]], dim=-1)        # (L, half)
+        assert freqs.shape == (L, self.half)
         return freqs
 
 
@@ -118,12 +157,14 @@ class VisionSdpaAttentionCausal(nn.Module):
             cos = torch.cat([cos, cos], dim=-1).unsqueeze(2)  # (B,L,1,D)
             sin = torch.cat([sin, sin], dim=-1).unsqueeze(2)
 
-            def rotate_half(x):
-                x1 = x[..., : x.shape[-1] // 2]
-                x2 = x[..., x.shape[-1] // 2 :]
-                return torch.cat((-x2, x1), dim=-1)
-            q = (q * cos) + (rotate_half(q) * sin)
-            k = (k * cos) + (rotate_half(k) * sin)
+            def rotate_half_local(x):
+                # x: (B,L,H,D)
+                x_even = x[..., ::2]
+                x_odd  = x[..., 1::2]
+                return torch.stack((-x_odd, x_even), dim=-1).reshape_as(x)
+
+            q = (q * cos) + (rotate_half_local(q) * sin)
+            k = (k * cos) + (rotate_half_local(k) * sin)
 
         # (B,H,L,D)
         q = q.permute(0,2,1,3)
@@ -147,11 +188,12 @@ class VisionSdpaAttentionCausal(nn.Module):
 
 
 class ResidualAttentionBlockCausal(nn.Module):
-    def __init__(self, hidden_size, num_attention_heads, intermediate_size, act_layer=nn.GELU, attn_dropout=0.0):
+    def __init__(self, hidden_size, num_attention_heads, intermediate_size,
+                 act_layer=nn.GELU, attn_dropout=0.0, norm_cls: Callable=nn.LayerNorm):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(hidden_size)
+        self.ln_1 = norm_cls(hidden_size)
         self.attn = VisionSdpaAttentionCausal(hidden_size, num_attention_heads, attn_dropout=attn_dropout)
-        self.ln_2 = nn.LayerNorm(hidden_size)
+        self.ln_2 = norm_cls(hidden_size)
         self.mlp = nn.Sequential(
             nn.Linear(hidden_size, intermediate_size),
             act_layer(),
@@ -193,11 +235,11 @@ class CrossAttention(nn.Module):
 
 
 class AttentiveBlock(nn.Module):
-    def __init__(self, hidden_size, num_heads):
+    def __init__(self, hidden_size, num_heads, norm_cls=nn.LayerNorm):
         super().__init__()
-        self.norm_q = nn.LayerNorm(hidden_size)
-        self.norm_k = nn.LayerNorm(hidden_size)
-        self.norm_v = nn.LayerNorm(hidden_size)
+        self.norm_q = norm_cls(hidden_size)
+        self.norm_k = norm_cls(hidden_size)
+        self.norm_v = norm_cls(hidden_size)
         self.attn = CrossAttention(hidden_size, num_heads)
 
     def forward(self, x_q, x_kv, pos_q=None, pos_k=None):
@@ -225,7 +267,8 @@ class TransformerCausal(nn.Module):
                  intermediate_size,
                  act_layer=nn.GELU,
                  gradient_checkpointing=False,
-                 attn_dropout=0.0):
+                 attn_dropout=0.0,
+                 norm_cls: Callable=nn.LayerNorm):
         super().__init__()
         self.layers = nn.ModuleList([
             ResidualAttentionBlockCausal(
@@ -233,7 +276,8 @@ class TransformerCausal(nn.Module):
                 num_attention_heads,
                 intermediate_size,
                 act_layer=act_layer,
-                attn_dropout=attn_dropout
+                attn_dropout=attn_dropout,
+                norm_cls=norm_cls
             ) for _ in range(num_hidden_layers)
         ])
         self.grad_checkpointing = gradient_checkpointing

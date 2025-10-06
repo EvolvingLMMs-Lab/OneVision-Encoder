@@ -23,3 +23,19 @@ def k710_ssv2_diving48_ssd():
         shard_id=rank,
         dali_type="decord",
     )
+
+
+@DATASET_REGISTRY.register()
+def k710_ssv2_diving48_pfs():
+    """ 临时使用 tmpfs 进行训练"""
+    with open("/video_vit/train_UniViT/videos_frames64_kinetics_ssv2/list_mp4", "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    lines = [x.strip().split(",")[0] for x in lines]
+    return Property(
+        prefix=lines,
+        name="k710_ssv2_diving48_pfs",
+        num_example=0,
+        num_shards=world_size,
+        shard_id=rank,
+        dali_type="decord",
+    )
