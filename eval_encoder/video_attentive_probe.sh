@@ -24,6 +24,7 @@ NUM_EPOCH="${NUM_EPOCH:-40}"
 INPUT_SIZE="${INPUT_SIZE:-224}"
 TUBELET_SIZE="${TUBELET_SIZE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
+LR="${LR:-0.0001}"
 
 # 如果外部没传，则给默认
 DATASETS="${DATASETS:-ssv2}"
@@ -64,7 +65,8 @@ do
                 --ckpt_path ${CKPT_PATH} \
                 --num_frames ${NUM_FRAMES} \
                 --input_size ${INPUT_SIZE} \
-                --tubelet_size ${TUBELET_SIZE}
+                --tubelet_size ${TUBELET_SIZE} \
+                --default_lr_list ${LR}
         done
     done
 done
