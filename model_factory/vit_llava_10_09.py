@@ -431,7 +431,7 @@ class MLCDViTDecoder(nn.Module):
 
 
 @register_model
-def pretrain_encoder_small_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
+def pretrain_encoder_small_patch16_224_v10_09_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
@@ -453,7 +453,7 @@ def pretrain_encoder_small_patch16_224_v10_08_rms(pretrained: bool = False, ckpt
     return model
 
 @register_model
-def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
+def pretrain_encoder_base_patch16_224_v10_09_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
@@ -476,7 +476,7 @@ def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_
 
 
 @register_model
-def pretrain_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+def pretrain_decoder_small_patch16_224_v10_09_rms(pretrained: bool = False, **kwargs):
     model = LlavaViTDecoder(
         hidden_size=384,             # decoder hidden
         encoder_hidden_size=384,     # must match encoder hidden_size
@@ -494,7 +494,7 @@ def pretrain_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kw
 
 
 @register_model
-def mlcd_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+def mlcd_decoder_small_patch16_224_v10_09_rms(pretrained: bool = False, **kwargs):
     """MLCD Decoder
     """
     model = MLCDViTDecoder(
@@ -513,7 +513,7 @@ def mlcd_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs
 
 
 @register_model
-def mlcd_decoder_base_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+def mlcd_decoder_base_patch16_224_v10_09_rms(pretrained: bool = False, **kwargs):
     """MLCD Decoder
     """
     model = MLCDViTDecoder(
@@ -540,8 +540,8 @@ if __name__ == "__main__":
 
     video = torch.randn(B, C, T, S, S)
 
-    encoder = pretrain_encoder_small_patch16_224_v10_08_rms()
-    decoder = pretrain_decoder_small_patch16_224_v10_08_rms()
+    encoder = pretrain_encoder_small_patch16_224_v10_09_rms()
+    decoder = pretrain_decoder_small_patch16_224_v10_09_rms()
 
     with torch.no_grad():
         enc_out = encoder(video)
