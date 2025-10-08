@@ -24,10 +24,10 @@ parser = argparse.ArgumentParser(description="Video Distillation Training Script
 parser.add_argument("--backward_passes_per_step", type=int, default=1)
 parser.add_argument("--debug", type=int, default=0)
 
-parser.add_argument("--list_batch_size", nargs='+', default=["128"])
+parser.add_argument("--list_batch_size", nargs='+', default=["512"])
 parser.add_argument("--list_dataset", nargs='+', default=["distill_mlcd_coyo_laion"])
 
-parser.add_argument("--lr", type=float, default=1e-3)
+parser.add_argument("--lr", type=float, default=4e-4)
 parser.add_argument("--local_rank", type=int, default=0)
 parser.add_argument("--image_size", default="224")
 parser.add_argument("--num_sampled_data", type=int, default=1_000_000_000)
@@ -549,7 +549,7 @@ class BatchEndCallBack(object):
                     self.list_loss_metric[head_id].reset()
 
                 # 添加样本数信息到日志
-                examples_info = f"samples: {self.total_examples}"
+                examples_info = f"samples: {num_samples}"
                 msg = f"{header}{progress}{time_info} {examples_info}{loss_str_format}"
 
                 if rank == 0:
