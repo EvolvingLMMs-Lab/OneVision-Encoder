@@ -56,10 +56,13 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
     -v /video_vit:/video_vit \
     -v /train_tmp:/train_tmp \
     -w /workspace/LLaVA-ViT/ \
-    --name "llava_vit_container" \
     llava_vit:25.10 /bin/bash
 
 # Inside the container, install the package in editable mode
+
+export http_proxy=http://172.16.5.77:8889
+export https_proxy=http://172.16.5.77:8889
+
 pip install -e .
 ```
 #### 2. Multi Node
@@ -74,9 +77,9 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
     -v "$(pwd)":/workspace/LLaVA-ViT \
     -v /vlm:/vlm \
     -v /video_vit:/video_vit \
+    -v /rice_ocr:/rice_ocr \
     -v /train_tmp:/train_tmp \
     -w /workspace/LLaVA-ViT/ \
-    --name "llava_vit_container" \
     -e NCCL_TIMEOUT=1800 \
     -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
     -e NCCL_SOCKET_IFNAME=eth0 -e NCCL_IB_GID_INDEX=3 -e NCCL_IB_DISABLE=0 -e NCCL_IB_HCA="mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1" -e NCCL_NET_GDR_LEVEL=2 -e NCCL_IB_QPS_PER_CONNECTION=4 -e NCCL_IB_TC=160 -e NCCL_IB_TIMEOUT=22 -e NCCL_CROSS_NIC=1 -e NCCL_MIN_NCHANNELS=8 -e NCCL_MAX_NCHANNELS=16 \
