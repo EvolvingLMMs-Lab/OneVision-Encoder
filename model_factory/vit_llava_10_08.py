@@ -5,6 +5,14 @@ from timm.models.registry import register_model
 from torch import nn
 from typing import Optional, Any, Dict
 
+__all__ = [
+    "pretrain_encoder_small_patch16_224_v10_08_rms",
+    "pretrain_encoder_base_patch16_224_v10_08_rms",
+    "pretrain_decoder_small_patch16_224_v10_08_rms",
+    "mlcd_decoder_small_patch16_224_v10_08_rms",
+    "mlcd_decoder_base_patch16_224_v10_08_rms",
+]
+
 class LlavaViTEncoder(nn.Module):
     def __init__(
         self,
@@ -286,6 +294,9 @@ class LlavaViTDecoder(nn.Module):
         mask: torch.Tensor,                # (B,L_full) 1=visible 0=masked
         patch_grid,                        # (T, h_patches, w_patches)
     ):
+        # Check if all tokens are visible (unmask case)
+        is_unmask = mask.all().item() if torch.is_tensor(mask) else False
+        
         if mask.dtype != torch.bool:
             mask_bool = mask.bool()
         else:
@@ -300,14 +311,19 @@ class LlavaViTDecoder(nn.Module):
         # 1. 投影 visible
         vis_dec = self.proj_in(visible_embeddings)  # (B,N_vis,H)
 
-        # 2. mask tokens
-        N_mask = L_full - N_vis
-        mask_tokens = self.mask_token.expand(B, N_mask, self.hidden_size)  # (B,N_mask,H)
+        if is_unmask:
+            # 全部可见，无需 mask tokens 和重排序
+            assert N_vis == L_full, "Unmask case requires N_vis == L_full"
+            x_full = vis_dec  # (B,L_full,H)
+        else:
+            # 2. mask tokens
+            N_mask = L_full - N_vis
+            mask_tokens = self.mask_token.expand(B, N_mask, self.hidden_size)  # (B,N_mask,H)
 
-        # 3. 还原完整序列
-        x_cat = torch.cat([vis_dec, mask_tokens], dim=1)  # (B,L_full,H)
-        gather_index = ids_restore.unsqueeze(-1).expand(-1, -1, self.hidden_size)
-        x_full = torch.gather(x_cat, 1, gather_index)  # (B,L_full,H)
+            # 3. 还原完整序列
+            x_cat = torch.cat([vis_dec, mask_tokens], dim=1)  # (B,L_full,H)
+            gather_index = ids_restore.unsqueeze(-1).expand(-1, -1, self.hidden_size)
+            x_full = torch.gather(x_cat, 1, gather_index)  # (B,L_full,H)
 
         # 4. RoPE
         freqs_full = self.video_rope(
@@ -341,17 +357,30 @@ class LlavaViTDecoder(nn.Module):
         # 7. 输出特征
         x_out = self.feature_head(x_out)  # (B,L,D_out)
 
-        decoded_visible = x_out[mask_bool].view(B, N_vis, -1)
-        decoded_masked = x_out[~mask_bool].view(B, N_mask, -1)
-
-        return {
-            "decoded_full": x_out,
-            "decoded_visible": decoded_visible,
-            "decoded_masked": decoded_masked,
-            "mask": mask.float() if mask.dtype != torch.float32 else mask,
-            "ids_restore": ids_restore,
-            "attention_mask_used": attention_mask is not None,
-        }
+        # 处理返回值
+        if is_unmask:
+            # 全部可见的情况下
+            return {
+                "decoded_full": x_out,
+                "decoded_visible": x_out,  # 全部为可见
+                "decoded_masked": torch.zeros(B, 0, x_out.size(-1), device=x_out.device),  # 空张量
+                "mask": mask.float() if mask.dtype != torch.float32 else mask,
+                "ids_restore": ids_restore,
+                "attention_mask_used": attention_mask is not None,
+            }
+        else:
+            # 正常情况，有可见和遮罩的 tokens
+            decoded_visible = x_out[mask_bool].view(B, N_vis, -1)
+            decoded_masked = x_out[~mask_bool].view(B, N_mask, -1)
+            
+            return {
+                "decoded_full": x_out,
+                "decoded_visible": decoded_visible,
+                "decoded_masked": decoded_masked,
+                "mask": mask.float() if mask.dtype != torch.float32 else mask,
+                "ids_restore": ids_restore,
+                "attention_mask_used": attention_mask is not None,
+            }
 
 
 class MLCDViTDecoder(nn.Module):
