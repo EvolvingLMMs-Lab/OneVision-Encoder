@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn import LayerNorm
 from torch.utils.checkpoint import checkpoint
-from typing import Callable
+from typing import Callable, Optional
 
 
 def rotate_half(x):
@@ -292,3 +292,40 @@ class TransformerCausal(nn.Module):
             else:
                 x = blk(x, rotary_pos_emb=rotary_pos_emb, attention_mask=attention_mask)
         return x
+
+class Siglip2MLP(nn.Module):
+    def __init__(self, hidden_size, intermediate_size):
+        super().__init__()
+        self.activation_fn = F.gelu
+        self.fc1 = nn.Linear(hidden_size, intermediate_size)
+        self.fc2 = nn.Linear(intermediate_size, hidden_size)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+        return hidden_states
+
+class Siglip2MultiheadAttentionPoolingHead(nn.Module):
+    """Multihead Attention Pooling."""
+
+    def __init__(self, hidden_size, num_attention_heads, intermediate_size):
+        super().__init__()
+
+        self.probe = nn.Parameter(torch.randn(1, 1, hidden_size))
+        self.attention = torch.nn.MultiheadAttention(hidden_size, num_attention_heads, batch_first=True)
+        self.norm = nn.RMSNorm(hidden_size, )
+        self.mlp = Siglip2MLP(hidden_size, intermediate_size)
+        self.num_heads = num_attention_heads
+
+    def forward(self, hidden_state: torch.Tensor, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        batch_size = hidden_state.shape[0]
+        probe = self.probe.repeat(batch_size, 1, 1)
+
+        hidden_state = self.attention(probe, hidden_state, hidden_state)[0]
+
+        residual = hidden_state
+        hidden_state = self.norm(hidden_state)
+        hidden_state = residual + self.mlp(hidden_state)
+
+        return hidden_state[:, 0]
