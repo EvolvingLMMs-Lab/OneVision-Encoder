@@ -160,6 +160,13 @@ Thanks so much to all of our amazing contributors!
                     <sub><b>FeilongTangmonash</b></sub>
                 </a>
             </td>
+            <td align="center">
+                <a href="https://github.com/wkzhang636">
+                    <img src="https://avatars.githubusercontent.com/u/194186498?v=4" width="80;" alt="wkzhang636"/>
+                    <br />
+                    <sub><b>wkzhang636</b></sub>
+                </a>
+            </td>
 		</tr>
 	<tbody>
 </table>
