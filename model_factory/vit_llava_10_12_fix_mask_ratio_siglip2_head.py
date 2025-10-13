@@ -183,7 +183,7 @@ class LlavaViTEncoder(nn.Module):
             attention_mask=attention_mask        # (B,N,N) or None
         )
         out = out.permute(1, 0, 2)  # (B,N,C)
-        out = self.ln_post(out)
+        # out = self.ln_post(out)
 
         if self.use_head:
             head_output = self.head(out)  # (B, hidden_size)
@@ -376,7 +376,7 @@ class LlavaViTDecoder(nn.Module):
         )
         x_out = x_out.permute(1, 0, 2)  # (B,L,H)
 
-        x_out = self.ln_post(x_out)
+        # x_out = self.ln_post(x_out)
 
         # 处理返回值
         if is_unmask:
@@ -448,7 +448,7 @@ def pretrain_decoder_small_patch16_224_v10_12_rms(pretrained: bool = False, **kw
         hidden_size=384,             # decoder hidden
         encoder_hidden_size=384,     # must match encoder hidden_size
         head_dim=64,
-        num_hidden_layers=4,
+        num_hidden_layers=1,
         intermediate_size=1536,      # 384 * 4
         feature_proj_dim=384,        # final feature dimension
         act_layer=nn.GELU,
