@@ -5,7 +5,7 @@ Video feature extraction using DALI + MetaCLIP-H/14 with checkpoint resume.
 Features are saved in order matching the input video list.
 
 Usage with DeepSpeed:
-    deepspeed --num_gpus=8 extract_video_features.py \
+    torchrun --nproc_per_node 8 step1_extract_video_features.py \
         --input /video_vit/train_UniViT/mp4_list.txt \
         --output /output/features \
         --batch_size 32 \
@@ -13,7 +13,7 @@ Usage with DeepSpeed:
         --chunk_size 1000
     
     # Multi-node
-    deepspeed --num_gpus=8 --num_nodes=2 --hostfile=hostfile extract_video_features.py \
+    deepspeed --num_gpus=8 --num_nodes=2 --hostfile=hostfile step1_extract_video_features.py \
         --input /video_vit/train_UniViT/mp4_list.txt \
         --output /output/features \
         --batch_size 32 \

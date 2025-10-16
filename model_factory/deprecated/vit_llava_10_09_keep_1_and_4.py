@@ -6,11 +6,11 @@ from torch import nn
 from typing import Optional, Any, Dict
 
 __all__ = [
-    "pretrain_encoder_small_patch16_224_v10_08_rms",
-    "pretrain_encoder_base_patch16_224_v10_08_rms",
-    "pretrain_decoder_small_patch16_224_v10_08_rms",
-    "mlcd_decoder_small_patch16_224_v10_08_rms",
-    "mlcd_decoder_base_patch16_224_v10_08_rms",
+    "pretrain_encoder_small_patch16_224_v10_09_keep_1_and_4",
+    "pretrain_encoder_base_patch16_224_v10_09_keep_1_and_4",
+    "pretrain_decoder_small_patch16_224_v10_09_keep_1_and_4",
+    "mlcd_decoder_small_patch16_224_v10_09_keep_1_and_4",
+    "mlcd_decoder_base_patch16_224_v10_09_keep_1_and_4",
 ]
 
 class LlavaViTEncoder(nn.Module):
@@ -71,6 +71,54 @@ class LlavaViTEncoder(nn.Module):
 
     def mask_mae_style(self, batch_size, t_frames, patches_per_frame, mask_ratio, device):
         total_patches = t_frames * patches_per_frame
+
+        # ===== 新增固定 8 帧特殊逻辑（最小侵入修改） =====
+        if t_frames == 8:
+            # 始终保留：帧0 与 帧4
+            i_region = torch.arange(0, patches_per_frame, device=device)  # frame 0
+            frame4_base = 4 * patches_per_frame
+            frame4_region = torch.arange(frame4_base, frame4_base + patches_per_frame, device=device)
+
+            always_keep_indices = torch.cat([i_region, frame4_region], dim=0)  # (2 * patches_per_frame,)
+
+            # 其余帧(1,2,3,5,6,7)的所有 patch 组成候选集合
+            # 原始 p_region_indices = patches_per_frame..total_patches-1 包含帧1-7
+            p_region_indices_full = torch.arange(patches_per_frame, total_patches, device=device)
+            # 去掉帧4
+            mask_frames_candidate = p_region_indices_full[
+                ~((p_region_indices_full >= frame4_base) &
+                  (p_region_indices_full < frame4_base + patches_per_frame))
+            ]
+            candidate_count = mask_frames_candidate.numel()
+
+            mask_ratio = float(mask_ratio)
+            mask_ratio = max(0.0, min(1.0, mask_ratio))
+            p_keep_count = int(round((1 - mask_ratio) * candidate_count))
+            p_keep_count = max(0, min(p_keep_count, candidate_count))
+
+            if p_keep_count > 0:
+                rand_scores = torch.rand(batch_size, candidate_count, device=device)
+                topk_idx = torch.topk(rand_scores, k=p_keep_count, dim=1, largest=True, sorted=False).indices
+                kept_dynamic = mask_frames_candidate[topk_idx]   # (B, p_keep_count)
+                always_keep_expanded = always_keep_indices.unsqueeze(0).expand(batch_size, -1)
+                visible_indices = torch.cat([always_keep_expanded, kept_dynamic], dim=1)
+            else:
+                visible_indices = always_keep_indices.unsqueeze(0).expand(batch_size, -1)
+
+            # 排序 + 构造 mask / ids_restore 与原逻辑一致
+            visible_indices = torch.sort(visible_indices, dim=1).values
+            visible_mask = torch.zeros(batch_size, total_patches, dtype=torch.bool, device=device)
+            visible_mask.scatter_(1, visible_indices, True)
+
+            vis_int = visible_mask.long()
+            mask_int = 1 - vis_int
+            vis_rank = torch.cumsum(vis_int, dim=1) - 1
+            mask_rank = torch.cumsum(mask_int, dim=1) - 1
+            n_visible_col = vis_int.sum(dim=1, keepdim=True)
+            ids_restore = torch.where(visible_mask, vis_rank, n_visible_col + mask_rank)
+            return visible_indices, visible_mask, ids_restore
+        # ===== 固定 8 帧逻辑结束，其他情况走原始实现 =====
+
         i_region = torch.arange(0, patches_per_frame, device=device)
         p_region_indices = torch.arange(patches_per_frame, total_patches, device=device)
         p_region_count = p_region_indices.numel()
@@ -294,9 +342,6 @@ class LlavaViTDecoder(nn.Module):
         mask: torch.Tensor,                # (B,L_full) 1=visible 0=masked
         patch_grid,                        # (T, h_patches, w_patches)
     ):
-        # Check if all tokens are visible (unmask case)
-        is_unmask = mask.all().item() if torch.is_tensor(mask) else False
-        
         if mask.dtype != torch.bool:
             mask_bool = mask.bool()
         else:
@@ -311,19 +356,14 @@ class LlavaViTDecoder(nn.Module):
         # 1. 投影 visible
         vis_dec = self.proj_in(visible_embeddings)  # (B,N_vis,H)
 
-        if is_unmask:
-            # 全部可见，无需 mask tokens 和重排序
-            assert N_vis == L_full, "Unmask case requires N_vis == L_full"
-            x_full = vis_dec  # (B,L_full,H)
-        else:
-            # 2. mask tokens
-            N_mask = L_full - N_vis
-            mask_tokens = self.mask_token.expand(B, N_mask, self.hidden_size)  # (B,N_mask,H)
+        # 2. mask tokens
+        N_mask = L_full - N_vis
+        mask_tokens = self.mask_token.expand(B, N_mask, self.hidden_size)  # (B,N_mask,H)
 
-            # 3. 还原完整序列
-            x_cat = torch.cat([vis_dec, mask_tokens], dim=1)  # (B,L_full,H)
-            gather_index = ids_restore.unsqueeze(-1).expand(-1, -1, self.hidden_size)
-            x_full = torch.gather(x_cat, 1, gather_index)  # (B,L_full,H)
+        # 3. 还原完整序列
+        x_cat = torch.cat([vis_dec, mask_tokens], dim=1)  # (B,L_full,H)
+        gather_index = ids_restore.unsqueeze(-1).expand(-1, -1, self.hidden_size)
+        x_full = torch.gather(x_cat, 1, gather_index)  # (B,L_full,H)
 
         # 4. RoPE
         freqs_full = self.video_rope(
@@ -357,30 +397,17 @@ class LlavaViTDecoder(nn.Module):
         # 7. 输出特征
         x_out = self.feature_head(x_out)  # (B,L,D_out)
 
-        # 处理返回值
-        if is_unmask:
-            # 全部可见的情况下
-            return {
-                "decoded_full": x_out,
-                "decoded_visible": x_out,  # 全部为可见
-                "decoded_masked": torch.zeros(B, 0, x_out.size(-1), device=x_out.device),  # 空张量
-                "mask": mask.float() if mask.dtype != torch.float32 else mask,
-                "ids_restore": ids_restore,
-                "attention_mask_used": attention_mask is not None,
-            }
-        else:
-            # 正常情况，有可见和遮罩的 tokens
-            decoded_visible = x_out[mask_bool].view(B, N_vis, -1)
-            decoded_masked = x_out[~mask_bool].view(B, N_mask, -1)
-            
-            return {
-                "decoded_full": x_out,
-                "decoded_visible": decoded_visible,
-                "decoded_masked": decoded_masked,
-                "mask": mask.float() if mask.dtype != torch.float32 else mask,
-                "ids_restore": ids_restore,
-                "attention_mask_used": attention_mask is not None,
-            }
+        decoded_visible = x_out[mask_bool].view(B, N_vis, -1)
+        decoded_masked = x_out[~mask_bool].view(B, N_mask, -1)
+
+        return {
+            "decoded_full": x_out,
+            "decoded_visible": decoded_visible,
+            "decoded_masked": decoded_masked,
+            "mask": mask.float() if mask.dtype != torch.float32 else mask,
+            "ids_restore": ids_restore,
+            "attention_mask_used": attention_mask is not None,
+        }
 
 
 class MLCDViTDecoder(nn.Module):
@@ -460,7 +487,7 @@ class MLCDViTDecoder(nn.Module):
 
 
 @register_model
-def pretrain_encoder_small_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
+def pretrain_encoder_small_patch16_224_v10_09_keep_1_and_4(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
@@ -482,7 +509,7 @@ def pretrain_encoder_small_patch16_224_v10_08_rms(pretrained: bool = False, ckpt
     return model
 
 @register_model
-def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
+def pretrain_encoder_base_patch16_224_v10_09_keep_1_and_4(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
@@ -505,7 +532,7 @@ def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_
 
 
 @register_model
-def pretrain_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+def pretrain_decoder_small_patch16_224_v10_09_keep_1_and_4(pretrained: bool = False, **kwargs):
     model = LlavaViTDecoder(
         hidden_size=384,             # decoder hidden
         encoder_hidden_size=384,     # must match encoder hidden_size
@@ -523,7 +550,7 @@ def pretrain_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kw
 
 
 @register_model
-def mlcd_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+def mlcd_decoder_small_patch16_224_v10_09_keep_1_and_4(pretrained: bool = False, **kwargs):
     """MLCD Decoder
     """
     model = MLCDViTDecoder(
@@ -542,7 +569,7 @@ def mlcd_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs
 
 
 @register_model
-def mlcd_decoder_base_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+def mlcd_decoder_base_patch16_224_v10_09_keep_1_and_4(pretrained: bool = False, **kwargs):
     """MLCD Decoder
     """
     model = MLCDViTDecoder(
@@ -562,30 +589,56 @@ def mlcd_decoder_base_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs)
 # ---------------- Main test: encoder + decoder ----------------
 if __name__ == "__main__":
     torch.manual_seed(42)
-    B = 2
-    C = 3
-    T = 1
-    S = 224
+    batch = 2
+    channels = 3
+    t_frames = 8
+    img_size = 224
+    mask_ratio = 0.5
 
-    video = torch.randn(B, C, T, S, S)
+    # 构造随机视频
+    video = torch.randn(batch, channels, t_frames, img_size, img_size)
 
-    encoder = pretrain_encoder_small_patch16_224_v10_08_rms()
-    decoder = pretrain_decoder_small_patch16_224_v10_08_rms()
+    encoder = pretrain_encoder_small_patch16_224_v10_09_keep_1_and_4()
+    decoder = pretrain_decoder_small_patch16_224_v10_09_keep_1_and_4()
 
+    # 编码
     with torch.no_grad():
-        enc_out = encoder(video)
+        enc_out = encoder(video, mask_ratio=mask_ratio)
 
-    embeddings = enc_out["visible_embeddings"]         # (B, L, 360)
-    print("=== Encoder ===")
-    print("video:", tuple(video.shape))
-    print("embeddings:", tuple(embeddings.shape))
+    visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, 576)
+    mask = enc_out["mask"]                                 # (B, L_full)
+    ids_restore = enc_out["ids_restore"]                   # (B, L_full)
+    patch_grid = enc_out["patch_grid"]                     # (T, Hp, Wp)
+    n_visible = enc_out["num_visible"]
+    L_full = enc_out["full_sequence_length"]
 
+    print("=== Encoder Info ===")
+    print("video:", video.shape)
+    print("patch_grid:", patch_grid)
+    print("full_seq_len:", L_full)
+    print("visible_embeddings:", visible_embeddings.shape)
+    print("mask ratio actual:", (mask.sum() / mask.numel()).item())
+    print("ids_restore:", ids_restore.shape)
+
+    # 解码
     with torch.no_grad():
-        dec_out = decoder(embeddings)
+        dec_out = decoder(
+            visible_embeddings=visible_embeddings,
+            ids_restore=ids_restore,
+            mask=mask,
+            patch_grid=patch_grid
+        )
 
-    decoded_full = dec_out["decoded_full"]     # (B, L, 384)
+    decoded_full = dec_out["decoded_full"]
+    decoded_visible = dec_out["decoded_visible"]
+    decoded_masked = dec_out["decoded_masked"]
 
-    print("\n=== Decoder ===")
-    print("decoded_full:", tuple(decoded_full.shape))
-    assert decoded_full.size(1) == embeddings.size(1)
-    print("\nDone.")
+    print("\n=== Decoder Info ===")
+    print("decoded_full:", decoded_full.shape)         # (B, L_full, D_out)
+    print("decoded_visible:", decoded_visible.shape)   # (B, N_vis, D_out)
+    print("decoded_masked:", decoded_masked.shape)     # (B, N_mask, D_out)
+    print("N_mask:", L_full - n_visible)
+
+    # 简单一致性检查（可见数 + 遮挡数 = 全长）
+    assert decoded_visible.size(1) + decoded_masked.size(1) == L_full, "visible+masked != full length"
+    print("\nChecks passed.")

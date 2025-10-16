@@ -1,3 +1,4 @@
+# torchrun --nproc_per_node=8 --nnodes=8 --node_rank=0 --master_addr=172.16.5.34 --master_port=12345 -m training.train_distill_10_06 --model_name_encoder pretrain_enc[0/0]base_patch16_224_v10_08_rms_init_from_mlcd --init_encoder /video_vit/pretrain_models/deepglint/mlcd/mlcd_vit_b_16_512px_fixed_for_llava_vit_init.pt --model_name_decoder mlcd_decoder_base_patch16_224_v10_08_rms --output /video_vit/xiangan/checkpoint_llava_vit/distill_b_16  --model_name_teacher mlcd_vit_b_16_512px --lr 0.0003
 import argparse
 import logging
 import os
@@ -13,141 +14,79 @@ from timm import create_model
 from torch import distributed
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
-
+from torch.nn.functional import layer_norm
 import model_factory
 from dataset import DATASET_REGISTRY
 from training.lr_scheduler import PolynomialLRWarmup
-from torch.nn.functional import layer_norm
 
 torch._dynamo.config.optimize_ddp = False
 
-parser = argparse.ArgumentParser(description="视频蒸馏训练脚本")
+parser = argparse.ArgumentParser(description="Video Distillation Training Script")
+parser.add_argument("--backward_passes_per_step", type=int, default=1)
+parser.add_argument("--debug", type=int, default=0)
 
+parser.add_argument("--list_batch_size", nargs='+', default=["512"])
+parser.add_argument("--list_dataset", nargs='+', default=["distill_mlcd_coyo_laion"])
 
-parser.add_argument(
-    "--local_rank",
-    type=int,
-    default=None,
-    help="Set by torchrun/deepspeed per process. If not provided, will read from env LOCAL_RANK or default to 0."
-)
+parser.add_argument("--lr", type=float, default=5e-4)
+parser.add_argument("--local_rank", type=int, default=0)
+parser.add_argument("--image_size", default="224")
+parser.add_argument("--num_sampled_data", type=int, default=10_000_000_000)
+parser.add_argument("--output", default="output")
+parser.add_argument("--output_decoder", default="output_decoder")
 
-# ========== 基础 / 通用 ==========
-parser.add_argument(
-    "--debug", type=int, default=0,
-    help="是否开启调试模式 (1 开启，0 关闭)"
-)
-parser.add_argument(
-    "--output", default="output",
-    help="编码器训练输出目录"
-)
-# ========== 数据与输入 ==========
-parser.add_argument(
-    "--list_dataset", nargs='+', default=["ssv2_tmpfs"],
-    help="数据集名称列表（可传多个）"
-)
-parser.add_argument(
-    "--list_batch_size", nargs='+', default=["128"],
-    help="批大小列表（可用于多配置循环，如 64 128）"
-)
-parser.add_argument(
-    "--image_size", default="224",
-    help="输入图像尺寸（正方形边长）"
-)
-parser.add_argument(
-    "--num_frames", type=int, default=8,
-    help="每个视频样本加载的帧数"
-)
-parser.add_argument(
-    "--num_sampled_data", type=int, default=16000000,
-    help="训练过程计划采样的总样本数（用于估算总步数）"
-)
-parser.add_argument(
-    "--mask_ratio", type=float, default=0.5,
-    help="训练时遮挡补全任务的遮挡比例"
-)
+parser.add_argument("--init_encoder", default="")
+parser.add_argument("--init_decoder", default="")
 
-# ========== 模型 ==========
+parser.add_argument("--frequent", type=int, default=10)
+parser.add_argument("--warmup_ratio", type=float, default=0.1)
+parser.add_argument("--weight_decay", type=float, default=0.05)
+parser.add_argument("--workers", type=int, default=2)
+parser.add_argument("--ckpt_interval", type=int, default=1000)
+
+parser.add_argument("--mask_ratio", type=float, default=0.5,
+                    help="Ratio of patches to mask during training")
+parser.add_argument("--finetune_backbone", type=int, default=1)
+parser.add_argument("--num_frames", type=int, default=8)
+
+# Add visualization arguments
+parser.add_argument("--visualize", type=int, default=0,
+                    help="Save input videos as GIFs for visualization")
+parser.add_argument("--vis_samples", type=int, default=2,
+                    help="Number of samples to visualize per batch")
+parser.add_argument("--vis_interval", type=int, default=10,
+                    help="How often to save visualizations")
+
+# Add the model name arguments
+parser.add_argument("--model_name_encoder", default="pretrain_encoder_small_patch16_224_v10_08_rms",
+                    help="Model name for the encoder architecture")
+parser.add_argument("--model_name_decoder", default="mlcd_decoder_small_patch16_224_v10_08_rms",
+                    help="Model name for the decoder architecture")
+parser.add_argument("--model_name_teacher", default="mlcd_vit_s_16_512px",
+                    choices=[
+                        "mlcd_vit_b_16_512px",
+                        "mlcd_vit_s_16_512px"],
+                    help="Model name for the teacher architecture")
+parser.add_argument("--ln_mse", action="store_true",
+                    help="Use LayerNorm MSE loss instead of standard MSE loss")
 parser.add_argument(
-    "--model_name_encoder",
-    default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask",
-    help="编码器模型名称/结构标识"
+    "--loss_spike_ratio", type=float, default=1.5,
+    help="loss 突刺判定阈值：当前 loss > EMA * ratio 时跳过该步更新；<=0 关闭"
 )
 parser.add_argument(
-    "--model_name_decoder",
-    default="pretrain_decoder_small_patch16_224_v10_12_rms",
-    help="解码器模型名称/结构标识"
+    "--loss_spike_ema_beta", type=float, default=0.9,
+    help="loss EMA 平滑系数，越大越平滑"
 )
 parser.add_argument(
-    "--model_name_teacher",
-    default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head",
-    choices=["pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head"],
-    help="教师模型名称（知识蒸馏用）"
-)
-parser.add_argument(
-    "--init_encoder", default="/vlm/xiangan/VideoMLCD/checkpoints/llava_vit_s_16.py/00140000/backbone.pt",
-    help="编码器初始权重路径（留空则随机初始化/默认权重）"
-)
-parser.add_argument(
-    "--init_decoder", default="",
-    help="解码器初始权重路径（留空则随机初始化/默认权重）"
-)
-parser.add_argument(
-    "--finetune_backbone", type=int, default=1,
-    help="是否微调主干网络 (1 微调, 0 冻结)"
+    "--loss_spike_min_step", type=int, default=100,
+    help="开始进行突刺检测的热身步数（不足该步数不检测）"
 )
 
-# ========== 优化与训练策略 ==========
-parser.add_argument(
-    "--lr", type=float, default=1e-3,
-    help="基础学习率"
-)
-parser.add_argument(
-    "--weight_decay", type=float, default=0.05,
-    help="权重衰减系数（L2 正则）"
-)
-parser.add_argument(
-    "--warmup_ratio", type=float, default=0.1,
-    help="学习率 warmup 占总训练步数的比例"
-)
-parser.add_argument(
-    "--backward_passes_per_step", type=int, default=1,
-    help="每个优化步累计的反向传播次数（梯度累积）"
-)
-
-# ========== 运行 / 日志 & 保存 ==========
-parser.add_argument(
-    "--workers", type=int, default=2,
-    help="DataLoader 工作线程数"
-)
-parser.add_argument(
-    "--frequent", type=int, default=10,
-    help="日志打印/状态输出的步数间隔"
-)
-parser.add_argument(
-    "--ckpt_interval", type=int, default=1000,
-    help="保存模型检查点的步数间隔"
-)
-
-# ========== 可视化 ==========
-parser.add_argument(
-    "--visualize", type=int, default=0,
-    help="是否保存输入视频 GIF (1 开启, 0 关闭)"
-)
-parser.add_argument(
-    "--vis_samples", type=int, default=2,
-    help="每个批次进行可视化的样本数量"
-)
-parser.add_argument(
-    "--vis_interval", type=int, default=10,
-    help="可视化执行的步数间隔"
-)
-
-args = parser.parse_args()
 
 # 注：虽然模型名中包含512px分辨率，但由于RoPE机制，这些模型向下兼容较低分辨率，结果质量不会有显著差异
 TEACHER_MODEL_PATH = {
-    # "mlcd_vit_b_16_512px": "/video_vit/pretrain_models/deepglint/mlcd/mlcd_vit_b_16_512px.pt",
-    "pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head": "/vlm/xiangan/VideoMLCD/checkpoints/llava_vit_s_16.py/00140000/backbone.pt",
+    "mlcd_vit_b_16_512px": "/video_vit/pretrain_models/deepglint/mlcd/mlcd_vit_b_16_512px.pt",
+    "mlcd_vit_s_16_512px": "/video_vit/pretrain_models/deepglint/mlcd/mlcd_vit_s_16_512px.pt",
 }
 
 args = parser.parse_args()
@@ -195,17 +134,17 @@ def save_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler, globa
         return
 
     os.makedirs(output_dir, exist_ok=True)
-
+    
     # Save encoder
     encoder_path = os.path.join(output_dir, f"encoder_checkpoint_{global_step}.pt")
     encoder_state_dict = unwrap_module(encoder).state_dict()
     torch.save(encoder_state_dict, encoder_path)
-
+    
     # Save decoder
     decoder_path = os.path.join(output_dir, f"decoder_checkpoint_{global_step}.pt")
     decoder_state_dict = unwrap_module(decoder).state_dict()
     torch.save(decoder_state_dict, decoder_path)
-
+    
     # Save optimizer and scheduler state
     optim_path = os.path.join(output_dir, f"optimizer_{global_step}.pt")
     checkpoint = {
@@ -214,17 +153,17 @@ def save_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler, globa
         'global_step': global_step,
     }
     torch.save(checkpoint, optim_path)
-
+    
     # Keep only the most recent checkpoints
     log.info(f"Saved checkpoint at step {global_step}")
-
+    
     # Clean up old checkpoints to maintain only keep_num
     all_checkpoints = []
     for file in os.listdir(output_dir):
         if file.startswith("encoder_checkpoint_") and file.endswith(".pt"):
             step = int(file.split("_")[-1].split(".")[0])
             all_checkpoints.append(step)
-
+    
     if len(all_checkpoints) > keep_num:
         all_checkpoints.sort()
         for step in all_checkpoints[:-keep_num]:
@@ -247,21 +186,21 @@ def load_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler):
     if latest_step == -1:
         log.info("No checkpoint found, starting from scratch")
         return None
-
+    
     # Load encoder
     encoder_path = os.path.join(output_dir, f"encoder_checkpoint_{latest_step}.pt")
     if os.path.exists(encoder_path):
         encoder_state_dict = torch.load(encoder_path, map_location="cpu")
         unwrap_module(encoder).load_state_dict(encoder_state_dict)
         log.info(f"Loaded encoder checkpoint from step {latest_step}")
-
+    
     # Load decoder
     decoder_path = os.path.join(output_dir, f"decoder_checkpoint_{latest_step}.pt")
     if os.path.exists(decoder_path):
         decoder_state_dict = torch.load(decoder_path, map_location="cpu")
         unwrap_module(decoder).load_state_dict(decoder_state_dict)
         log.info(f"Loaded decoder checkpoint from step {latest_step}")
-
+    
     # Load optimizer and scheduler state
     optim_path = os.path.join(output_dir, f"optimizer_{latest_step}.pt")
     if os.path.exists(optim_path) and optimizer is not None:
@@ -269,7 +208,7 @@ def load_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler):
         optimizer.load_state_dict(checkpoint['optimizer'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         log.info(f"Loaded optimizer and scheduler from step {latest_step}")
-
+    
     return {'global_step': latest_step}
 
 
@@ -297,17 +236,21 @@ def main():
     # Initialize models
     llava_vit_encoder = create_model(args.model_name_encoder).cuda().train()
     llava_vit_decoder = create_model(args.model_name_decoder).cuda().train()
-
+    llava_vit_encoder = torch.compile(llava_vit_encoder)
+    # llava_vit_decoder = torch.compile(llava_vit_decoder)
 
     # Initialize teacher model and load pre-trained weights
-    llava_vit_teacher = create_model(args.model_name_teacher).cuda().eval()
+    if args.model_name_teacher == "mlcd_vit_s_16_512px":
+        llava_vit_teacher = create_model("mlcd_rope2d_vit_s_16").cuda().eval()
+    elif args.model_name_teacher == "mlcd_vit_b_16_512px":
+        llava_vit_teacher = create_model("mlcd_rope2d_vit_b_16").cuda().eval()
+    else:
+        raise NotImplementedError(f"Teacher model {args.model_name_teacher} not implemented")
+
     log.info(f"Loading teacher model from {TEACHER_MODEL_PATH[args.model_name_teacher]}")
     state_dict = torch.load(TEACHER_MODEL_PATH[args.model_name_teacher], "cpu")
     state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
     llava_vit_teacher.load_state_dict(state_dict, strict=True)
-
-    llava_vit_encoder = torch.compile(llava_vit_encoder)
-    # llava_vit_decoder = torch.compile(llava_vit_decoder)
     llava_vit_teacher = torch.compile(llava_vit_teacher)
 
     # Freeze teacher model parameters
@@ -356,6 +299,7 @@ def main():
 
     # Define loss function
     mse_loss = torch.nn.MSELoss().cuda()
+    smooth_l1 = torch.nn.SmoothL1Loss().cuda()
 
     # Set up data loaders
     list_dali_dataloader = []
@@ -363,11 +307,12 @@ def main():
 
     for head_id, dataset_config in enumerate(args.list_dataset):
         if args.debug:
+
             from dataloader.data_v2_video import SyntheticDataIter
             train_iter = SyntheticDataIter(args.batch_size, args.image_size[0], local_rank)
         elif dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video import dali_dataloader
 
+            from dataloader.data_decord_video import dali_dataloader
             num_workers = 4
             train_iter = dali_dataloader(
                 file_list=dataset_config.prefix,
@@ -382,7 +327,6 @@ def main():
                 shard_id=dataset_config.shard_id,
                 num_shards=dataset_config.num_shards,
             )
-
         elif dataset_config.dali_type == "origin":
 
             from dataloader.data_v2 import MultiRecDALIWarper
@@ -395,7 +339,6 @@ def main():
                 shard_id=dataset_config.shard_id,
                 num_shards=dataset_config.num_shards
         )
-
         else:
             raise NotImplementedError(f"Dataloader type {dataset_config.dali_type} not implemented")
 
@@ -433,6 +376,8 @@ def main():
         return
 
     num_samples = 0
+    loss_ema = ScalaMetric()
+    loss_ema.reset()
     # Main training loop
     while global_step < args.total_steps:
         list_data_batch = list_next_data_batch
@@ -443,7 +388,7 @@ def main():
 
         for head_id, dataset_config in enumerate(args.list_dataset):
             head_input = list_data[head_id]
-
+            
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                 # Run encoder with masking
 
@@ -451,62 +396,75 @@ def main():
 
                 # Extract encoder outputs
                 visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, D)
-                mask = enc_out["mask"]                                 # (B, L_full)
-                ids_restore = enc_out["ids_restore"]                   # (B, L_full)
-                patch_grid = enc_out["patch_grid"]                     # (T, Hp, Wp)
 
                 # Run decoder
-                dec_out = llava_vit_decoder_ddp(
-                    visible_embeddings=visible_embeddings,
-                    ids_restore=ids_restore,
-                    mask=mask,
-                    patch_grid=patch_grid
-                )
+                dec_out = llava_vit_decoder_ddp(visible_embeddings)
+
                 decoded_full = dec_out["decoded_full"]  # Full sequence of decoded tokens
 
             # Get teacher model output
             with torch.no_grad():
-                # Reshape [b, c, t, h, w] to [b*t, c, h, w]
-                b, c, t, h, w = head_input.shape
-                head_input_reshaped = head_input.reshape(b*t, c, h, w)
-
                 # Get teacher embeddings and reshape back
-                teacher_output = llava_vit_teacher(head_input_reshaped)
-                teacher_output = teacher_output["visible_embeddings"]
-                teacher_output = teacher_output.reshape(b, t*teacher_output.shape[1], -1)
+                teacher_output = llava_vit_teacher(head_input).detach()[:, 1:, :]  # Skip CLS token
 
                 # Shift teacher output by removing the first frame for proper supervision
                 # Only compute loss on the first (n-1) frames
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                teacher_output = teacher_output[:, teacher_output.shape[1]//t:, :]  # Remove first frame features
-                decoded_full = decoded_full[:, :-(decoded_full.shape[1]//t), :]  # Use only first (n-1) frames
-
-                frames_per_video = args.num_frames - 1
-                tokens_per_frame = decoded_full.shape[1] // frames_per_video
-                decoded_full_img = llava_vit_teacher.head(decoded_full.reshape(b * frames_per_video, tokens_per_frame, -1))
-                teacher_output_img = llava_vit_teacher.head(teacher_output.reshape(b * frames_per_video, tokens_per_frame, -1))
-                loss = mse_loss(decoded_full_img, teacher_output_img)
-
+                if args.ln_mse:
+                    decoded_full = layer_norm(decoded_full, decoded_full.shape[-1:], eps=1e-5)
+                    teacher_output = layer_norm(teacher_output, teacher_output.shape[-1:], eps=1e-5)
+                loss = smooth_l1(decoded_full, teacher_output)
 
             list_loss.append(loss)
-            list_loss_float.append(loss.float())
+            list_loss_float.append(loss.detach().item())
 
-        # Compute total loss and backward pass
         total_loss = sum(list_loss)
-        optimizer.zero_grad()
         total_loss.backward()
 
-        # Apply gradient clipping and step optimizer
-        clip_grad_norm_(llava_vit_encoder.parameters(), max_norm=1, norm_type=2)
-        clip_grad_norm_(llava_vit_decoder.parameters(), max_norm=1, norm_type=2)
-        optimizer.step()
-        lr_scheduler.step()
+        with torch.no_grad():
+            total_loss_scalar = sum(list_loss_float)
+
+            t = torch.tensor([total_loss_scalar], device="cuda", dtype=torch.float32)
+            distributed.all_reduce(t, op=distributed.ReduceOp.AVG)
+            total_loss_scalar = t.item()
+
+            skip_update = False
+            # EMA 检测（达到热身步数且开启阈值时）
+            if args.loss_spike_ratio > 0 and global_step >= args.loss_spike_min_step:
+                if int(loss_ema.avg) == 0:
+                    loss_ema.update(total_loss_scalar)
+
+                if total_loss_scalar > (loss_ema.avg * args.loss_spike_ratio):
+                    skip_update = True
+                    if rank == 0:
+                        log.info(
+                            f"[loss spike] step {global_step}: loss {total_loss_scalar:.6f} > EMA {loss_ema.avg:.6f} * {args.loss_spike_ratio:.2f}, skip update"
+                        )
+                else:
+                    # 仅在非突刺时更新 EMA
+                    loss_ema.update(total_loss_scalar)
+            else:
+                loss_ema.update(total_loss_scalar)
+
+            if global_step % 100 == 0:
+                loss_ema_avg = loss_ema.avg
+                log.info(f"[loss_ema.avg] {loss_ema_avg:.6f}")
+                loss_ema.reset()
+                loss_ema.update(loss_ema_avg)
+
+        if not skip_update:
+            # Apply gradient clipping and step optimizer
+            clip_grad_norm_(llava_vit_encoder.parameters(), max_norm=0.5, norm_type=2)
+            clip_grad_norm_(llava_vit_decoder.parameters(), max_norm=0.5, norm_type=2)
+            optimizer.step()
+            lr_scheduler.step()
+        optimizer.zero_grad()
 
         # Update progress and metrics
         batch_end_callback(
             global_step=global_step,
             lr_scheduler=lr_scheduler,
-            list_loss_float=list_loss_float,
+            list_loss_float=[total_loss_scalar],
             batch_size=args.batch_size,
             num_samples=num_samples
         )
@@ -568,6 +526,9 @@ class BatchEndCallBack(object):
         # 用于计算平均每步时间
         self.step_times = []
         self.max_time_history = 100  # 保留最近100个step的时间来平均
+        
+        # 累计样本数计数器
+        self.total_examples = 0
         
         # Create TensorBoard writer if rank 0
         if rank == 0:
