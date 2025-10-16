@@ -319,7 +319,7 @@ def _build_rope2d_vit(patch_size: int,
 
 
 @register_model
-def mlcd_rope2d_vit_b_16_1024(pretrained: bool = False, **kwargs):
+def mlcd_rope2d_vit_b_16(pretrained: bool = False, **kwargs):
     """
     ViT-B: patch 16, 12 层, 12 头, width=768, 输出 1024
     """

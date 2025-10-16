@@ -6,8 +6,11 @@ from torch import nn
 from typing import Optional, Any, Dict
 
 __all__ = [
-    "pretrain_encoder_small_patch16_224_v10_10_rms_unmask",
-    "pretrain_decoder_small_patch16_224_v10_08_rms"
+    "pretrain_encoder_small_patch16_224_v10_08_rms",
+    "pretrain_encoder_base_patch16_224_v10_08_rms",
+    "pretrain_decoder_small_patch16_224_v10_08_rms",
+    "mlcd_decoder_small_patch16_224_v10_08_rms",
+    "mlcd_decoder_base_patch16_224_v10_08_rms",
 ]
 
 class LlavaViTEncoder(nn.Module):
@@ -24,7 +27,6 @@ class LlavaViTEncoder(nn.Module):
         attn_dropout=0.0,
         use_causal_temporal=True,   # 新增开关：是否启用时间因果
         norm_cls=nn.RMSNorm,
-        mask_ratio=0.5,             # 遮挡比例
     ):
         super().__init__()
 
@@ -66,7 +68,6 @@ class LlavaViTEncoder(nn.Module):
 
         self.half_head_dim = head_dim // 2
         self.video_rope = VideoRotaryEmbeddingSplit466(head_dim)
-        self.mask_ratio = float(mask_ratio)
 
     def mask_mae_style(self, batch_size, t_frames, patches_per_frame, mask_ratio, device):
         total_patches = t_frames * patches_per_frame
@@ -102,7 +103,7 @@ class LlavaViTEncoder(nn.Module):
         frame_ids = visible_indices // patches_per_frame  # (B,N)
         # frame_ids[:,None,:] -> (B,1,N); frame_ids[:,:,None] -> (B,N,1)
         # 我们需要 mask[i,j] = True 当 frame_j > frame_i
-        future = frame_ids.unsqueeze(2) < frame_ids.unsqueeze(1)  # (B,N,N) 这里 frame_i < frame_j
+        future = frame_ids.unsqueeze(1) < frame_ids.unsqueeze(2)  # (B,N,N) 这里 frame_i < frame_j
         # 我们想要 mask[i,j] = True 当 frame_j > frame_i ⇒ frame_ids[:, :, None] < frame_ids[:, None, :]
         # 注意上面 future 的定义是 frame_i < frame_j => 等价 frame_j > frame_i
         attention_mask = future  # True=禁止
@@ -128,7 +129,7 @@ class LlavaViTEncoder(nn.Module):
         tokens = feats.reshape(batch, total_patches, self.hidden_size)
 
         # masking
-        if t_frames == 1 or self.mask_ratio == 0.0:
+        if t_frames == 1:
             # 全部可见，不进行随机遮挡
             visible_indices = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)  # (B, L)
             visible_mask_bool = torch.ones(batch, total_patches, dtype=torch.bool, device=device)        # (B, L)
@@ -282,7 +283,7 @@ class LlavaViTDecoder(nn.Module):
         """
         frame_ids = torch.arange(total_patches, device=device) // patches_per_frame  # (L,)
         # frame_i < frame_j => j 是未来帧 => 屏蔽 (query i 禁止看 key j)
-        causal = frame_ids.unsqueeze(1) < frame_ids.unsqueeze(0)  # (L,L) True 说明列是未来帧
+        causal = frame_ids.unsqueeze(0) < frame_ids.unsqueeze(1)  # (L,L) True 说明列是未来帧
         causal = causal.unsqueeze(0).expand(batch_size, -1, -1).clone()  # (B,L,L)
         return causal  # True = disallowed
 
@@ -459,7 +460,7 @@ class MLCDViTDecoder(nn.Module):
 
 
 @register_model
-def pretrain_encoder_small_patch16_224_v10_10_rms_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
+def pretrain_encoder_small_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
@@ -471,13 +472,17 @@ def pretrain_encoder_small_patch16_224_v10_10_rms_unmask(pretrained: bool = Fals
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
         norm_cls=nn.RMSNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
     )
+    if pretrained:
+        assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
+        state_dict = torch.load(ckpt_path, map_location='cpu')
+        # replace _orig_mod. in keys
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=True)
     return model
 
-
 @register_model
-def pretrain_encoder_base_patch16_224_v10_10_rms_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
+def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
@@ -485,88 +490,22 @@ def pretrain_encoder_base_patch16_224_v10_10_rms_unmask(pretrained: bool = False
         hidden_size=768,
         head_dim=64,
         num_hidden_layers=12,
-        intermediate_size=1536 * 2,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
-    )
-    return model
-
-
-@register_model
-def pretrain_encoder_large_patch16_224_v10_10_rms_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
-    """
-    ViT Encoder for Video MAE-style pretraining."""
-    model = LlavaViTEncoder(
-        patch_size=16,
-        hidden_size=1024,
-        head_dim=64,
-        num_hidden_layers=24,
-        intermediate_size=4096,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
-    )
-    return model
-
-
-@register_model
-def pretrain_encoder_large_patch16_224_v10_10_ln_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
-    """
-    ViT Encoder for Video MAE-style pretraining."""
-    model = LlavaViTEncoder(
-        patch_size=16,
-        hidden_size=1024,
-        head_dim=64,
-        num_hidden_layers=24,
-        intermediate_size=1024,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.LayerNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
-    )
-    return model
-
-
-@register_model
-def pretrain_decoder_small_patch16_224_v10_10_rms_in_768(pretrained: bool = False, **kwargs):
-    model = LlavaViTDecoder(
-        hidden_size=384,             # decoder hidden
-        encoder_hidden_size=768,     # must match encoder hidden_size
-        head_dim=64,
-        num_hidden_layers=3,
-        intermediate_size=1536,      # 384 * 4
-        feature_proj_dim=384,        # final feature dimension
+        intermediate_size=3072,
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
         norm_cls=nn.RMSNorm,
     )
     if pretrained:
-        pass
-    return model
-
-@register_model
-def pretrain_decoder_base_patch16_224_v10_10_ln_in_1024(pretrained: bool = False, **kwargs):
-    model = LlavaViTDecoder(
-        hidden_size=768,             # decoder hidden
-        encoder_hidden_size=1024,     # must match encoder hidden_size
-        head_dim=64,
-        num_hidden_layers=3,
-        intermediate_size=4096,
-        feature_proj_dim=768,        # final feature dimension
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.LayerNorm,
-    )
-    if pretrained:
-        pass
+        assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
+        state_dict = torch.load(ckpt_path, map_location='cpu')
+        # replace _orig_mod. in keys
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=True)
     return model
 
 
 @register_model
-def pretrain_decoder_small_patch16_224_v10_10_rms(pretrained: bool = False, **kwargs):
+def pretrain_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
     model = LlavaViTDecoder(
         hidden_size=384,             # decoder hidden
         encoder_hidden_size=384,     # must match encoder hidden_size
@@ -582,24 +521,71 @@ def pretrain_decoder_small_patch16_224_v10_10_rms(pretrained: bool = False, **kw
         pass
     return model
 
-# @register_model
-# def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
-#     """
-#     ViT Encoder for Video MAE-style pretraining."""
-#     model = LlavaViTEncoder(
-#         patch_size=16,
-#         hidden_size=768,
-#         head_dim=64,
-#         num_hidden_layers=12,
-#         intermediate_size=3072,
-#         act_layer=nn.GELU,
-#         use_gradient_checkpointing=False,
-#         norm_cls=nn.RMSNorm,
-#     )
-#     if pretrained:
-#         assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
-#         state_dict = torch.load(ckpt_path, map_location='cpu')
-#         # replace _orig_mod. in keys
-#         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-#         model.load_state_dict(state_dict, strict=True)
-#     return model
+
+@register_model
+def mlcd_decoder_small_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+    """MLCD Decoder
+    """
+    model = MLCDViTDecoder(
+        hidden_size=384,             # decoder hidden
+        encoder_hidden_size=384,     # must match encoder hidden_size
+        head_dim=64,
+        num_hidden_layers=4,
+        intermediate_size=1536,      # 384 * 4
+        feature_proj_dim=384,        # final feature dimension
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+    )
+    if pretrained:
+        pass
+    return model
+
+
+@register_model
+def mlcd_decoder_base_patch16_224_v10_08_rms(pretrained: bool = False, **kwargs):
+    """MLCD Decoder
+    """
+    model = MLCDViTDecoder(
+        hidden_size=768,             # decoder hidden
+        encoder_hidden_size=768,     # must match encoder hidden_size
+        head_dim=64,
+        num_hidden_layers=1,
+        intermediate_size=3072,      # 384 * 4
+        feature_proj_dim=768,        # final feature dimension
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+    )
+    if pretrained:
+        pass
+    return model
+
+# ---------------- Main test: encoder + decoder ----------------
+if __name__ == "__main__":
+    torch.manual_seed(42)
+    B = 2
+    C = 3
+    T = 1
+    S = 224
+
+    video = torch.randn(B, C, T, S, S)
+
+    encoder = pretrain_encoder_small_patch16_224_v10_08_rms()
+    decoder = pretrain_decoder_small_patch16_224_v10_08_rms()
+
+    with torch.no_grad():
+        enc_out = encoder(video)
+
+    embeddings = enc_out["visible_embeddings"]         # (B, L, 360)
+    print("=== Encoder ===")
+    print("video:", tuple(video.shape))
+    print("embeddings:", tuple(embeddings.shape))
+
+    with torch.no_grad():
+        dec_out = decoder(embeddings)
+
+    decoded_full = dec_out["decoded_full"]     # (B, L, 384)
+
+    print("\n=== Decoder ===")
+    print("decoded_full:", tuple(decoded_full.shape))
+    assert decoded_full.size(1) == embeddings.size(1)
+    print("\nDone.")

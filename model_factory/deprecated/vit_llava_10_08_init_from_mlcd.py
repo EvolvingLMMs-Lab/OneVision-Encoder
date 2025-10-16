@@ -1,13 +1,16 @@
+from collections import OrderedDict
+from typing import Dict
+
 import torch
-from model_factory.layers import TransformerCausal, VideoRotaryEmbeddingSplit466
 from timm.models.layers import to_2tuple, trunc_normal_
 from timm.models.registry import register_model
 from torch import nn
-from typing import Optional, Any, Dict
+
+from model_factory.layers import (TransformerCausal,
+                                  VideoRotaryEmbeddingSplit466)
 
 __all__ = [
-    "pretrain_encoder_small_patch16_224_v10_10_rms_unmask",
-    "pretrain_decoder_small_patch16_224_v10_08_rms"
+    "pretrain_encoder_base_patch16_224_v10_08_rms_init_from_mlcd",
 ]
 
 class LlavaViTEncoder(nn.Module):
@@ -23,8 +26,7 @@ class LlavaViTEncoder(nn.Module):
         use_gradient_checkpointing=False,
         attn_dropout=0.0,
         use_causal_temporal=True,   # 新增开关：是否启用时间因果
-        norm_cls=nn.RMSNorm,
-        mask_ratio=0.5,             # 遮挡比例
+        norm_cls=nn.LayerNorm,
     ):
         super().__init__()
 
@@ -66,7 +68,6 @@ class LlavaViTEncoder(nn.Module):
 
         self.half_head_dim = head_dim // 2
         self.video_rope = VideoRotaryEmbeddingSplit466(head_dim)
-        self.mask_ratio = float(mask_ratio)
 
     def mask_mae_style(self, batch_size, t_frames, patches_per_frame, mask_ratio, device):
         total_patches = t_frames * patches_per_frame
@@ -102,7 +103,7 @@ class LlavaViTEncoder(nn.Module):
         frame_ids = visible_indices // patches_per_frame  # (B,N)
         # frame_ids[:,None,:] -> (B,1,N); frame_ids[:,:,None] -> (B,N,1)
         # 我们需要 mask[i,j] = True 当 frame_j > frame_i
-        future = frame_ids.unsqueeze(2) < frame_ids.unsqueeze(1)  # (B,N,N) 这里 frame_i < frame_j
+        future = frame_ids.unsqueeze(1) < frame_ids.unsqueeze(2)  # (B,N,N) 这里 frame_i < frame_j
         # 我们想要 mask[i,j] = True 当 frame_j > frame_i ⇒ frame_ids[:, :, None] < frame_ids[:, None, :]
         # 注意上面 future 的定义是 frame_i < frame_j => 等价 frame_j > frame_i
         attention_mask = future  # True=禁止
@@ -128,7 +129,7 @@ class LlavaViTEncoder(nn.Module):
         tokens = feats.reshape(batch, total_patches, self.hidden_size)
 
         # masking
-        if t_frames == 1 or self.mask_ratio == 0.0:
+        if t_frames == 1:
             # 全部可见，不进行随机遮挡
             visible_indices = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)  # (B, L)
             visible_mask_bool = torch.ones(batch, total_patches, dtype=torch.bool, device=device)        # (B, L)
@@ -282,7 +283,7 @@ class LlavaViTDecoder(nn.Module):
         """
         frame_ids = torch.arange(total_patches, device=device) // patches_per_frame  # (L,)
         # frame_i < frame_j => j 是未来帧 => 屏蔽 (query i 禁止看 key j)
-        causal = frame_ids.unsqueeze(1) < frame_ids.unsqueeze(0)  # (L,L) True 说明列是未来帧
+        causal = frame_ids.unsqueeze(0) < frame_ids.unsqueeze(1)  # (L,L) True 说明列是未来帧
         causal = causal.unsqueeze(0).expand(batch_size, -1, -1).clone()  # (B,L,L)
         return causal  # True = disallowed
 
@@ -431,6 +432,7 @@ class MLCDViTDecoder(nn.Module):
             self.feature_head = nn.Identity()
             self.out_feature_dim = hidden_size
 
+
     def forward(
         self,
         full_embeddings: torch.Tensor,   # (B, L_full, encoder_hidden_size) 已经是完整序列
@@ -445,9 +447,9 @@ class MLCDViTDecoder(nn.Module):
             dtype=x_full.dtype
         )
 
-        x_in = self.ln_in(x_full).permute(1, 0, 2)          # (L,B,H)
+        x_full = x_full.permute(1, 0, 2)  # (L,B,H)
         x_out = self.transformer(
-            x_in,
+            x_full,
             rotary_pos_emb=freqs_full,
             attention_mask=None
         ).permute(1, 0, 2)                                   # (B,L,H)
@@ -458,103 +460,17 @@ class MLCDViTDecoder(nn.Module):
         }
 
 
+
 @register_model
-def pretrain_encoder_small_patch16_224_v10_10_rms_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
+def mlcd_decoder_base_patch16_224_v10_08_simple_layer(pretrained: bool = False, **kwargs):
+    """MLCD Decoder
     """
-    ViT Encoder for Video MAE-style pretraining."""
-    model = LlavaViTEncoder(
-        patch_size=16,
-        hidden_size=384,
-        head_dim=64,
-        num_hidden_layers=12,
-        intermediate_size=1536,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
-    )
-    return model
-
-
-@register_model
-def pretrain_encoder_base_patch16_224_v10_10_rms_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
-    """
-    ViT Encoder for Video MAE-style pretraining."""
-    model = LlavaViTEncoder(
-        patch_size=16,
-        hidden_size=768,
-        head_dim=64,
-        num_hidden_layers=12,
-        intermediate_size=1536 * 2,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
-    )
-    return model
-
-
-@register_model
-def pretrain_encoder_large_patch16_224_v10_10_rms_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
-    """
-    ViT Encoder for Video MAE-style pretraining."""
-    model = LlavaViTEncoder(
-        patch_size=16,
-        hidden_size=1024,
-        head_dim=64,
-        num_hidden_layers=24,
-        intermediate_size=4096,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
-    )
-    return model
-
-
-@register_model
-def pretrain_encoder_large_patch16_224_v10_10_ln_unmask(pretrained: bool = False, ckpt_path=None,**kwargs):
-    """
-    ViT Encoder for Video MAE-style pretraining."""
-    model = LlavaViTEncoder(
-        patch_size=16,
-        hidden_size=1024,
-        head_dim=64,
-        num_hidden_layers=24,
-        intermediate_size=1024,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.LayerNorm,
-        mask_ratio=0.0,  # 不遮挡任何 patch
-    )
-    return model
-
-
-@register_model
-def pretrain_decoder_small_patch16_224_v10_10_rms_in_768(pretrained: bool = False, **kwargs):
-    model = LlavaViTDecoder(
-        hidden_size=384,             # decoder hidden
+    model = MLCDViTDecoder(
+        hidden_size=768,             # decoder hidden
         encoder_hidden_size=768,     # must match encoder hidden_size
         head_dim=64,
-        num_hidden_layers=3,
-        intermediate_size=1536,      # 384 * 4
-        feature_proj_dim=384,        # final feature dimension
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
-    )
-    if pretrained:
-        pass
-    return model
-
-@register_model
-def pretrain_decoder_base_patch16_224_v10_10_ln_in_1024(pretrained: bool = False, **kwargs):
-    model = LlavaViTDecoder(
-        hidden_size=768,             # decoder hidden
-        encoder_hidden_size=1024,     # must match encoder hidden_size
-        head_dim=64,
-        num_hidden_layers=3,
-        intermediate_size=4096,
+        num_hidden_layers=1,
+        intermediate_size=3072,      # 384 * 4
         feature_proj_dim=768,        # final feature dimension
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
@@ -565,41 +481,165 @@ def pretrain_decoder_base_patch16_224_v10_10_ln_in_1024(pretrained: bool = False
     return model
 
 
+
 @register_model
-def pretrain_decoder_small_patch16_224_v10_10_rms(pretrained: bool = False, **kwargs):
-    model = LlavaViTDecoder(
-        hidden_size=384,             # decoder hidden
-        encoder_hidden_size=384,     # must match encoder hidden_size
+def pretrain_encoder_base_patch16_224_v10_08_rms_init_from_mlcd(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
+    model = LlavaViTEncoder(
+        patch_size=16,
+        hidden_size=768,
         head_dim=64,
-        num_hidden_layers=3,
-        intermediate_size=1536,      # 384 * 4
-        feature_proj_dim=384,        # final feature dimension
+        num_hidden_layers=12,
+        intermediate_size=3072,
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
+        norm_cls=nn.LayerNorm,
     )
     if pretrained:
-        pass
+        assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
+        state_dict = torch.load(ckpt_path, map_location='cpu')
+        # replace _orig_mod. in keys
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=True)
     return model
 
-# @register_model
-# def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
-#     """
-#     ViT Encoder for Video MAE-style pretraining."""
-#     model = LlavaViTEncoder(
-#         patch_size=16,
-#         hidden_size=768,
-#         head_dim=64,
-#         num_hidden_layers=12,
-#         intermediate_size=3072,
-#         act_layer=nn.GELU,
-#         use_gradient_checkpointing=False,
-#         norm_cls=nn.RMSNorm,
-#     )
-#     if pretrained:
-#         assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
-#         state_dict = torch.load(ckpt_path, map_location='cpu')
-#         # replace _orig_mod. in keys
-#         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-#         model.load_state_dict(state_dict, strict=True)
-#     return model
+
+def simple_replace_keys(state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """
+    纯字符串重命名，不做任何权重拼接。
+    适用：老模型本来就有 in_proj.weight/.bias，只是命名不同（如 in_proj_weight -> in_proj.weight）。
+    """
+    rename_rules = [
+        # 注意力 in_proj 命名规范化
+        ("attn.in_proj_weight", "attn.in_proj.weight"),
+        ("attn.in_proj_bias", "attn.in_proj.bias"),
+        ("self_attn.", "attn."),  # 如果老代码叫 self_attn
+
+        # MLP 命名规范化
+        ("mlp.fc1.", "mlp.0."),
+        ("mlp.fc2.", "mlp.2."),
+        ("mlp.c_fc.", "mlp.0."),
+        ("mlp.c_proj.", "mlp.2."),
+
+        # 可选：LayerNorm 命名统一
+        ("ln1.", "ln_1."),
+        ("ln2.", "ln_2."),
+    ]
+    new_state = OrderedDict()
+    for k, v in state.items():
+        nk = k
+        for old, new in rename_rules:
+            if old in nk:
+                nk = nk.replace(old, new)
+        new_state[nk] = v
+    return new_state
+
+
+def merge_qkv_to_inproj(state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """
+    若存在 q_proj/k_proj/v_proj，则拼接为 attn.in_proj.weight/bias。
+    如果没有 q/k/v，则不改动。
+    """
+    state = OrderedDict(state)
+    # 找到所有 block 的前缀，如 layers.0., blocks.3. 等
+    prefixes = set()
+    for k in state.keys():
+        if ".attn." in k or ".self_attn." in k:
+            p = k.split(".attn.")[0]
+            if p == k:  # 可能是 self_attn
+                p = k.split(".self_attn.")[0]
+            prefixes.add(p + ".")
+    for base in sorted(prefixes):
+        attn_name = "attn."
+        if any(k.startswith(base + "self_attn.") for k in state.keys()):
+            attn_name = "self_attn."
+
+        # q/k/v keys
+        qw = state.get(base + attn_name + "q_proj.weight")
+        kw = state.get(base + attn_name + "k_proj.weight")
+        vw = state.get(base + attn_name + "v_proj.weight")
+        qb = state.get(base + attn_name + "q_proj.bias")
+        kb = state.get(base + attn_name + "k_proj.bias")
+        vb = state.get(base + attn_name + "v_proj.bias")
+
+        has_w = (qw is not None) and (kw is not None) and (vw is not None)
+        if not has_w:
+            continue
+
+        in_w = torch.cat([qw, kw, vw], dim=0)  # (3*C, C)
+        state[base + "attn.in_proj.weight"] = in_w
+
+        if (qb is not None) and (kb is not None) and (vb is not None):
+            in_b = torch.cat([qb, kb, vb], dim=0)  # (3*C,)
+            state[base + "attn.in_proj.bias"] = in_b
+
+        # 移除旧的 q/k/v 参数
+        for name in ["q_proj", "k_proj", "v_proj"]:
+            state.pop(base + attn_name + f"{name}.weight", None)
+            state.pop(base + attn_name + f"{name}.bias", None)
+
+        # 把 self_attn. 统一成 attn.
+        if attn_name == "self_attn.":
+            keys_to_move = [k for k in list(state.keys()) if k.startswith(base + "self_attn.")]
+            for k in keys_to_move:
+                v = state.pop(k)
+                state[base + k.replace("self_attn.", "attn.", 1)] = v
+
+    # 最后跑一遍简单重命名，统一 in_proj_weight -> in_proj.weight、mlp.fc1->mlp.0 等
+    state = simple_replace_keys(state)
+    return state
+
+
+def apply_replaces(k: str) -> str:
+    # 这里按需加/删规则即可
+    pairs = [
+        ("transformer.resblocks.", "transformer.layers."),
+        ("attn.in_proj_weight", "attn.in_proj.weight"),
+        ("attn.in_proj_bias", "attn.in_proj.bias"),
+        # 可选：有些仓库把 self_attn 命名为 attn
+        ("self_attn.", "attn."),
+        # 可选：MLP 老命名
+        ("mlp.fc1.", "mlp.0."),
+        ("mlp.fc2.", "mlp.2."),
+        ("mlp.c_fc.", "mlp.0."),
+        ("mlp.c_proj.", "mlp.2."),
+    ]
+    for old, new in pairs:
+        if old in k:
+            k = k.replace(old, new)
+    return k
+
+def remap_and_filter(ckpt: dict, target_keys: set) -> "OrderedDict[str, torch.Tensor]":
+    out = OrderedDict()
+    for k, v in ckpt.items():
+        nk = apply_replaces(k)
+        # 丢掉模型不需要的键（例如 ln_pre/ln_post/class_pos_emb/proj 等）
+        if nk in target_keys:
+            out[nk] = v
+        else:
+            print(f"Skip loading weight for {nk}, not in target model.")
+    return out
+
+
+# ---------------- Main test: encoder + decoder ----------------
+if __name__ == "__main__":
+    model = pretrain_encoder_base_patch16_224_v10_08_rms_init_from_mlcd(pretrained=False)
+    model.eval()
+    state_dict = torch.load("/video_vit/pretrain_models/deepglint/mlcd/mlcd_vit_b_16_512px.pt", map_location='cpu')
+    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+
+    # 如果老模型是 q_proj/k_proj/v_proj 三路：
+    new_state = simple_replace_keys(state_dict)
+    # 关键：拿到模型的目标键集合
+    target_keys = set(model.state_dict().keys())
+    # 演示里假设你已经有 model:
+    target_keys = set(model.state_dict().keys())
+
+    # 请把上一行的注释解除，下面这行才会生效
+    new_state = remap_and_filter(new_state, target_keys)
+
+    # 然后加载（strict=False 容忍个别未对齐）
+    model.load_state_dict(new_state, strict=True)
+    torch.save(model.state_dict(), "/video_vit/pretrain_models/deepglint/mlcd/mlcd_vit_b_16_512px_fixed_for_llava_vit_init.pt")
+    print("Loaded pretrained weights.")

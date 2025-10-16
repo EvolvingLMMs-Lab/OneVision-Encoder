@@ -17,6 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 import model_factory
 from dataset import DATASET_REGISTRY
 from training.lr_scheduler import PolynomialLRWarmup
+from torch.nn.functional import layer_norm
 
 torch._dynamo.config.optimize_ddp = False
 
@@ -33,11 +34,11 @@ parser.add_argument(
 )
 # ========== 数据与输入 ==========
 parser.add_argument(
-    "--list_dataset", nargs='+', default=["ssv2_tmpfs"],
+    "--list_dataset", nargs='+', default=["ssv2_tmpfs","distill_mlcd_coyo_laion"],
     help="数据集名称列表（可传多个）"
 )
 parser.add_argument(
-    "--list_batch_size", nargs='+', default=["128"],
+    "--list_batch_size", nargs='+', default=[32, 32],
     help="批大小列表（可用于多配置循环，如 64 128）"
 )
 parser.add_argument(
@@ -60,13 +61,18 @@ parser.add_argument(
 # ========== 模型 ==========
 parser.add_argument(
     "--model_name_encoder",
-    default="pretrain_encoder_small_patch16_224_v10_03",
+    default="pretrain_encoder_small_patch16_224_v10_08_rms",
     help="编码器模型名称/结构标识"
 )
 parser.add_argument(
-    "--model_name_decoder",
-    default="pretrain_decoder_small_patch16_224_v10_03",
-    help="解码器模型名称/结构标识"
+    "--model_name_decoder_video",
+    default="pretrain_decoder_small_patch16_224_v10_08_rms",
+    help="视频解码器模型名称/结构标识"
+)
+parser.add_argument(
+    "--model_name_decoder_image",
+    default="mlcd_decoder_small_patch16_224_v10_08_rms",
+    help="图像解码器模型名称/结构标识"
 )
 parser.add_argument(
     "--model_name_teacher",
@@ -75,12 +81,16 @@ parser.add_argument(
     help="教师模型名称（知识蒸馏用）"
 )
 parser.add_argument(
-    "--init_encoder", default="",
+    "--init_encoder", default="/video_vit/xiangan/checkpoint_llava_vit/pre_distill_s_16/encoder_checkpoint_241000.pt",
     help="编码器初始权重路径（留空则随机初始化/默认权重）"
 )
 parser.add_argument(
-    "--init_decoder", default="",
-    help="解码器初始权重路径（留空则随机初始化/默认权重）"
+    "--init_decoder_video", default="",
+    help="视频解码器初始权重路径（留空则随机初始化/默认权重）"
+)
+parser.add_argument(
+    "--init_decoder_image", default="/video_vit/xiangan/checkpoint_llava_vit/pre_distill_s_16/decoder_checkpoint_241000.pt",
+    help="图像解码器初始权重路径（留空则随机初始化/默认权重）"
 )
 parser.add_argument(
     "--finetune_backbone", type=int, default=1,
@@ -180,7 +190,7 @@ def unwrap_module(model):
         return model
 
 
-def save_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler, global_step, keep_num=5):
+def save_checkpoint(output_dir, encoder, decoder_video, decoder_image, optimizer, lr_scheduler, global_step, keep_num=5):
     """Save model checkpoint with encoder and decoder models."""
     if rank != 0:
         return
@@ -193,9 +203,13 @@ def save_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler, globa
     torch.save(encoder_state_dict, encoder_path)
 
     # Save decoder
-    decoder_path = os.path.join(output_dir, f"decoder_checkpoint_{global_step}.pt")
-    decoder_state_dict = unwrap_module(decoder).state_dict()
-    torch.save(decoder_state_dict, decoder_path)
+    decoder_video_path = os.path.join(output_dir, f"decoder_video_checkpoint_{global_step}.pt")
+    decoder_video_state_dict = unwrap_module(decoder_video).state_dict()
+    torch.save(decoder_video_state_dict, decoder_video_path)
+
+    decoder_image_path = os.path.join(output_dir, f"decoder_image_checkpoint_{global_step}.pt")
+    decoder_image_state_dict = unwrap_module(decoder_image).state_dict()
+    torch.save(decoder_image_state_dict, decoder_image_path)
 
     # Save optimizer and scheduler state
     optim_path = os.path.join(output_dir, f"optimizer_{global_step}.pt")
@@ -219,13 +233,13 @@ def save_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler, globa
     if len(all_checkpoints) > keep_num:
         all_checkpoints.sort()
         for step in all_checkpoints[:-keep_num]:
-            for prefix in ["encoder_checkpoint_", "decoder_checkpoint_", "optimizer_"]:
+            for prefix in ["encoder_checkpoint_", "decoder_video_checkpoint_", "decoder_image_checkpoint_", "optimizer_"]:
                 file_path = os.path.join(output_dir, f"{prefix}{step}.pt")
                 if os.path.exists(file_path):
                     os.remove(file_path)
 
 
-def load_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler):
+def load_checkpoint(output_dir, encoder, decoder_video, decoder_image, optimizer, lr_scheduler):
     """Load model checkpoint for both encoder and decoder."""
     # Find the latest checkpoint
     latest_step = -1
@@ -247,11 +261,17 @@ def load_checkpoint(output_dir, encoder, decoder, optimizer, lr_scheduler):
         log.info(f"Loaded encoder checkpoint from step {latest_step}")
 
     # Load decoder
-    decoder_path = os.path.join(output_dir, f"decoder_checkpoint_{latest_step}.pt")
-    if os.path.exists(decoder_path):
-        decoder_state_dict = torch.load(decoder_path, map_location="cpu")
-        unwrap_module(decoder).load_state_dict(decoder_state_dict)
-        log.info(f"Loaded decoder checkpoint from step {latest_step}")
+    decoder_video_path = os.path.join(output_dir, f"video_decoder_checkpoint_{latest_step}.pt")
+    if os.path.exists(decoder_video_path):
+        decoder_video_state_dict = torch.load(decoder_video_path, map_location="cpu")
+        unwrap_module(decoder_video).load_state_dict(decoder_video_state_dict)
+        log.info(f"Loaded video decoder checkpoint from step {latest_step}")
+
+    decoder_image_path = os.path.join(output_dir, f"image_decoder_checkpoint_{latest_step}.pt")
+    if os.path.exists(decoder_image_path):
+        decoder_image_state_dict = torch.load(decoder_image_path, map_location="cpu")
+        unwrap_module(decoder_image).load_state_dict(decoder_image_state_dict)
+        log.info(f"Loaded image decoder checkpoint from step {latest_step}")
 
     # Load optimizer and scheduler state
     optim_path = os.path.join(output_dir, f"optimizer_{latest_step}.pt")
@@ -287,9 +307,8 @@ def main():
 
     # Initialize models
     llava_vit_encoder = create_model(args.model_name_encoder).cuda().train()
-    llava_vit_decoder = create_model(args.model_name_decoder).cuda().train()
-    # llava_vit_encoder = torch.compile(llava_vit_encoder)
-    # llava_vit_decoder = torch.compile(llava_vit_decoder)
+    llava_vit_decoder_video = create_model(args.model_name_decoder_video).cuda().train()
+    llava_vit_decoder_image = create_model(args.model_name_decoder_image).cuda().train()
 
     # Initialize teacher model and load pre-trained weights
     llava_vit_teacher = create_model("mlcd_rope2d_vit_s_16").cuda().eval()
@@ -309,16 +328,23 @@ def main():
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
         llava_vit_encoder.load_state_dict(state_dict, strict=False)
 
-    if args.init_decoder:
-        log.info(f"Initializing decoder from {args.init_decoder}")
-        state_dict = torch.load(args.init_decoder, "cpu")
+    if args.init_decoder_video:
+        log.info(f"Initializing video decoder from {args.init_decoder_video}")
+        state_dict = torch.load(args.init_decoder_video, "cpu")
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-        llava_vit_decoder.load_state_dict(state_dict, strict=False)
+        llava_vit_decoder_video.load_state_dict(state_dict, strict=False)
+
+    if args.init_decoder_image:
+        log.info(f"Initializing image decoder from {args.init_decoder_image}")
+        state_dict = torch.load(args.init_decoder_image, "cpu")
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        llava_vit_decoder_image.load_state_dict(state_dict, strict=False)
 
     # Set up optimizer
     parameters = [
         {"params": llava_vit_encoder.parameters()},
-        {"params": llava_vit_decoder.parameters()}
+        {"params": llava_vit_decoder_video.parameters()},
+        {"params": llava_vit_decoder_image.parameters()}
     ]
 
     optimizer_cls = torch.optim.AdamW
@@ -328,7 +354,14 @@ def main():
     )
 
     # Try to load checkpoint if exists
-    checkpoint_result = load_checkpoint(args.output, llava_vit_encoder, llava_vit_decoder, optimizer, lr_scheduler)
+    checkpoint_result = load_checkpoint(
+        args.output,
+        llava_vit_encoder,
+        llava_vit_decoder_video,
+        llava_vit_decoder_image,
+        optimizer,
+        lr_scheduler)
+
     if checkpoint_result is not None:
         global_step = checkpoint_result['global_step']
         log.info(f"Resuming from step {global_step}")
@@ -340,7 +373,8 @@ def main():
             bucket_cap_mb=32, find_unused_parameters=True, static_graph=True)
 
     llava_vit_encoder_ddp = wrap_ddp(llava_vit_encoder)
-    llava_vit_decoder_ddp = wrap_ddp(llava_vit_decoder)
+    llava_vit_decoder_video_ddp = wrap_ddp(llava_vit_decoder_video)
+    llava_vit_decoder_image_ddp = wrap_ddp(llava_vit_decoder_image)
 
     # Define loss function
     mse_loss = torch.nn.MSELoss().cuda()
@@ -431,43 +465,59 @@ def main():
 
         for head_id, dataset_config in enumerate(args.list_dataset):
             head_input = list_data[head_id]
+            if dataset_config.dali_type == "decord":
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    # Run encoder with masking
+                    enc_out = llava_vit_encoder_ddp(head_input, mask_ratio=args.mask_ratio)
+                    # Extract encoder outputs
+                    visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, D)
+                    mask = enc_out["mask"]                                 # (B, L_full)
+                    ids_restore = enc_out["ids_restore"]                   # (B, L_full)
+                    patch_grid = enc_out["patch_grid"]                     # (T, Hp, Wp)
+                    # Run decoder
+                    dec_out = llava_vit_decoder_video_ddp(
+                        visible_embeddings=visible_embeddings,
+                        ids_restore=ids_restore,
+                        mask=mask,
+                        patch_grid=patch_grid
+                    )
+                    decoded_full = dec_out["decoded_full"]  # Full sequence of decoded tokens
+                # Get teacher model output
+                with torch.no_grad():
+                    # Reshape [b, c, t, h, w] to [b*t, c, h, w]
+                    b, c, t, h, w = head_input.shape
+                    head_input_reshaped = head_input.reshape(b*t, c, h, w)
+                    # Get teacher embeddings and reshape back
+                    teacher_output = llava_vit_teacher(head_input_reshaped)[:, 1:, :]  # Skip CLS token
+                    teacher_output = teacher_output.reshape(b, t*teacher_output.shape[1], -1)
+                    # Shift teacher output by removing the first frame for proper supervision
+                    # Only compute loss on the first (n-1) frames
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    teacher_output = teacher_output[:, teacher_output.shape[1]//t:, :]  # Remove first frame features
+                    decoded_full = decoded_full[:, :-(decoded_full.shape[1]//t), :]  # Use only first (n-1) frames
+                    teacher_output = layer_norm(teacher_output, teacher_output.shape[-1:], eps=1e-5)
+                    decoded_full = layer_norm(decoded_full, decoded_full.shape[-1:], eps=1e-5)
+                    loss = mse_loss(decoded_full, teacher_output)
 
-            with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                # Run encoder with masking
-
-                enc_out = llava_vit_encoder_ddp(head_input, mask_ratio=args.mask_ratio)
-
-                # Extract encoder outputs
-                visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, D)
-                mask = enc_out["mask"]                                 # (B, L_full)
-                ids_restore = enc_out["ids_restore"]                   # (B, L_full)
-                patch_grid = enc_out["patch_grid"]                     # (T, Hp, Wp)
-
-                # Run decoder
-                dec_out = llava_vit_decoder_ddp(
-                    visible_embeddings=visible_embeddings,
-                    ids_restore=ids_restore,
-                    mask=mask,
-                    patch_grid=patch_grid
-                )
-                decoded_full = dec_out["decoded_full"]  # Full sequence of decoded tokens
-
-            # Get teacher model output
-            with torch.no_grad():
-                # Reshape [b, c, t, h, w] to [b*t, c, h, w]
-                b, c, t, h, w = head_input.shape
-                head_input_reshaped = head_input.reshape(b*t, c, h, w)
-
-                # Get teacher embeddings and reshape back
-                teacher_output = llava_vit_teacher(head_input_reshaped)[:, 1:, :]  # Skip CLS token
-                teacher_output = teacher_output.reshape(b, t*teacher_output.shape[1], -1)
-
-                # Shift teacher output by removing the first frame for proper supervision
-                # Only compute loss on the first (n-1) frames
-            with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                teacher_output = teacher_output[:, teacher_output.shape[1]//t:, :]  # Remove first frame features
-                decoded_full = decoded_full[:, :-(decoded_full.shape[1]//t), :]  # Use only first (n-1) frames
-                loss = mse_loss(decoded_full, teacher_output)
+            elif dataset_config.dali_type == "origin":
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    # Run encoder with masking
+                    enc_out = llava_vit_encoder_ddp(head_input, mask_ratio=0.0)
+                    # Extract encoder outputs
+                    visible_embeddings = enc_out["visible_embeddings"]     # (B, N_vis, D)
+                    # Run decoder
+                    dec_out = llava_vit_decoder_image_ddp(visible_embeddings)
+                    decoded_full = dec_out["decoded_full"]  # Full sequence of decoded tokens
+                # Get teacher model output
+                with torch.no_grad():
+                    # Get teacher embeddings and reshape back
+                    teacher_output = llava_vit_teacher(head_input)[:, 1:, :]  # Skip CLS token
+                    # Shift teacher output by removing the first frame for proper supervision
+                    # Only compute loss on the first (n-1) frames
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    decoded_full = layer_norm(decoded_full, decoded_full.shape[-1:], eps=1e-5)
+                    teacher_output = layer_norm(teacher_output, teacher_output.shape[-1:], eps=1e-5)
+                    loss = mse_loss(decoded_full, teacher_output)
 
             list_loss.append(loss)
             list_loss_float.append(loss.float())
@@ -478,8 +528,9 @@ def main():
         total_loss.backward()
 
         # Apply gradient clipping and step optimizer
-        clip_grad_norm_(llava_vit_encoder.parameters(), max_norm=1, norm_type=2)
-        clip_grad_norm_(llava_vit_decoder.parameters(), max_norm=1, norm_type=2)
+        clip_grad_norm_(llava_vit_encoder.parameters(), max_norm=0.5, norm_type=2)
+        clip_grad_norm_(llava_vit_decoder_video.parameters(), max_norm=0.5, norm_type=2)
+        clip_grad_norm_(llava_vit_decoder_image.parameters(), max_norm=0.5, norm_type=2)
         optimizer.step()
         lr_scheduler.step()
 
@@ -499,7 +550,8 @@ def main():
             save_checkpoint(
                 args.output,
                 llava_vit_encoder_ddp,
-                llava_vit_decoder_ddp,
+                llava_vit_decoder_video_ddp,
+                llava_vit_decoder_image_ddp,
                 optimizer,
                 lr_scheduler,
                 global_step
@@ -518,7 +570,8 @@ def main():
     save_checkpoint(
         args.output,
         llava_vit_encoder_ddp,
-        llava_vit_decoder_ddp,
+        llava_vit_decoder_video_ddp,
+        llava_vit_decoder_image_ddp,
         optimizer,
         lr_scheduler,
         global_step
