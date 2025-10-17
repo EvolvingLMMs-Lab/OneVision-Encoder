@@ -200,7 +200,8 @@ def main():
         assert os.path.exists(args.init_backbone)
         state_dict = torch.load(args.init_backbone, "cpu")
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-        backbone.load_state_dict(state_dict, strict=False)
+        backbone.load_state_dict(state_dict, strict=True)
+        logger.info(f"Loaded backbone weights from {args.init_backbone}")
 
     backbone.requires_grad_(bool(args.finetune_backbone))
     backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
@@ -257,9 +258,11 @@ def main():
                 if init_partial_fc.endswith(".npy"):
                     _weight = torch.from_numpy(np.load(init_partial_fc)).cuda()
                     partial_fc.weight = torch.nn.Parameter(_weight)
+                    logger.info(f"Loaded partial FC weights from {init_partial_fc}")
                 elif init_partial_fc.endswith(".pt"):
                     _weight = torch.load(init_partial_fc, "cpu")
                     partial_fc.load_state_dict(_weight, strict=True)
+                    logger.info(f"Loaded partial FC state from {init_partial_fc}")
             else:
                 raise
 

@@ -183,10 +183,9 @@ class LlavaViTEncoder(nn.Module):
             attention_mask=attention_mask        # (B,N,N) or None
         )
         out = out.permute(1, 0, 2)  # (B,N,C)
-        # out = self.ln_post(out)
 
         if self.use_head:
-            head_output = self.head(out)  # (B, hidden_size)
+            head_output = self.head(self.ln_post(out))  # (B, hidden_size)
 
         return {
             "visible_embeddings": out,
@@ -200,21 +199,21 @@ class LlavaViTEncoder(nn.Module):
             "attention_mask_used": attention_mask is not None,
         }
 
-    def load_state_dict(self, state_dict, strict: bool = True):
-        # 不在原地改用户传入的对象，避免副作用；也可用 deepcopy，如果你后面会就地操作 tensor。
-        sd = dict(state_dict)
+    # def load_state_dict(self, state_dict, strict: bool = True):
+    #     # 不在原地改用户传入的对象，避免副作用；也可用 deepcopy，如果你后面会就地操作 tensor。
+    #     sd = dict(state_dict)
 
 
-        # 2) 如果当前模型没有 head，或显式不使用 head，则移除相关权重
-        no_head = (not hasattr(self, 'head')) or (getattr(self, 'head', None) is None)
-        use_head = getattr(self, 'use_head', True)
-        if no_head or (use_head is False):
-            drop_keys = [k for k in list(sd.keys()) if k.startswith('head.')]
-            for k in drop_keys:
-                sd.pop(k)
+    #     # 2) 如果当前模型没有 head，或显式不使用 head，则移除相关权重
+    #     no_head = (not hasattr(self, 'head')) or (getattr(self, 'head', None) is None)
+    #     use_head = getattr(self, 'use_head', True)
+    #     if no_head or (use_head is False):
+    #         drop_keys = [k for k in list(sd.keys()) if k.startswith('head.')]
+    #         for k in drop_keys:
+    #             sd.pop(k)
 
-        # 3) 交给父类去正常加载
-        return super().load_state_dict(sd, strict=strict)
+    #     # 3) 交给父类去正常加载
+    #     return super().load_state_dict(sd, strict=strict)
 
 
 class LlavaViTDecoder(nn.Module):
