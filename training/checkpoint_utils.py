@@ -44,7 +44,7 @@ def save_checkpoint(
     lr_scheduler,
     amp,
     global_step,
-    list_head_name,
+    list_head_names,
     keep_num=5):
     """
     保存训练状态，每个步骤创建一个单独的文件夹，每个PFC头部创建子文件夹
@@ -56,7 +56,7 @@ def save_checkpoint(
         lr_scheduler: 学习率调度器
         amp: 自动混合精度对象
         global_step: 当前全局步数
-        list_head_name: 头部名称列表
+        list_head_names: 头部名称列表
         keep_num: 保留的checkpoint数量
     """
     # 创建当前步骤的文件夹
@@ -83,7 +83,7 @@ def save_checkpoint(
 
     if isinstance(pfc_modules, list):
         # 每个rank保存自己的PFC模块
-        for head_id, (head_name, pfc) in enumerate(zip(list_head_name, pfc_modules)):
+        for head_id, (head_name, pfc) in enumerate(zip(list_head_names, pfc_modules)):
             if isinstance(pfc, list):
                 for i in range(len(pfc)):
                     # print(pfc)
@@ -163,7 +163,7 @@ def clean_old_checkpoints(output_dir, keep_num=5):
 
 
 def load_checkpoint(output_dir, step, backbone, pfc_modules, lr_scheduler, 
-                  amp, list_head_name):
+                  amp, list_head_names):
     """
     从指定步骤的检查点文件夹加载训练状态
     
@@ -174,7 +174,7 @@ def load_checkpoint(output_dir, step, backbone, pfc_modules, lr_scheduler,
         pfc_modules: PFC模块列表
         lr_scheduler: 学习率调度器
         amp: 自动混合精度对象
-        list_head_name: 头部名称列表
+        list_head_names: 头部名称列表
     
     Returns:
         dict: 包含恢复的全局步骤信息
@@ -211,7 +211,7 @@ def load_checkpoint(output_dir, step, backbone, pfc_modules, lr_scheduler,
     
     if isinstance(pfc_modules, list):
         # 加载PFC模块
-        for head_id, (head_name, pfc) in enumerate(zip(list_head_name, pfc_modules)):
+        for head_id, (head_name, pfc) in enumerate(zip(list_head_names, pfc_modules)):
             if isinstance(pfc, list):
                 for i in range(len(pfc)):
                     head_dir = os.path.join(step_dir, f"{head_name}_{i:02d}")

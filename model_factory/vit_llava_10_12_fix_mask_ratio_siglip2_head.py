@@ -418,7 +418,8 @@ def pretrain_encoder_small_patch16_224_v10_12_rms_unmask(pretrained: bool = Fals
         use_gradient_checkpointing=False,
         norm_cls=nn.RMSNorm,
         mask_ratio=0.0,  # 不遮挡任何 patch
-        use_head=False
+        use_head=False,
+        use_causal_temporal=False
     )
     return model
 
@@ -437,46 +438,65 @@ def pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head(pretrained: b
         use_gradient_checkpointing=False,
         norm_cls=nn.RMSNorm,
         mask_ratio=0.0,  # 不遮挡任何 patch
-        use_head=True
+        use_head=True,
+        use_causal_temporal=False
+    )
+    return model
+
+@register_model
+def pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head_causal(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
+    model = LlavaViTEncoder(
+        patch_size=16,
+        hidden_size=384,
+        head_dim=64,
+        num_hidden_layers=12,
+        intermediate_size=1536,
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.RMSNorm,
+        mask_ratio=0.0,  # 不遮挡任何 patch
+        use_head=True,
+        use_causal_temporal=True
+    )
+    return model
+
+@register_model
+def pretrain_encoder_base_patch16_224_v10_12_rms_unmask_with_head(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
+    model = LlavaViTEncoder(
+        patch_size=16,
+        hidden_size=768,
+        head_dim=64,
+        num_hidden_layers=12,
+        intermediate_size=3072,
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.RMSNorm,
+        mask_ratio=0.0,  # 不遮挡任何 patch
+        use_head=True,
+        use_causal_temporal=False
     )
     return model
 
 
 @register_model
-def pretrain_decoder_small_patch16_224_v10_12_rms(pretrained: bool = False, **kwargs):
-    model = LlavaViTDecoder(
-        hidden_size=384,             # decoder hidden
-        encoder_hidden_size=384,     # must match encoder hidden_size
+def pretrain_encoder_base_patch16_224_v10_12_rms_unmask_with_head_causal(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
+    model = LlavaViTEncoder(
+        patch_size=16,
+        hidden_size=768,
         head_dim=64,
-        num_hidden_layers=1,
-        intermediate_size=1536,      # 384 * 4
-        feature_proj_dim=384,        # final feature dimension
+        num_hidden_layers=12,
+        intermediate_size=3072,
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
         norm_cls=nn.RMSNorm,
+        mask_ratio=0.0,  # 不遮挡任何 patch
+        use_head=True,
+        use_causal_temporal=True
     )
-    if pretrained:
-        pass
     return model
-
-# @register_model
-# def pretrain_encoder_base_patch16_224_v10_08_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
-#     """
-#     ViT Encoder for Video MAE-style pretraining."""
-#     model = LlavaViTEncoder(
-#         patch_size=16,
-#         hidden_size=768,
-#         head_dim=64,
-#         num_hidden_layers=12,
-#         intermediate_size=3072,
-#         act_layer=nn.GELU,
-#         use_gradient_checkpointing=False,
-#         norm_cls=nn.RMSNorm,
-#     )
-#     if pretrained:
-#         assert ckpt_path is not None, "ckpt_path must be provided for pretrained model"
-#         state_dict = torch.load(ckpt_path, map_location='cpu')
-#         # replace _orig_mod. in keys
-#         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-#         model.load_state_dict(state_dict, strict=True)
-#     return model

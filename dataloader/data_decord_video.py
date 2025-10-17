@@ -25,7 +25,10 @@ class DALIWarper(object):
             data_dict = self.iter.__next__()[0]
             videos = data_dict["videos"]
             labels = data_dict["labels"]
-            return videos, labels
+            return {
+                "pixel_values": videos,
+                "labels": labels
+            }
         except StopIteration:
             self.iter.reset()
             return self.__next__()
@@ -45,6 +48,7 @@ class ExternalInputCallable:
         self, source_params):
 
         self.file_list = source_params.get("file_list", None)
+        self.label = source_params.get("label")
         if self.file_list is None:
             raise ValueError("file_list is None")
 
@@ -82,7 +86,6 @@ class ExternalInputCallable:
             sequence_length,
             test_info):
 
-        # print(video_path)
         decord_vr = decord.VideoReader(video_path, num_threads=1, ctx=decord.cpu(0))
         duration = len(decord_vr)
 
@@ -173,17 +176,17 @@ class ExternalInputCallable:
         sample_idx = self.perm[sample_info.idx_in_epoch + self.shard_offset]
 
         example_info = self.file_list[sample_idx]
+        video_label = self.label[sample_idx]
         test_info = None
 
         video_path = example_info
-        video_label = 0
 
         try:
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
         except:
             print("Error: ", video_path)
             video_path = self.replace_example_info
-            video_label = 0
+            video_label = self.label[0]
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
 
         if self.mode == "test":
@@ -338,6 +341,7 @@ def dali_pipeline(mode, source_params):
 
 def dali_dataloader(
     file_list,
+    label,
     dali_num_threads,
     dali_py_num_workers,
     batch_size,
@@ -364,6 +368,7 @@ def dali_dataloader(
         "num_shards":           num_shards, 
         "shard_id":             shard_id,
         "file_list":            file_list,
+        "label":                label,
         
         # Size parameters
         "input_size":           input_size,
@@ -416,3 +421,125 @@ def dali_dataloader(
         mode          = mode
     )
     return dataloader
+
+
+# --------- Paste everything below at the end of your file --------------
+
+import argparse
+from pathlib import Path
+import numpy as np
+from PIL import Image
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
+
+def _to_numpy(x):
+    if torch is not None and isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    return np.array(x)
+
+
+def _undo_dali_norm(frame_chw, mean255, std255):
+    # frame_chw: C x H x W (float32), output of crop_mirror_normalize
+    mean = np.asarray(mean255, dtype=np.float32).reshape(-1, 1, 1)
+    std = np.asarray(std255, dtype=np.float32).reshape(-1, 1, 1)
+    img = frame_chw * std + mean  # back to 0..255
+    img = np.transpose(img, (1, 2, 0))
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def _save_image(img_hwc_uint8, path):
+    Image.fromarray(img_hwc_uint8).save(str(path))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Quick DALI dataloader visual check")
+    group = parser.add_mutually_exclusive_group(required=False)
+    group.add_argument("--file-list", type=str, default="/video_vit/train_UniViT/mp4_list.txt")
+    parser.add_argument("--outdir", type=str, default="./dali_debug_out", help="Output dir to save frames")
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--sequence-length", type=int, default=8)
+    parser.add_argument("--input-size", type=int, default=224)
+    parser.add_argument("--short-side-size", type=int, default=256)
+    parser.add_argument("--dali-threads", type=int, default=2)
+    parser.add_argument("--dali-py-workers", type=int, default=2)
+    parser.add_argument("--num-samples", type=int, default=10, help="Save concatenated frames for N samples")
+    # NOTE: only 'train' mode is wired correctly in the provided code (val/test ctor differs)
+    parser.add_argument("--mode", type=str, default="train", choices=["train"], help="Use 'train' for this check")
+    args = parser.parse_args()
+
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    with open(args.file_list, "r", encoding="utf-8") as f:
+        file_list = [ln.strip() for ln in f if ln.strip()]
+    if not file_list:
+        raise SystemExit("file_list is empty")
+
+    labels = np.load("/video_vit/train_UniViT/list_merged.npy")
+
+    # Important: set num_shards=1, shard_id=0 to avoid None handling issues in source_params
+    dataloader = dali_dataloader(
+        file_list=file_list,
+        label=labels,
+        dali_num_threads=args.dali_threads,
+        dali_py_num_workers=args.dali_py_workers,
+        batch_size=args.batch_size,
+        input_size=args.input_size,
+        sequence_length=args.sequence_length,
+        stride=1,
+        mode=args.mode,
+        seed=0,
+        short_side_size=args.short_side_size,
+        num_shards=1,
+        shard_id=0,
+    )
+
+    it = iter(dataloader)
+    saved = 0
+    target = args.num_samples
+
+    # Mean/std used inside dali_dataloader (scaled to 0..255)
+    mean255 = [x * 255 for x in [0.48145466, 0.4578275, 0.40821073]]
+    std255 = [x * 255 for x in [0.26862954, 0.26130258, 0.27577711]]
+
+    while saved < target:
+        videos, labels_out = next(it)
+        print(labels_out)
+        vids_np = _to_numpy(videos)
+        print(f"DALI batch shape: {vids_np.shape}, dtype={vids_np.dtype}")
+
+        # Expect shape: [B, C, F, H, W]
+        if vids_np.ndim != 5:
+            raise RuntimeError(f"Unexpected videos shape: {vids_np.shape} (expected 5D BxCxFxHxW)")
+
+        B, C, F, H, W = vids_np.shape
+        for b in range(B):
+            if saved >= target:
+                break
+            sample = vids_np[b]  # C x F x H x W
+
+            # Collect frames (no channel swap), then concatenate horizontally
+            frames = []
+            for fidx in range(F):
+                frame_chw = sample[:, fidx, :, :]  # C x H x W
+                if np.issubdtype(frame_chw.dtype, np.floating):
+                    img = _undo_dali_norm(frame_chw, mean255, std255)  # H x W x C, uint8
+                else:
+                    img = np.transpose(frame_chw, (1, 2, 0)).astype(np.uint8)
+                frames.append(img)
+
+            big_img = np.concatenate(frames, axis=1)  # H x (F*W) x C
+            out_path = outdir / f"sample_{saved:03d}_concat_F{F}_HxW{H}x{W}.png"
+            _save_image(big_img, out_path)
+            print(f"[{saved+1}/{target}] Saved {out_path}")
+            saved += 1
+
+    print(f"Done. Saved {saved} concatenated samples to {outdir}")
+
+
+if __name__ == "__main__":
+    main()
