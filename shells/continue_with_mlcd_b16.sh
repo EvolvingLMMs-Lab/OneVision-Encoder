@@ -9,7 +9,7 @@ torchrun \
   --model_name pretrain_encoder_base_patch16_224_v10_12_rms_unmask_with_head \
   --embedding_size 768 \
   --list_batch_sizes 32 32 \
-  --num_sampled_data 100000000 \
+  --num_sampled_data 150000000 \
   --list_datasets k710_ssv2_univit_pfs mlcd_coyo_laion \
   --list_init_partial_fc_paths NULL /vlm/xiangan/VideoMLCD/checkpoints/llava_vit_b_16.py/00390626/MLCD_in_pfs/MLCD_in_pfs_%03d.pt \
   --init_backbone /vlm/xiangan/VideoMLCD/checkpoints/llava_vit_b_16.py/00390626/backbone.pt \
