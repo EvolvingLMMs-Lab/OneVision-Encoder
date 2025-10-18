@@ -1,0 +1,6 @@
+[MESSAGES CONTROL]
+disable =
+    W0101,  # unreachable
+    W1203,  # logging-fstring-interpolation
+    C0301,  # line-too-long
+    C0415,  # import-outside-toplevel

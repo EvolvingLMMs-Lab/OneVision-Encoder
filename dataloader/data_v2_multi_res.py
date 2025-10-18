@@ -112,7 +112,10 @@ class DALIWarperV2(object):
                 tensor_label: torch.Tensor = tensor_label[:, int(self.label_select)]
             else:
                 tensor_label: torch.Tensor = tensor_label[:, 0]
-            return tensor_data, tensor_label
+            return {
+                "pixel_values": tensor_data,
+                "labels": tensor_label
+            }
 
     def __iter__(self):
         return self
