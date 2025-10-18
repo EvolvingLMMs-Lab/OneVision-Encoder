@@ -86,6 +86,10 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
     llava_vit:25.10 bash -c "service ssh restart; bash; "
 
 # Inside the container, install the package in editable mode
+
+export http_proxy=http://172.16.5.77:8889
+export https_proxy=http://172.16.5.77:8889
+
 pip install -e .
 ```
 
@@ -95,26 +99,26 @@ pip install -e .
 
 ```bash
 # Example command to start training
-torchrun -m --nproc_per_node 8 training.train_predict_10_06
+torchrun -m --nproc_per_node 8 training.train_univit \
+  --list_batch_size 64 \
+  --output ./output/baseline
 ```
 
 2. Multi Node
 
 ```bash
-# Example command to start training
-pdsh -w 172.16.5.[34,35] 'cd /workspace/LLaVA-ViT && torchrun --nproc_per_node=8 --nnodes=4 --node_rank=%n --master_addr=172.16.5.34 --master_port=12345 -m training.train_predict_10_06'
 ```
 
 ## 🚀 Evaluation
 ```bash
-DATASETS=ssv2 \
+DATASETS=ucf101 \
 MODEL_FAMILY=llava_vit \
-MODEL_NAME=pretrain_encoder_small_patch16_224_v10_03 \
+MODEL_NAME=pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head \
 CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/date_25_10_05_first_success_training/encoder_checkpoint_125000.pt \
 EMBEDDING_SIZE=384 \
 NUM_EPOCH=100 \
 BATCH_SIZE=4 \
-LR=2e-4 \
+LR=5e-4 \
 bash video_attentive_probe.sh
 ```
 

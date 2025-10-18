@@ -25,6 +25,7 @@ INPUT_SIZE="${INPUT_SIZE:-224}"
 TUBELET_SIZE="${TUBELET_SIZE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 LR="${LR:-0.0001}"
+EVAL_FREQ="${EVAL_FREQ:-10}"
 
 # 如果外部没传，则给默认
 DATASETS="${DATASETS:-ssv2}"
@@ -66,7 +67,8 @@ do
                 --num_frames ${NUM_FRAMES} \
                 --input_size ${INPUT_SIZE} \
                 --tubelet_size ${TUBELET_SIZE} \
-                --default_lr_list ${LR}
+                --default_lr_list ${LR} \
+                --eval_freq ${EVAL_FREQ}
         done
     done
 done

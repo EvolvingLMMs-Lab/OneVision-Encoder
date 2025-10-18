@@ -378,13 +378,15 @@ def main():
         for head_id, dataset_config in enumerate(args.list_datasets):
 
             dataset_config: Property
-            if dataset_config.dali_type in ["decord"]:
+            if dataset_config.dali_type in ["decord", "origin"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     head_embedding = backbone(head_input)["head_output"]
                 head_embedding = head_embedding.float()
-            list_embedding.append(head_embedding)
+                list_embedding.append(head_embedding)
+            else:
+                raise ValueError(f"Unsupported DALI type: {dataset_config.dali_type}")
 
         list_loss = []
         list_loss_float = []
