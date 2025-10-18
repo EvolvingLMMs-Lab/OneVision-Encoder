@@ -69,7 +69,7 @@ def mlcd_coyo_laion():
     return Property(
         prefixes=list_prefix,
         name="coyo_laion",
-        num_classes=2_000_000,
+        num_classes=2000000,
         num_examples=0,
         num_shards=1,
         shard_id=0,

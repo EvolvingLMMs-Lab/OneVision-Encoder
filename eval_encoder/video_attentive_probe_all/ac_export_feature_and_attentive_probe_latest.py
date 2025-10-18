@@ -149,7 +149,41 @@ def get_feature(videos, processor, forward_base_model):
                 enc_out = forward_base_model(videos, mask_ratio=0.5)
                 outputs = enc_out["visible_embeddings"]
 
-    elif args.model_family in ["ov_1_5_vit", "mlcd_base", "mlcd"]:
+    elif args.model_family == "llava_vit_si":
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            outputs = []
+            temporal_table = None
+            T = videos.shape[2]
+            for frame_idx in range(T):
+                frame = videos[:, :, frame_idx, :, :]
+
+                with torch.no_grad():
+                    enc_out = forward_base_model(frame)
+
+                feats = enc_out["visible_embeddings"]
+
+                # --- NEW: 加时间位置编码（正弦），首帧时一次性构建 ---
+                if temporal_table is None:
+                    B, N_patch, D = feats.shape
+                    device = feats.device
+                    # 构建 [T, D] 正弦时间编码
+                    position = torch.arange(T, device=device).float().unsqueeze(1)
+                    div_term = torch.exp(torch.arange(0, D, 2, device=device).float() * (-math.log(10000.0) / D))
+                    temporal_table = torch.zeros(T, D, device=device)
+                    temporal_table[:, 0::2] = torch.sin(position * div_term)
+                    temporal_table[:, 1::2] = torch.cos(position * div_term)
+                    # temporal_table: [T, D]
+
+                # 取当前帧的编码，加到该帧所有 patch 上
+                feats = feats + temporal_table[frame_idx].view(1, 1, -1)
+                # --- NEW END ---
+
+                outputs.append(feats)
+
+            outputs = torch.cat(outputs, dim=1)  # [B, T*N_patch, D]
+
+
+    elif args.model_family in ["ov_1_5_vit", "mlcd_base", "mlcd", "mlcd_torch"]:
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             outputs = []
             temporal_table = None
@@ -465,7 +499,8 @@ def find_peak(args, lr, cur_device, base_model, data_loader_train, data_loader_v
     else:
         processor = None
 
-    if args.model_family != "dino_v3" and args.model_family != "ov_1_5_vit" and args.model_family != "rice":
+    # if args.model_family != "dino_v3" and args.model_family != "ov_1_5_vit" and args.model_family != "rice":
+    if args.model_family not in ["dino_v3", "ov_1_5_vit", "rice", "llava_vit", "mlcd_torch"]:
         print("have load ckpt")
         base_model = load_finetune_checkpoint(args, base_model)
 
@@ -635,11 +670,22 @@ def get_model(args):
        from transformers import MLCDVisionModel
        base_model = MLCDVisionModel.from_pretrained(args.ckpt_path).cuda()
 
-    elif args.model_family == 'llava_vit':
+    elif args.model_family in ['llava_vit', 'llava_vit_si']:
         base_model = create_model(
             args.model_name,
-            pretrained=True,
-            ckpt_path=args.ckpt_path)
+            pretrained=False,)
+        state_dict = torch.load(args.ckpt_path, map_location='cpu')
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        base_model.load_state_dict(state_dict, strict=True)
+
+    elif args.model_family == "mlcd_torch":
+        base_model = create_model(
+            args.model_name,
+            pretrained=False,)
+        state_dict = torch.load(args.ckpt_path, map_location='cpu')
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        base_model.load_state_dict(state_dict, strict=True)
+
 
     elif args.model_family == 'mlcd':
         if args.model_name=="vit-bigG-patch14-448":
