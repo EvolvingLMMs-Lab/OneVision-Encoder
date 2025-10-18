@@ -114,12 +114,11 @@ torchrun -m --nproc_per_node 8 training.train_univit \
 DATASETS=ucf101 \
 MODEL_FAMILY=llava_vit \
 MODEL_NAME=pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head \
-CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/date_25_10_05_first_success_training/encoder_checkpoint_125000.pt \
+CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/baseline_continue_with_mlcd/00006000/backbone.pt \
 EMBEDDING_SIZE=384 \
 NUM_EPOCH=100 \
 BATCH_SIZE=4 \
-LR=5e-4 \
-bash video_attentive_probe.sh
+LR=5e-4 bash video_attentive_probe.sh
 ```
 
 ## Contributors
