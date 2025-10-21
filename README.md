@@ -41,7 +41,7 @@ docker tag $(docker images -q | head -n 1) llava_vit:25.11
 ```
 
 
-#### 1. Sigle Node
+#### 1. Single Node
 ```
 # Run container with -w to set working directory directly to the mounted volume
 docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
