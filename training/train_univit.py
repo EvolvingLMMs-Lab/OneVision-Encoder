@@ -3,7 +3,6 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
 from typing import Any, Dict, List
 
 import numpy as np
@@ -13,15 +12,14 @@ from torch import distributed
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
 
+import model_factory
 from dataset import DATASET_REGISTRY, Property
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
 from training.fused_partial_fc_v2 import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
-import model_factory
 
 torch._dynamo.config.optimize_ddp = False
 
-import argparse
 
 parser = argparse.ArgumentParser(description="Multi-dataset video training")
 
