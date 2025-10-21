@@ -1,5 +1,6 @@
 torchrun -m --nproc_per_node 8 training.train_univit \
-  --model_name pretrain_encoder_small_patch16_224_v10_12_rms_mask05_head \
+  --model_name pretrain_encoder_small_patch16_224_v10_12_rms_mask08_head \
+  --num_frames 16 \
   --list_batch_sizes 64 64 \
   --lr 1e-4 \
   --list_datasets k710_ssv2_univit_pfs mlcd_coyo_laion \
