@@ -22,13 +22,16 @@
 
 mkdir -p /video_vit
 mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-iyHiNUmePn.lb-0a25b0a7.cfs.bj.baidubce.com:/ /video_vit
+
+mkdir -p /vlm
+mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-xvbkSb1zPT.lb-563926be.cfs.bj.baidubce.com:/ /vlm
 ```
 
 ### 1. Docker Build
 
 > #### Option 1: Build from Dockerfile
 ```bash
-docker build -t llava_vit:25.10 .
+docker build -t llava_vit:25.11 .
 ```
 
 > #### Option 2: Load pre-built Docker image
@@ -36,15 +39,7 @@ docker build -t llava_vit:25.10 .
 docker load -i /video_vit/docker_images/llava_vit_tag_25.11.tar && \
 docker tag $(docker images -q | head -n 1) llava_vit:25.11
 ```
-<!-- 
-### 2. Run
-```bash
-mkdir -p /train_tmp
-mount -t tmpfs -o size=200G tmpfs /train_tmp
-cp -r /video_vit/pretrain_video_datas/ssv2.tar /train_tmp/
-cd /train_tmp
-tar -xf ssv2.tar
-``` -->
+
 
 #### 1. Sigle Node
 ```
