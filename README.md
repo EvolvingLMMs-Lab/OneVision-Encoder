@@ -128,6 +128,13 @@ Thanks so much to all of our amazing contributors!
 	<tbody>
 		<tr>
             <td align="center">
+                <a href="https://github.com/GeoffreyChen777">
+                    <img src="https://avatars.githubusercontent.com/u/14183213?v=4" width="80;" alt="GeoffreyChen777"/>
+                    <br />
+                    <sub><b>GeoffreyChen777</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/Luodian">
                     <img src="https://avatars.githubusercontent.com/u/15847405?v=4" width="80;" alt="Luodian"/>
                     <br />
