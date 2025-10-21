@@ -33,10 +33,10 @@ docker build -t llava_vit:25.10 .
 
 > #### Option 2: Load pre-built Docker image
 ```bash
-docker load -i /video_vit/docker_images/llava_vit_tag_25.10.tar && \
-docker tag $(docker images -q | head -n 1) llava_vit:25.10
+docker load -i /video_vit/docker_images/llava_vit_tag_25.11.tar && \
+docker tag $(docker images -q | head -n 1) llava_vit:25.11
 ```
-
+<!-- 
 ### 2. Run
 ```bash
 mkdir -p /train_tmp
@@ -44,7 +44,7 @@ mount -t tmpfs -o size=200G tmpfs /train_tmp
 cp -r /video_vit/pretrain_video_datas/ssv2.tar /train_tmp/
 cd /train_tmp
 tar -xf ssv2.tar
-```
+``` -->
 
 #### 1. Sigle Node
 ```
@@ -56,7 +56,7 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
     -v /video_vit:/video_vit \
     -v /train_tmp:/train_tmp \
     -w /workspace/LLaVA-ViT/ \
-    llava_vit:25.10 /bin/bash
+    llava_vit:25.11 /bin/bash
 
 # Inside the container, install the package in editable mode
 
@@ -85,7 +85,7 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
     -e NCCL_SOCKET_IFNAME=eth0 -e NCCL_IB_GID_INDEX=3 -e NCCL_IB_DISABLE=0 -e NCCL_IB_HCA="mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1" -e NCCL_NET_GDR_LEVEL=2 -e NCCL_IB_QPS_PER_CONNECTION=4 -e NCCL_IB_TC=160 -e NCCL_IB_TIMEOUT=22 -e NCCL_CROSS_NIC=1 -e NCCL_MIN_NCHANNELS=8 -e NCCL_MAX_NCHANNELS=16 \
     -e http_proxy=http://172.16.5.77:8889 \
     -e https_proxy=http://172.16.5.77:8889 \
-    llava_vit:25.10 bash -c "service ssh restart; bash; "
+    llava_vit:25.11 bash -c "service ssh restart; bash; "
 
 # Inside the container, install the package in editable mode
 pip install -e .
@@ -112,9 +112,10 @@ torchrun -m --nproc_per_node 8 training.train_univit \
 DATASETS=ucf101 \
 MODEL_FAMILY=llava_vit \
 MODEL_NAME=pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head \
-CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/baseline_continue_with_mlcd/00006000/backbone.pt \
+CKPT_PATH=/video_vit/xiangan/checkpoint_llava_vit/baseline_continue_with_mlcd/00117188/backbone.pt \
 EMBEDDING_SIZE=384 \
 NUM_EPOCH=100 \
+NUM_FRAMES=8 \
 BATCH_SIZE=4 \
 LR=5e-4 bash video_attentive_probe.sh
 ```
