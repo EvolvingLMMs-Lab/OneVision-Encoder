@@ -36,7 +36,7 @@ docker build -t llava_vit:25.10 .
 docker load -i /video_vit/docker_images/llava_vit_tag_25.10.tar && \
 docker tag $(docker images -q | head -n 1) llava_vit:25.10
 ```
-
+<!-- 
 ### 2. Run
 ```bash
 mkdir -p /train_tmp
@@ -44,7 +44,7 @@ mount -t tmpfs -o size=200G tmpfs /train_tmp
 cp -r /video_vit/pretrain_video_datas/ssv2.tar /train_tmp/
 cd /train_tmp
 tar -xf ssv2.tar
-```
+``` -->
 
 #### 1. Sigle Node
 ```
