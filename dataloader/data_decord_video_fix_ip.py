@@ -185,7 +185,6 @@ class ExternalInputCallable:
 
 @pipeline_def()
 def dali_pipeline(mode, source_params):
-
     if mode == "train":
         videos, visible_indices, labels = fn.external_source(
             source      = ExternalInputCallable(source_params),
@@ -195,9 +194,8 @@ def dali_pipeline(mode, source_params):
             dtype       = [types.UINT8, types.INT16, types.INT64],
             layout      = ["FHWC", "C", "C"]
         )
-        
-        videos = videos.gpu()
 
+        videos = videos.gpu()
         videos = fn.resize(
             videos,
             resize_x=source_params['input_size'],
@@ -216,8 +214,6 @@ def dali_pipeline(mode, source_params):
         visible_indices = visible_indices.gpu()
         labels = labels.gpu()
         return videos, visible_indices, labels
-        
-   
 
 
 def dali_dataloader(

@@ -7,13 +7,10 @@ from typing import Optional, Any, Dict
 
 
 __all__ = [
-    "pretrain_encoder_small_patch16_224_v10_12_rms_unmask",
     "pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head",
     "pretrain_encoder_small_patch16_224_v10_12_rms_mask05_head",
     "pretrain_encoder_small_patch16_224_v10_12_rms_mask08_head",
-    "pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head_causal",
     "pretrain_encoder_base_patch16_224_v10_12_rms_unmask_with_head",
-    "pretrain_encoder_base_patch16_224_v10_12_rms_unmask_with_head_causal",
 ]
 
 class LlavaViTEncoder(nn.Module):
@@ -251,6 +248,26 @@ def pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head(pretrained: b
         head_dim=64,
         num_hidden_layers=12,
         intermediate_size=1536,
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.RMSNorm,
+        mask_ratio=0.0,  # 不遮挡任何 patch
+        use_head=True,
+        use_causal_temporal=False
+    )
+    return model
+
+
+@register_model
+def pretrain_encoder_large_patch14_224_v10_12_rms_unmask_with_head(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
+    model = LlavaViTEncoder(
+        patch_size=14,
+        hidden_size=1024,
+        head_dim=64,
+        num_hidden_layers=24,
+        intermediate_size=4096,
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
         norm_cls=nn.RMSNorm,

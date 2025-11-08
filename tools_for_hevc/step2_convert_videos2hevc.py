@@ -7,12 +7,16 @@
   - 本 rank 的“目标路径列表”文件（targets.rank{RANK}.txt）：该 rank 对应的目标输出路径（包含已存在和将要生成的目标，剔除源缺失项）
 - 每个 rank 可继续使用本地多进程池进行并行（默认会按 WORLD_SIZE 降低并行度）
 
-用法示例（短横线参数）：
-  deepspeed --num_gpus=8 convert_to_h265_ds.py \
-    --lists my.list \
-    --source-root /data/src \
-    --target-root /data/hevc \
-    --log-dir logs
+deepspeed \
+  --hostfile hosts_14 \
+  --num_nodes 12 \
+  --num_gpus 8 \
+  --master_addr 172.16.5.34 \
+  --master_port 29600 \
+  step2_convert_videos2hevc.py \
+  --file /video_vit/dataset/clips_square_aug_k710_ssv2/merged_list.txt \
+  --source_root /video_vit/dataset/clips_square_aug_k710_ssv2 \
+  --target_root /video_vit/dataset/clips_square_aug_k710_ssv2_hevc
 """
 
 import os
@@ -23,12 +27,16 @@ import subprocess
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
+import time
+from tqdm import tqdm
 
 # ===== 分布式环境变量（与原代码一致）=====
 RANK = int(os.environ.get("RANK", "0"))
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
 # ========================================
+
+time.sleep(10 * RANK)  # 避免多进程启动时日志混乱
 
 # ===== 可调参数（环境变量） =====
 GOP_SIZE = int(os.getenv("GOP_SIZE", "16"))          # 固定 GOP=16
@@ -37,7 +45,7 @@ SKIP_AUDIO = os.getenv("SKIP_AUDIO", "1") == "1"     # 默认去音频
 
 # 根据 WORLD_SIZE 自动下调每个 rank 的并行度；若显式设置 NPROC 则以 NPROC 为准
 _auto_proc = max(1, (os.cpu_count() or 1) // max(1, WORLD_SIZE))
-PROCESSES = 64
+PROCESSES = 8
 # =================================
 
 def _resolve_paths(relative_src_path: str, source_root: str, target_root: str) -> Tuple[str, str]:
@@ -260,28 +268,30 @@ def build_tasks_from_items(
     targets_rank: List[str] = []
     seen_dst = set()
 
-    for raw_path in items:
+    for idx, raw_path in enumerate(items):
         src_path, dst_path = _resolve_paths(raw_path, source_root, target_root)
+        
+        if idx % 1000 == 0:
+            print(f"[rank {RANK}] Processing item {idx}/{len(items)}: {src_path} -> {dst_path}")
+        # if dst_path in seen_dst:
+        #     continue
 
-        if dst_path in seen_dst:
-            continue
-
-        if not os.path.exists(src_path):
-            print(f"[rank {RANK}] Missing source, skip: {src_path}")
-            if log_path:
-                _append_fail(
-                    log_path,
-                    f"missing source: {src_path} (dst would be {dst_path})"
-                )
-            continue
+        # if not os.path.exists(src_path):
+        #     print(f"[rank {RANK}] Missing source, skip: {src_path}")
+        #     if log_path:
+        #         _append_fail(
+        #             log_path,
+        #             f"missing source: {src_path} (dst would be {dst_path})"
+        #         )
+        #     continue
 
         seen_dst.add(dst_path)
         targets_rank.append(dst_path)
 
-        if os.path.exists(dst_path):
-            print(f"[rank {RANK}] Skipped (already exists): {dst_path}")
-        else:
-            tasks.append((src_path, dst_path, encoder, log_path or "failed.txt"))
+        # if os.path.exists(dst_path):
+        #     print(f"[rank {RANK}] Skipped (already exists): {dst_path}")
+        # else:
+        tasks.append((src_path, dst_path, encoder, log_path or "failed.txt"))
 
     return tasks, targets_rank
 

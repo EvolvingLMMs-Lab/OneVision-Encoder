@@ -1,8 +1,47 @@
 import os
+import glob
 
 from dataset.registry import DATASET_REGISTRY
 
 from .properties import Property
+
+
+@DATASET_REGISTRY.register()
+def RICE_in_pfs():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
+    patterns = [
+        "/vlm/data/coyo400m_resized448/*.rec",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/*.rec",
+    ]
+    all_files = [f for pattern in patterns for f in glob.glob(pattern)]
+    all_files = [x.replace(".rec", "") for x in all_files]
+    all_files = sorted(all_files)
+
+    # 添加文件检查
+    if not all_files:
+        raise FileNotFoundError("未找到数据集文件")
+
+    # 计算节点信息
+    gpus_per_node = 8
+    node_rank = rank // gpus_per_node
+    num_nodes = world_size // gpus_per_node
+    list_prefix = all_files[node_rank::num_nodes]
+
+    return Property(
+        num_classes=2000000,
+        num_examples=0,
+        prefixes=list_prefix,
+        name="MLCD_in_pfs",
+        label_select=0,
+        label_start=0,
+        num_shards=8,
+        shard_id=local_rank,
+        dali_type="origin",
+        random_diff=10,
+    )
 
 
 @DATASET_REGISTRY.register()

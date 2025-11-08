@@ -8,16 +8,25 @@ export VIZ_MASK_SAMPLES=1
 # export LLAVA_OUTPUT_DIR=/video_vit/yunyaoyan/Check_Code/LLaVA-ViT/checkpoints/mask
 export UMT_HEVC_Y_ONLY=1 
 
-DATASETS=k400
-MODEL_FAMILY=llava_vit
-MODEL_NAME=pretrain_encoder_small_patch16_224_v10_12_rms_mask05_head_ip
-CKPT_PATH=/video_vit/feilong/Check_Code/LLaVA-ViT/checkpoints/bidir_IP_10_29_fix_IP_path/00117188/backbone.pt
-EMBEDDING_SIZE=384
-INPUT_SIZE=224
-NUM_FRAMES=20
-NUM_EPOCH=100
-BATCH_SIZE=4
-LR=2e-4
+# ============== 数据与输出配置 ==============
+DATASETS="${DATASETS:-k400}"     # 数据集名称
+OUTPUT="${OUTPUT:-output}"       # 训练/评估产物输出目录
+
+# ============== 模型与权重配置 ==============
+MODEL_FAMILY="${MODEL_FAMILY:-llava_vit}"    # 逻辑模型名称（自定义 tag）
+MODEL_NAME="${MODEL_NAME:-pretrain_encoder_small_patch16_224_v10_29_rms_head_ip}"
+CKPT_PATH="${CKPT_PATH:-/video_vit/feilong/Check_Code/LLaVA-ViT/checkpoints/bidir_IP_10_29_fix_IP_path/00117188/backbone.pt}"  # 微调初始权重 / 预训练 ckpt 路径
+
+# ============== 训练超参数 ==============
+EMBEDDING_SIZE="${EMBEDDING_SIZE:-384}"
+INPUT_SIZE="${INPUT_SIZE:-224}"
+NUM_FRAMES="${NUM_FRAMES:-8}"
+NUM_EPOCH="${NUM_EPOCH:-100}"
+NUM_TARGET="${NUM_TARGET:-1568}"
+BATCH_SIZE="${BATCH_SIZE:-4}"
+LR="${LR:-1e-4}"
+TUBELET_SIZE="${TUBELET_SIZE:-1}"
+EVAL_FREQ="${EVAL_FREQ:-10}"
 
 TRAIN_DATA_ROOT_PATH="${TRAIN_DATA_ROOT_PATH:-/video_vit/eval_data/train}"
 TRAIN_DATA_CSV_PATH="${TRAIN_DATA_CSV_PATH:-/video_vit/fewshot_video/ActionRecognition}"
@@ -32,21 +41,6 @@ RANK="${RANK:-0}"                # 当前节点 rank
 ADDR="${ADDR:-127.0.0.1}"        # 主节点地址 (MASTER_ADDR)
 PORT="${PORT:-32599}"            # 主节点端口 (MASTER_PORT)
 
-
-
-# ============== Output & Model Defaults ==============
-OUTPUT="${OUTPUT:-output}"              # 训练/评估产物输出目录
-MODEL_FAMILY="${MODEL_FAMILY:-NULL}"           # 逻辑模型名称（自定义 tag）
-MODEL_NAME="${MODEL_NAME:-NULL}"
-CKPT_PATH="${CKPT_PATH:-model.pt}"            # 微调初始权重 / 预训练 ckpt 路径
-
-EMBEDDING_SIZE="${EMBEDDING_SIZE:-1024}"
-NUM_FRAMES="${NUM_FRAMES:-8}"
-NUM_EPOCH="${NUM_EPOCH:-40}"
-INPUT_SIZE="${INPUT_SIZE:-224}"
-TUBELET_SIZE="${TUBELET_SIZE:-1}"
-BATCH_SIZE="${BATCH_SIZE:-32}"
-LR="${LR:-0.0001}"
 
 # 如果外部没传，则给默认
 DATASETS="${DATASETS:-ssv2}"
@@ -68,7 +62,7 @@ do
             echo "NUM_SHOTS: $NUM_SHOTS"
 
             FLASH=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NNODES}" \
-                --node_rank="${RANK}" --master_addr="${ADDR}" --master_port="${PORT}" \
+                --node_rank="${RANK}" --master_port="${PORT}" \
                 video_attentive_probe_all/ac_export_feature_and_attentive_probe_latest_ip.py \
                 --embedding_size ${EMBEDDING_SIZE} \
                 --dataset ${DATASET} \
@@ -76,6 +70,7 @@ do
                 --seed ${SEED} \
                 --num_shots ${NUM_SHOTS} \
                 --num_step 8 \
+                --num_target ${NUM_TARGET} \
                 --train_data_root_path ${TRAIN_DATA_ROOT_PATH} \
                 --train_data_csv_path ${TRAIN_DATA_CSV_PATH} \
                 --val_data_root_path ${VAL_DATA_ROOT_PATH} \
@@ -92,3 +87,4 @@ do
         done
     done
 done
+    

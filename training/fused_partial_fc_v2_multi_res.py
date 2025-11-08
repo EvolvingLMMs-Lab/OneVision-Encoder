@@ -194,45 +194,35 @@ class PartialFC_V2(torch.nn.Module):
 
         ########################### added by multi-res ###########################
         # Gather sizes of each feature tensor
-        batch_size_pt = torch.tensor([batch_size], device="cuda")
-        gathered_batch_size = [torch.zeros_like(batch_size_pt) for _ in range(self.world_size)]
-        distributed.all_gather(gathered_batch_size, batch_size_pt)
-        gathered_batch_size = [size.item() for size in gathered_batch_size]    
-        # max_batch_size = max(gathered_batch_size)
-        distributed.all_reduce(batch_size_pt, distributed.ReduceOp.MAX)
-        max_batch_size = batch_size_pt.item()
+        batch_size_pt = torch.tensor([local_embeddings.shape[0]], device=local_embeddings.device, dtype=torch.int64)
+
+        _gathered_bs = [torch.empty_like(batch_size_pt) for _ in range(self.world_size)]
+        distributed.all_gather(_gathered_bs, batch_size_pt)  # list of [1]-shape tensors
+
+        # 张量方式得到每个 rank 的 batch size 和最大值（都是张量，.item() 由 capture_scalar_outputs 捕获）
+        sizes = torch.stack(_gathered_bs).squeeze(-1)   # [world_size], int64
+        max_batch_size = sizes.max()                    # 0-dim tensor (int64)
+
         # Pad features to the maximum size
-        if local_embeddings.size(0) < max_batch_size:
-            padding = (0, 0, 0, int(max_batch_size - local_embeddings.size(0)))
-            local_embeddings = torch.nn.functional.pad(local_embeddings, padding)
+        pad_n = int((max_batch_size - local_embeddings.size(0)).item())
+        if pad_n > 0:
+            local_embeddings = torch.nn.functional.pad(local_embeddings, (0, 0, 0, pad_n))
+            local_labels = torch.nn.functional.pad(local_labels, (0, 0, 0, pad_n))
 
-        if local_labels.size(0) < max_batch_size:
-            padding = (0, 0, 0, int(max_batch_size - local_labels.size(0)))
-            local_labels = torch.nn.functional.pad(local_labels, padding)
-        ########################### added by multi-res ###########################
-
-        _gather_embeddings = [
-            torch.zeros_like(local_embeddings)
-            for _ in range(self.world_size)
-        ]
-
-        # print(local_embeddings.size())
+        _gather_embeddings = [torch.zeros_like(local_embeddings) for _ in range(self.world_size)]
         _list_embeddings = AllGather(local_embeddings, *_gather_embeddings)
 
-        # print(local_labels.size())
-        _gather_labels = [
-            torch.zeros_like(local_labels) for _ in range(self.world_size)
-        ]
+        _gather_labels = [torch.zeros_like(local_labels) for _ in range(self.world_size)]
         distributed.all_gather(_gather_labels, local_labels)
 
         embeddings = torch.cat(_list_embeddings)
         labels = torch.cat(_gather_labels)
 
-        ########################### added by multi-res ###########################
         # Remove padding
-        _all_embeddings = [feat[:size] for feat, size in zip(embeddings.split(max_batch_size), gathered_batch_size)]
-        _all_labels = [feat[:size] for feat, size in zip(labels.split(max_batch_size), gathered_batch_size)]
-        
+        sizes_list = [int(s.item()) for s in sizes]            # python ints（被捕获）
+        m = int(max_batch_size.item())                         # python int（被捕获）
+        _all_embeddings = [feat[:sz] for feat, sz in zip(embeddings.split(m), sizes_list)]
+        _all_labels     = [feat[:sz] for feat, sz in zip(labels.split(m), sizes_list)]
         embeddings = torch.cat(_all_embeddings, dim=0)
         labels = torch.cat(_all_labels, dim=0)
         ########################### added by multi-res ###########################
@@ -278,7 +268,7 @@ class PartialFC_V2(torch.nn.Module):
         weight_6, labels_6 = self.sample(labels_6, index_positive_6)
         weight_7, labels_7 = self.sample(labels_7, index_positive_7)
 
-        with torch.cuda.amp.autocast(self.fp16):
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             if self.is_normlize:
                 norm_embeddings = normalize(embeddings)
                 norm_weight_activated_0 = normalize(weight_0)

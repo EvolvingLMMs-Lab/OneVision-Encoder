@@ -20,7 +20,7 @@ CKPT_PATH="${CKPT_PATH:-model.pt}"            # 微调初始权重 / 预训练 c
 
 EMBEDDING_SIZE="${EMBEDDING_SIZE:-1024}"
 NUM_FRAMES="${NUM_FRAMES:-8}"
-NUM_EPOCH="${NUM_EPOCH:-40}"
+NUM_EPOCH="${NUM_EPOCH:-100}"
 INPUT_SIZE="${INPUT_SIZE:-224}"
 TUBELET_SIZE="${TUBELET_SIZE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
@@ -36,7 +36,7 @@ IFS=',' read -r -a DATASET_ARRAY <<< "$DATASETS"
 
 for SEED in 1
 do
-    # for DATASET in ssv2 k400 k600 k700 hmdb51 ucf101 epic_verb epic_noun perception_test diving48 CharadesEgo  CharadesEgo_v1_only1st CharadesEgo_v1_only3rd
+    # for DATASET in ssv2 k400 hmdb51 ucf101 perception_test k600 k700 epic_verb epic_noun perception_test diving48 CharadesEgo  CharadesEgo_v1_only1st CharadesEgo_v1_only3rd
     for DATASET in "${DATASET_ARRAY[@]}";
     do
         echo "当前 SEED=$SEED, DATASET=$DATASET"

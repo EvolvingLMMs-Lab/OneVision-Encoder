@@ -10,10 +10,7 @@ from nvidia.dali.plugin.pytorch import DALIGenericIterator, LastBatchPolicy
 import decord
 from nvidia.dali.pipeline import pipeline_def
 import glob
-try:
-    from .hevc_feature_decoder import ResPipeReader
-except Exception:
-    from hevc_feature_decoder import ResPipeReader
+from hevc_feature_decoder import ResPipeReader
 
 
 

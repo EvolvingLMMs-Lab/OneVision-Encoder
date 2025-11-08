@@ -13,6 +13,7 @@ rank = int(os.environ.get("RANK", "0"))
 local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 world_size = int(os.environ.get("WORLD_SIZE", "1"))
 
+
 class DALIWarper(object):
     def __init__(self, dali_iter, step_data_num, mode="train"):
         self.iter = dali_iter
@@ -71,15 +72,12 @@ class ExternalInputCallable:
         self.seed = source_params.get("seed", 0)
         self.reprob = source_params.get("reprob", 0.0)
 
-
-        self.label = None
-        self.video_visible_indices = None
-        if self.label_path is not None:
-            self.label = np.load(self.label_path)
-        if self.visible_indices_path is not None:
-            self.video_visible_indices = np.load(self.visible_indices_path, mmap_mode="r")
-
-
+        # self.label = None
+        # self.video_visible_indices = None
+        # if self.label_path is not None:
+        #     self.label = np.load(self.label_path)
+        # if self.visible_indices_path is not None:
+        #     self.video_visible_indices = np.load(self.visible_indices_path, mmap_mode="r")
 
         self.perm = None
         self.last_seen_epoch = None
@@ -93,20 +91,21 @@ class ExternalInputCallable:
         # drop last batch
         self.full_iterations = self.shard_size // self.batch_size
 
-    def __getstate__(self):
-        state = dict(self.__dict__)
-        # 不要把 mmap arrays pickled 过去
-        state["label"] = None
-        state["video_visible_indices"] = None
-        return state
+    # def __getstate__(self):
+    #     state = dict(self.__dict__)
+    #     # 不要把 mmap arrays pickled 过去
+    #     state["label"] = None
+    #     state["video_visible_indices"] = None
+    #     return state
 
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        # 在子进程里按路径重新打开 mmap
-        if self.label is None and self.label_path is not None:
-            self.label = np.load(self.label_path)
-        if self.video_visible_indices is None and self.visible_indices_path is not None:
-            self.video_visible_indices = np.load(self.visible_indices_path, mmap_mode="r")
+
+    # def __setstate__(self, state):
+    #     self.__dict__.update(state)
+    #     # 在子进程里按路径重新打开 mmap
+    #     if self.label is None and self.label_path is not None:
+    #         self.label = np.load(self.label_path)
+    #     if self.video_visible_indices is None and self.visible_indices_path is not None:
+    #         self.video_visible_indices = np.load(self.visible_indices_path, mmap_mode="r")
 
 
     def sparse_sampling_get_frameid_data(
@@ -126,8 +125,22 @@ class ExternalInputCallable:
         decord_vr.seek(0)
         video_data = decord_vr.get_batch(frame_id_list).asnumpy()
         return video_data
-        
 
+    def get_label_and_visible_indices(self, video_path):
+        # label:    /video_vit/dataset/clips_square_aug_k710_ssv2/6/3/rank_068_sample_0000145663_label.npy
+        # video:    /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2/6/3/rank_068_sample_0000145663.mp4
+        # residual: /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2_residual/6/3/rank_068_sample_0000145663.visidx.npy
+
+        label_path = video_path.replace("clips_square_aug_k710_ssv2_hevc_v2", "clips_square_aug_k710_ssv2")
+        label_path = label_path.replace(".mp4", "_label.npy")
+
+        video_visible_indices_path = video_path.replace("clips_square_aug_k710_ssv2_hevc_v2", "clips_square_aug_k710_ssv2_hevc_v2_residual")
+        video_visible_indices_path = video_visible_indices_path.replace(".mp4", ".visidx.npy")
+
+        video_label = np.load(label_path)
+        video_visible_indices = np.load(video_visible_indices_path, mmap_mode="r")
+
+        return video_label, video_visible_indices
 
     def __call__(self, sample_info):
         # sample_info
@@ -146,22 +159,24 @@ class ExternalInputCallable:
 
         sample_idx = self.perm[sample_info.idx_in_epoch + self.shard_offset]
 
-        example_info = self.file_list[sample_idx]
-        video_label = self.label[sample_idx]
-        video_visible_indices = self.video_visible_indices[sample_idx]
-        test_info = None
+        video_path = self.file_list[sample_idx]
 
-        video_path = example_info
+        # label:    /video_vit/dataset/clips_square_aug_k710_ssv2/6/3/rank_068_sample_0000145663_label.npy
+        # video:    /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2/6/3/rank_068_sample_0000145663.mp4
+        # residual: /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2_residual/6/3/rank_068_sample_0000145663.visidx.npy
+        test_info = None
         # print(video_path)
         try:
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
-        except:
-            print("Error: ", video_path)
+            video_label, video_visible_indices = self.get_label_and_visible_indices(video_path)
+        except Exception as e:
+            print("Error loading video:" , video_path)
+            print(e)
+
             video_path = self.replace_example_info
-            video_label = self.label[0]
-            video_visible_indices = self.video_visible_indices[0]
+            video_label, video_visible_indices = self.get_label_and_visible_indices(video_path)
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
-        
+
         if self.mode == "test":
             chunk_nb, split_nb, video_idx = test_info
             return (
@@ -196,12 +211,12 @@ def dali_pipeline(mode, source_params):
         )
 
         videos = videos.gpu()
-        videos = fn.resize(
-            videos,
-            resize_x=source_params['input_size'],
-            resize_y=source_params['input_size'],
-            interp_type         = types.INTERP_LINEAR
-        )
+        # videos = fn.resize(
+        #     videos,
+        #     resize_x=source_params['input_size'],
+        #     resize_y=source_params['input_size'],
+        #     interp_type         = types.INTERP_LINEAR
+        # )
 
         videos = fn.crop_mirror_normalize(
             videos,
@@ -218,7 +233,6 @@ def dali_pipeline(mode, source_params):
 
 def dali_dataloader(
     file_list,
-    label,
     dali_num_threads,
     dali_py_num_workers,
     batch_size,
@@ -245,12 +259,10 @@ def dali_dataloader(
         "num_shards":           num_shards, 
         "shard_id":             shard_id,
         "file_list":            file_list,
-        "label_path":                label[0],
-        "visible_indices_path":      label[1],
-        
+
         # Size parameters
-        "input_size":           input_size,
-        "short_side_size":      short_side_size,
+        # "input_size":           input_size,
+        # "short_side_size":      short_side_size,
         "sequence_length":      sequence_length,
         "stride":               stride,
         
@@ -263,10 +275,8 @@ def dali_dataloader(
         "mean":                 mean,
         "std":                  std,
         "reprob":               0,
-
-
     }
-        
+
     pipe = dali_pipeline(
         batch_size           = batch_size,
         num_threads          = dali_num_threads,
@@ -299,4 +309,3 @@ def dali_dataloader(
         mode          = mode
     )
     return dataloader
-

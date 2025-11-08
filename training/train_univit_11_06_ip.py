@@ -18,7 +18,7 @@ from training.checkpoint_utils import load_checkpoint, save_checkpoint
 from training.fused_partial_fc_v2 import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
 
-torch._dynamo.config.optimize_ddp = False
+torch._dynamo.config.optimize_ddp = True
 
 
 parser = argparse.ArgumentParser(description="Multi-dataset video training")
@@ -108,6 +108,13 @@ parser.add_argument("--visualize", type=int, default=0, help="Save input clips a
 parser.add_argument("--vis_samples", type=int, default=2, help="Number of samples to visualize per batch / 每个 batch 可视化的样本数")
 parser.add_argument("--vis_interval", type=int, default=10, help="Visualization save interval in steps / 可视化保存的步数间隔")
 
+# ---------------------------
+# Index sampling for ViT input / ViT 输入的索引采样
+# ---------------------------
+
+parser.add_argument("--total_indices", type=int, default=2000, help="Visible indices total count / 可见索引总数")
+parser.add_argument("--target_num", type=int, default=1536, help="Sampled indices count / 采样索引个数")
+parser.add_argument("--must_num", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
 
 args = parser.parse_args()
 
@@ -239,7 +246,7 @@ def main():
 
         partial_fc.train().cuda()
         list_module_pfc.append(partial_fc)
-        dict_pfc_modules[head_name] = torch.compile(partial_fc)
+        dict_pfc_modules[head_name] = partial_fc
 
         lr_pfc = args.lr * args.list_lr_pfc_weights[head_id]
         parameters.append(
@@ -300,31 +307,26 @@ def main():
             find_unused_parameters=True,
             static_graph=True)
 
-    ddp_backbone = wrap_ddp(backbone)
-    compiled_ddp_backbone = torch.compile(ddp_backbone)
+    backbone = wrap_ddp(backbone)
 
     list_dali_dataloader = []
     list_head_names = []
     # print("开始加载数据了")
     for head_id, dataset_config in enumerate(args.list_datasets):
         if dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video_fix_ip import dali_dataloader
+            from dataloader.data_decord_video_fix_ip_fix_size import dali_dataloader
 
             train_iter = dali_dataloader(
                 file_list=dataset_config.prefixes,
-                label=dataset_config.label,
-                dali_num_threads=2,
+                dali_num_threads=4,
                 dali_py_num_workers=8,
                 batch_size=args.list_batch_sizes[head_id],
                 input_size=args.image_size[0],
                 sequence_length=args.num_frames,
-                stride=8,
                 seed=0+rank,
-                short_side_size=256 / 224 * args.image_size[0],
                 shard_id=dataset_config.shard_id,
                 num_shards=dataset_config.num_shards)
-        
-        
+
 
         elif dataset_config.dali_type == "origin":
 
@@ -385,18 +387,35 @@ def main():
             dataset_config: Property
             if dataset_config.dali_type in ["decord"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
-                visible_indices = list_data_batch[head_id]["visible_indices"]
+                visible_indices = list_data_batch[head_id]["visible_indices"]  # [bs, 2000]
+                bs = visible_indices.shape[0]
+                # assert visible_indices.shape[1] == args.total_indices
+
+                must_have = visible_indices[:, :args.must_num]  # [bs, 196]
+                candidates = visible_indices[:, args.must_num:args.total_indices]  # [bs, 1804]
+                sample_num = args.target_num - args.must_num  # 1340
+
+                # [bs, 1804]——每行是每个batch的随机分配概率
+                randmat = torch.rand(bs, candidates.shape[1], device=visible_indices.device)
+                # 用 topk 按行取采样下标
+                idx = randmat.topk(sample_num, dim=1).indices  # [bs, 1340]
+
+                # 用 gather 实现批量采样
+                sampled = torch.gather(candidates, 1, idx)  # [bs, 1340]
+
+                # 拼接
+                selected_visible_indices = torch.cat([must_have, sampled], dim=1)  # [bs, 1536]
 
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding = compiled_ddp_backbone(head_input, visible_indices)["head_output"]
+                    head_embedding = backbone(head_input, selected_visible_indices)["head_output"]
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)
             elif dataset_config.dali_type in ["origin"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding = compiled_ddp_backbone(head_input)["head_output"]
+                    head_embedding = backbone(head_input)["head_output"]
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)  
             else:
@@ -422,9 +441,9 @@ def main():
         is_accumulation_step = (global_step % args.backward_passes_per_step != 0)
         scaled_loss = sum(list_loss) / args.backward_passes_per_step
 
-        if is_accumulation_step:
+        if is_accumulation_step and isinstance(backbone, torch.nn.parallel.DistributedDataParallel):
             # 中间累积步骤，避免DDP通信
-            with compiled_ddp_backbone.no_sync():
+            with backbone.no_sync():
                 scaled_loss.backward()
         else:
             # 最后一步正常backward，会进行梯度同步
@@ -432,7 +451,7 @@ def main():
 
             # 只在累积完成时执行梯度裁剪和优化器更新
             if global_step % args.backward_passes_per_step == 0:
-                clip_grad_norm_(compiled_ddp_backbone.parameters(), max_norm=5, norm_type=2)
+                clip_grad_norm_(backbone.parameters(), max_norm=5, norm_type=2)
                 for pfc in list_module_pfc:
                     clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
                 opt.step()
