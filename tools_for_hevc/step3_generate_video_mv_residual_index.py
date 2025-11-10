@@ -22,7 +22,7 @@ from numpy.lib.format import open_memmap
 
 import numpy as np
 # ---- 你的残差读取器 ----
-from hevc_feature_decoder import HevcFeatureReader
+from hevc_feature_decoder_mv import HevcFeatureReader
 
 
 def _y_from_yuv_bytes(buf: bytes, H: int, W: int, cw: int, ch: int, tight: bool = True) -> np.ndarray:
