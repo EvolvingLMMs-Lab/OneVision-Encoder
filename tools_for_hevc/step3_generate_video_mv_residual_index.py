@@ -239,11 +239,35 @@ def process_one_video_mv_res(
     异常时返回全 0（便于断点续跑）。
     """
     try:
-        # 允许把非hevc路径自动替换为 *_hevc
-        vp = _maybe_swap_to_hevc(video_path)
+        os.environ["UMT_HEVC_Y_ONLY"] = "1" if hevc_y_only else "0"
+        prefix_fast = int(os.environ.get("HEVC_PREFIX_FAST", "1")) != 0
 
+        video_path = _maybe_swap_to_hevc(video_path)
+        vr = decord.VideoReader(video_path, num_threads=max(4, hevc_n_parallel), ctx=decord.cpu(0))
+        duration = len(vr)
+
+        T = seq_len
+        if duration >= T:
+            frame_id_list = list(range(T))
+        else:
+            frame_id_list = list(range(duration)) + [duration - 1] * (T - duration)
+
+        # I 帧（相对 T 片段的位置）
+        key_idx = None
+        if hasattr(vr, "get_key_indices"):
+            key_idx = vr.get_key_indices()
+        elif hasattr(vr, "get_keyframes"):
+            key_idx = vr.get_keyframes()
+        if key_idx is not None:
+            I_global = set(int(i) for i in np.asarray(key_idx).tolist())
+        else:
+            I_global = set(int(i) for i in range(0, duration, 16))
+        I_pos = set([i for i, fid in enumerate(frame_id_list) if fid in I_global])
+
+        # 读残差（Y 通道），I 位置置 0
+        Tsel = T
         # --- 用 HevcFeatureReader 与 C 端严格对齐（读取顺序与字段布局由 C 端决定） ---
-        rdr = HevcFeatureReader(vp, nb_frames=seq_len, n_parallel=hevc_n_parallel)
+        rdr = HevcFeatureReader(video_path, nb_frames=seq_len, n_parallel=hevc_n_parallel)
         H, W = rdr.height, rdr.width
 
         T = int(seq_len)
@@ -265,61 +289,94 @@ def process_one_video_mv_res(
         # 逐帧读取，保持首 T 帧（不足用最后一帧补齐）
         frames_collected = 0
         last_fused = np.zeros((H, W), dtype=np.float32)
-        for (frame_tuple, meta) in rdr.nextFrameEx():
-            if frames_collected >= T:
-                break
-            (
-                frame_type,
-                quadtree_stru,
-                rgb,
-                mv_x_L0,
-                mv_y_L0,
-                mv_x_L1,
-                mv_y_L1,
-                ref_off_L0,
-                ref_off_L1,
-                size,
-                residual,
-            ) = frame_tuple
 
-            raw_mode = bool(meta.get("raw_mode", False))
-            if raw_mode:
-                Hc = int(meta.get("coded_height", H))
-                Wc = int(meta.get("coded_width", W))
-                tight = bool(meta.get("tight_planes", True))
-                # rgb carries raw YUV bytes; residual carries raw residual YUV bytes
-                y_plane = _y_from_yuv_bytes(rgb, H, W, Wc, Hc, tight=tight)
-                y_res   = _y_from_yuv_bytes(residual, H, W, Wc, Hc, tight=tight)
-                mv_x_L0 = _reshape_mv_from_bytes(mv_x_L0, H, W)
-                mv_y_L0 = _reshape_mv_from_bytes(mv_y_L0, H, W)
-                ref_off_L0 = _reshape_ref_from_bytes(ref_off_L0, H, W)
-                # L1/size 可按需：这里不使用，保持占位
+        try:
+            if all(fid == i for i, fid in enumerate(frame_id_list)) and prefix_fast:
+                # 连续帧：直接取前 Tsel 帧
+                it = rdr.nextFrameEx()
+                for i in range(Tsel):
+                    frame_tuple, meta = next(it)
+                    (
+                        frame_type,
+                        quadtree_stru,
+                        rgb,
+                        mv_x_L0,
+                        mv_y_L0,
+                        mv_x_L1,
+                        mv_y_L1,
+                        ref_off_L0,
+                        ref_off_L1,
+                        size,
+                        residual,
+                    ) = frame_tuple
 
-            if meta.get("is_i_frame", False):
-                fused_list[frames_collected] = np.zeros((H, W), dtype=np.float32)
+                    if i in I_pos:
+                        fused_list[i] = np.zeros((H, W), dtype=np.float32)
+                        continue
+
+                    mvx_hw = rdr._upsample_mv_to_hw(mv_x_L0.astype(np.float32))
+                    mvy_hw = rdr._upsample_mv_to_hw(mv_y_L0.astype(np.float32))
+                    mv_norm, _ = _mv_energy_norm(
+                        mvx_hw, mvy_hw, H, W,
+                        mv_unit_div=mv_unit_div, pct=mv_pct
+                    )
+
+                    Y_res = _residual_y(residual)
+                    res_norm, _ = _residual_energy_norm(Y_res, pct=res_pct)
+
+                    fused = _fuse_energy(
+                        mv_norm, res_norm,
+                        mode=fuse_mode, w_mv=w_mv, w_res=w_res
+                    )
+                    fused_list[i] = fused
+                    last_fused = fused
             else:
-                # 1) MV：四分之一分辨率上采样到 H×W；单位换算（quarter-pel -> px）在 _mv_energy_norm 内处理
-                mvx = rdr._upsample_mv_to_hw(mv_x_L0.astype(np.float32))
-                mvy = rdr._upsample_mv_to_hw(mv_y_L0.astype(np.float32))
-                mv_norm, _mv_scale_px = _mv_energy_norm(
-                    mvx, mvy, H, W, mv_unit_div=mv_unit_div, pct=mv_pct
-                )  # H×W, float32 in [0,1]
+                # 非连续：顺序扫描并映射
+                wanted = set(frame_id_list)
+                idx2pos = {fid: i for i, fid in enumerate(frame_id_list)}
+                filled = 0
+                cur_idx = 0
+                for frame_tuple, meta in rdr.nextFrameEx():
+                    if cur_idx in wanted:
+                        pos = idx2pos[cur_idx]
+                        (
+                            frame_type,
+                            quadtree_stru,
+                            rgb,
+                            mv_x_L0,
+                            mv_y_L0,
+                            mv_x_L1,
+                            mv_y_L1,
+                            ref_off_L0,
+                            ref_off_L1,
+                            size,
+                            residual,
+                        ) = frame_tuple
 
-                # 2) 残差：取得 Y 平面并做分位数归一化
-                Y_res = y_res if raw_mode else _residual_y(residual)
-                res_norm, _res_scale = _residual_energy_norm(Y_res, pct=res_pct)  # H×W
+                        if pos in I_pos:
+                            fused_list[pos] = np.zeros((H, W), dtype=np.float32)
+                        else:
+                            mvx_hw = rdr._upsample_mv_to_hw(mv_x_L0.astype(np.float32))
+                            mvy_hw = rdr._upsample_mv_to_hw(mv_y_L0.astype(np.float32))
+                            mv_norm, _ = _mv_energy_norm(
+                                mvx_hw, mvy_hw, H, W,
+                                mv_unit_div=mv_unit_div, pct=mv_pct
+                            )
+                            Y_res = _residual_y(residual)
+                            res_norm, _ = _residual_energy_norm(Y_res, pct=res_pct)
+                            fused = _fuse_energy(
+                                mv_norm, res_norm,
+                                mode=fuse_mode, w_mv=w_mv, w_res=w_res
+                            )
+                            fused_list[pos] = fused
+                            last_fused = fused
 
-                # 3) 融合
-                fused = _fuse_energy(
-                    mv_norm, res_norm, mode=fuse_mode, w_mv=w_mv, w_res=w_res
-                )
-                fused_list[frames_collected] = fused
-                last_fused = fused
-
-            frames_collected += 1
-
-        rdr.close()
-
+                        filled += 1
+                        if filled >= Tsel:
+                            break
+                    cur_idx += 1
+        finally:
+            rdr.close()
         # 若不足 T 帧，则用最后一帧的 fused 重复补齐
         for i in range(frames_collected, T):
             fused_list[i] = last_fused.copy()
