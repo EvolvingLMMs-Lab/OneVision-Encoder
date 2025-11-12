@@ -11,9 +11,9 @@ import decord
 from nvidia.dali.pipeline import pipeline_def
 import glob
 try:
-    from .hevc_feature_decoder import HevcFeatureReader
+    from .hevc_feature_decoder_mv import HevcFeatureReader
 except Exception:
-    from hevc_feature_decoder import HevcFeatureReader
+    from hevc_feature_decoder_mv import HevcFeatureReader
 try:
     import cv2
     _HAS_CV2 = True
@@ -127,8 +127,12 @@ class ExternalInputCallable:
         if self.mode in ["train", "val"]:
             # 所有帧索引
             all_index = list(range(0, int(duration), 1))
-            average_duration = duration // sequence_length
 
+            # 按照每一个seq进行分group
+            # average_duration = duration // sequence_length
+            # 第一帧为I帧 其余为P帧
+            average_duration = duration
+            
             if average_duration > 0:
                 frame_id_list = list(
                     np.multiply(list(range(sequence_length)), average_duration))
@@ -168,8 +172,7 @@ class ExternalInputCallable:
 
             frame_ids = frame_id_list
             pos_map = {fid: i for i, fid in enumerate(frame_ids)}
-
-
+            
                         # 读取视频帧
             decord_vr.seek(0)
             video_data = decord_vr.get_batch(frame_id_list).asnumpy()
