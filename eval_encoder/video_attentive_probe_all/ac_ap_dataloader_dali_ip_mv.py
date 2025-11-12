@@ -11,9 +11,9 @@ import decord
 from nvidia.dali.pipeline import pipeline_def
 import glob
 try:
-    from .hevc_feature_decoder import HevcFeatureReader
+    from .hevc_feature_decoder_mv import HevcFeatureReader
 except Exception:
-    from hevc_feature_decoder import HevcFeatureReader
+    from hevc_feature_decoder_mv import HevcFeatureReader
 try:
     import cv2
     _HAS_CV2 = True
@@ -127,8 +127,10 @@ class ExternalInputCallable:
         if self.mode in ["train", "val"]:
             # 所有帧索引
             all_index = list(range(0, int(duration), 1))
-            average_duration = duration // sequence_length
 
+            # 按照每一个seq进行分group
+            average_duration = duration // sequence_length
+            
             if average_duration > 0:
                 frame_id_list = list(
                     np.multiply(list(range(sequence_length)), average_duration))
@@ -138,7 +140,6 @@ class ExternalInputCallable:
                     frame_id_list = list(range(0, min(duration, sequence_length)))
                 else:
                     frame_id_list = list(range(duration)) + [duration - 1] * (sequence_length - duration)
-            
             try:
                 key_idx = None
                 if hasattr(decord_vr, "get_key_indices"):
@@ -158,8 +159,10 @@ class ExternalInputCallable:
             except Exception:
                 # 保底处理：忽略异常，后续用默认策略
                 print("没有读取成功")
-                gop = max(1,int(self.gop_size))
-                I_list = [i for i, fid in enumerate(frame_id_list)if(int(fid)% gop)== 0]
+                # gop = max(1,int(self.gop_size))
+                # I_list = [i for i, fid in enumerate(frame_id_list)if(int(fid)% gop)== 0]
+                # 第一帧为I帧
+                I_list = [0]
                 # 其余为 P 帧
                 P_list = [i for i in range(len(frame_id_list))if i not in I_list]
                 # Map absolute frame id -> position in the sampled sequence
@@ -168,8 +171,7 @@ class ExternalInputCallable:
 
             frame_ids = frame_id_list
             pos_map = {fid: i for i, fid in enumerate(frame_ids)}
-
-
+            
                         # 读取视频帧
             decord_vr.seek(0)
             video_data = decord_vr.get_batch(frame_id_list).asnumpy()
