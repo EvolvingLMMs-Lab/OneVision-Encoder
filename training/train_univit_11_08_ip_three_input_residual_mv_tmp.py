@@ -49,7 +49,7 @@ parser.add_argument("--list_datasets", nargs='+', type=str, default=["k710_ssv2_
                     help="Dataset registry names, one or more / 数据集注册名，可多个")
 parser.add_argument("--list_batch_sizes", nargs='+', type=int, default=[32],
                     help="Per-dataset batch sizes / 各数据集的 batch 大小")
-parser.add_argument("--list_sample_rates", nargs='+', type=float, default=[0.1],
+parser.add_argument("--list_sample_rates", nargs='+', type=float, default=[ 0.1],
                     help="Per-dataset sampling rate / 各数据集采样权重")
 parser.add_argument("--list_margins", nargs='+', type=float, default=[0.3],
                     help="Per-dataset loss margin / 各数据集损失 margin")
@@ -207,7 +207,6 @@ def main():
         assert os.path.exists(args.init_backbone)
         state_dict = torch.load(args.init_backbone, "cpu")
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         backbone.load_state_dict(state_dict, strict=True)
         logger.info(f"Loaded backbone weights from {args.init_backbone}")
 
@@ -316,7 +315,7 @@ def main():
     # print("开始加载数据了")
     for head_id, dataset_config in enumerate(args.list_datasets):
         if dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video_fix_ip_fix_size import dali_dataloader
+            from dataloader.data_decord_video_fix_ip_fix_size_residual_mv import dali_dataloader
 
             train_iter = dali_dataloader(
                 file_list=dataset_config.prefixes,
@@ -373,15 +372,15 @@ def main():
 
     # -------- 这里加一段logger，输出每个rank分到的数据 --------
 
-    for head_id, dataset_config in enumerate(args.list_datasets):
-        name = dataset_config.name if hasattr(dataset_config, "name") else f"head_{head_id}"
-        prefixes = getattr(dataset_config, "prefixes", None)
-        logger.info(
-            f"[rank {rank}][local_rank {local_rank}] head_id={head_id} dataset={name} assigned_prefixes_num={len(prefixes) if prefixes is not None else 'N/A'}"
-        )
-        if prefixes is not None:
-            preview_prefixes = prefixes
-            logger.info(f"[rank {rank}][local_rank {local_rank}] prefixes preview: {preview_prefixes}")
+    # for head_id, dataset_config in enumerate(args.list_datasets):
+    #     name = dataset_config.name if hasattr(dataset_config, "name") else f"head_{head_id}"
+    #     prefixes = getattr(dataset_config, "prefixes", None)
+    #     logger.info(
+    #         f"[rank {rank}][local_rank {local_rank}] head_id={head_id} dataset={name} assigned_prefixes_num={len(prefixes) if prefixes is not None else 'N/A'}"
+    #     )
+    #     if prefixes is not None:
+    #         preview_prefixes = prefixes
+    #         logger.info(f"[rank {rank}][local_rank {local_rank}] prefixes preview: {preview_prefixes}")
             # 如需全部打印，可以用:
             # for p in prefixes:
             #     logger.info(f"    {p}")

@@ -24,6 +24,12 @@ import numpy as np
 # ---- 你的残差读取器 ----
 from hevc_feature_decoder_mv import HevcFeatureReader
 
+# ===== 新增：读取分布式环境变量 =====
+RANK = int(os.environ.get("RANK", "0"))
+LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
+WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
+# =====================================
+
 
 def _y_from_yuv_bytes(buf: bytes, H: int, W: int, cw: int, ch: int, tight: bool = True) -> np.ndarray:
     if tight:
@@ -388,7 +394,7 @@ def process_one_video_mv_res(
 
         fused = np.stack(fused_list, axis=0)  # (T, H, W)
 
-        # resize -> 224×224，并转成“强度”型 uint8（不需要居中）
+        # resize -> 224×224，并转成"强度"型 uint8（不需要居中）
         fused224_u8 = np.empty((T, 224, 224), dtype=np.uint8)
         for i in range(T):
             fused224_u8[i] = _resize_u8_gray((fused[i] * 255.0).astype(np.uint8), size=224)
@@ -509,50 +515,47 @@ def _debug_dump_video(video_path: str, out_dir: str, frames: int, hevc_n_paralle
     print(f"[debug] dumped {cnt} frames to {out_dir}")
 
 
-def _find_zero_rows_memmap(mm: np.memmap, chunk: int = 20000):
-    """返回所有全 0 行的索引列表（分块扫描，避免一次性读全量内存）"""
-    N = mm.shape[0]
-    todo = []
-    for st in range(0, N, chunk):
-        ed = min(N, st + chunk)
-        blk = mm[st:ed]           # memmap 切片，逐块触盘
-        # 行是否全 0：等价于 (blk != 0).any(axis=1) == False
-        row_zero = ~(blk != 0).any(axis=1)
-        idxs = np.nonzero(row_zero)[0] + st
-        if idxs.size:
-            todo.extend(idxs.tolist())
-    return todo
+# ===== 新增：按样本生成输出路径的工具函数 =====
+def _make_out_path(video_path: str, src: str, dst: str, suffix: str = ".visidx.npy") -> str:
+    """基于原始视频路径做字符串 replace，保持层级不变，只改前缀，并将扩展改为 .visidx.npy"""
+    if src not in video_path:
+        raise ValueError(f"--out_replace_src '{src}' 不在视频路径中：{video_path}")
+    replaced = video_path.replace(src, dst)
+    stem, _ = os.path.splitext(replaced)
+    out_path = stem + suffix
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    return out_path
+# ==============================================
 
-#   --list /video_vit/train_UniViT/mp4_list.txt \
-#   --out-file /video_vit/train_UniViT/visible_indices.npy \
-#   --seq-len 16 --patch-size 16 --keep-ratio 0.30 \
-#   --hevc-n-parallel 6 --hevc-y-only 1 --resume 1
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--list", type=str, default= "/video_vit/train_UniViT/mp4_list_part_3.txt", help="视频列表文件（每行一个路径）")
-    ap.add_argument("--out-file",  type=str, default= "/video_vit/feilong/CVPR/tools_for_hevc/mp4_list_part_3.npy", help="合并输出（.npy），仅保存 visible_indices，总形状 (N,K)")
+    ap.add_argument("--list", type=str, default="/video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2/shuf_merged_list", help="视频列表文件（每行一个路径）")
+    # ===== 新增：分文件输出相关参数 =====
+    ap.add_argument("--out_replace_src", default="clips_square_aug_k710_ssv2_hevc_v2", help="输出路径替换：原始路径中的子串（如原根目录）")
+    ap.add_argument("--out_replace_dst", default="clips_square_aug_k710_ssv2_hevc_v2_residual_mv", help="输出路径替换：替换成的子串（如新根目录）")
+    ap.add_argument("--out_suffix", default=".visidx.npy", help="每个视频结果文件后缀，默认 .visidx.npy")
+    ap.add_argument("--overwrite",  type=int, default=0, help="输出文件存在时是否覆盖（0 跳过，1 覆盖）")
+    # ====================================
     ap.add_argument("--seq-len", type=int, default=64, help="T：每视频使用的帧数（不足重复最后一帧）")
     ap.add_argument("--patch-size", type=int, default=16, help="ViT patch 大小，需整除 224")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--keep-ratio", type=float, default=0.30, help="保留比例（0~1），用于计算 K")
-    g.add_argument("--k-keep",     type=int,   default=1568, help="直接指定 K")
+    g.add_argument("--k-keep",     type=int,   default=2000, help="直接指定 K")
     ap.add_argument("--hevc-n-parallel", type=int, default=6, help="HevcFeatureReader 并行度")
     ap.add_argument("--hevc-y-only",     type=int, default=1, help="Y 通道残差（1/0）")
-    ap.add_argument("--flush-every",     type=int, default=100, help="每处理多少视频 flush 一次")
-    # 断点续跑相关
-    ap.add_argument("--resume",          type=int, default=1, help="若 out-file 存在则断点续跑（按全 0 行判定）")
-    ap.add_argument("--overwrite",       type=int, default=0, help="忽略旧文件，重新创建并清零")
-    ap.add_argument("--scan-chunk",      type=int, default=20000, help="扫描全 0 行时的分块大小")
-    ap.add_argument("--prezero",         type=int, default=1, help="新建文件时是否整体清零（便于断点续跑）")
+    ap.add_argument("--flush-every",     type=int, default=100, help="每处理多少视频打印一次日志")
     # 单视频调试参数
     ap.add_argument("--video", type=str, help="单视频调试：输入视频路径（优先级高于 --list）")
     ap.add_argument("--debug-out", type=str, default="viz_residual_debug", help="单视频调试输出目录")
     ap.add_argument("--debug-frames", type=int, default=16, help="单视频调试：读取的帧数 T")
+    ap.add_argument("--local_rank", type=int, default=0, help="本地 rank（DeepSpeed 自动注入）")
 
     args = ap.parse_args()
 
-    # === 单视频可视化直通分支 ===
+    # === 单视频可视化直通分支（不变） ===
     if args.video:
         vp = _maybe_swap_to_hevc(args.video)
         os.makedirs(args.debug_out, exist_ok=True)
@@ -564,7 +567,7 @@ def main():
     if N == 0:
         raise RuntimeError("empty list")
 
-    # 计算 L 与 K（或从现有文件继承）
+    # 计算 L 与 K
     T = int(args.seq_len)
     p = int(args.patch_size)
     assert 224 % p == 0, "224 必须能被 patch_size 整除"
@@ -572,111 +575,72 @@ def main():
     wb = 224 // p
     L = T * hb * wb
 
-    out_file = os.path.abspath(args.out_file)
-    os.makedirs(os.path.dirname(out_file), exist_ok=True)
-
-    mm = None
-    K = None
-
-    if os.path.exists(out_file) and not args.overwrite and args.resume:
-        # --- 断点续跑：沿用现有文件 ---
-        mm = open_memmap(out_file, mode="r+")
-        if mm.dtype != np.int32:
-            raise RuntimeError(f"existing file dtype {mm.dtype}, expected int32")
-        if mm.shape[0] != N:
-            raise RuntimeError(f"existing file rows {mm.shape[0]} != videos {N}（列表内容/数量不一致）")
-        K_file = int(mm.shape[1])
-        if args.k_keep is not None:
-            # 显式指定 K，需与现有文件一致
-            if int(args.k_keep) != K_file:
-                raise RuntimeError(f"K mismatch: existing {K_file} vs arg {args.k_keep}. 使用 --overwrite 1 重建，或去掉 --k-keep。")
-            K = K_file
-        else:
-            # 未指定则沿用文件的 K
-            K = K_file
-        if K <= 1:
-            raise RuntimeError("K<=1 在“全 0 行判未完成”的语义下不安全，请使用更大的 K 或改用其它占位符策略。")
-
-        # 找出未完成（全 0 行）的索引
-        todo = _find_zero_rows_memmap(mm, chunk=args.scan_chunk)
-        if not todo:
-            print(f"[info] nothing to do, all {N} rows already filled (N,K)=({N},{K})")
-            return
-        print(f"[resume] found {len(todo)}/{N} rows to process (N,K)=({N},{K})")
+    if args.k_keep is not None and args.k_keep >= 0:
+        K = min(int(args.k_keep), L)
     else:
-        # --- 新建文件 ---
-        # 计算 K（保底 K>=1，但我们强制 K>=2 更安全）
-        if args.k_keep is not None and args.k_keep >= 0:
-            K = min(int(args.k_keep), L)
-        else:
-            keep_ratio = max(0.0, min(float(args.keep_ratio), 1.0))
-            K = int(round(L * keep_ratio))
-        if K <= 1:
-            raise RuntimeError(f"K={K} 不安全（可能与全 0 行冲突），请设置更大的 keep-ratio 或 k-keep。")
+        keep_ratio = max(0.0, min(float(args.keep_ratio), 1.0))
+        K = int(round(L * keep_ratio))
+    if K <= 1:
+        raise RuntimeError(f"K={K} 不安全（可能与全 0 行冲突），请设置更大的 keep-ratio 或 k-keep。")
 
-        mm = open_memmap(out_file, mode="w+", dtype=np.int32, shape=(N, K))
-        if args.prezero:
-            mm[:] = 0    # 显式清零，保障“全 0 = 未完成”
-            mm.flush()
-        todo = list(range(N))
-        print(f"[init] create {out_file} with shape (N,K)=({N},{K}), zero-initialized={bool(args.prezero)}")
+    # ===== 新增：DeepSpeed 分片逻辑 =====
+    num_local = N // WORLD_SIZE + int(RANK < (N % WORLD_SIZE))
+    start = (N // WORLD_SIZE) * RANK + min(RANK, N % WORLD_SIZE)
+    end = start + num_local
+    local_indices = list(range(start, end))
 
-    # --- 主循环：仅处理未完成行（全 0 行） ---
-    for c, i in enumerate(todo, 1):
+    if RANK == 0:
+        print(f"[dist] WORLD_SIZE={WORLD_SIZE}, N={N}, K={K}, slice per rank ~{N//max(1,WORLD_SIZE)} (+余数)")
+    print(f"[rank {RANK}/{WORLD_SIZE}] will process indices [{start}, {end}) => {num_local} videos")
+    # ====================================
+
+    processed = 0
+    for c, i in enumerate(local_indices, 1):
         vp = videos[i].strip()
         if not vp:
-            sys.stderr.write(f"[WARN] empty line at {i}, fill zeros\n")
-            mm[i, :] = 0
-        else:
-            vis_idx = process_one_video_mv_res(
-                video_path=vp,
-                seq_len=T,
-                patch_size=p,
-                K=K,
-                hevc_n_parallel=args.hevc_n_parallel,
-                hevc_y_only=bool(args.hevc_y_only),
-            )
-            mm[i, :] = vis_idx  # 若失败，这里就是全 0；下次还能继续
-        if (c % args.flush_every) == 0:
-            mm.flush()
-            print(f"[info] processed {c}/{len(todo)} (global row {i})")
+            sys.stderr.write(f"[WARN][rank {RANK}] empty line at {i}, skip\n")
+            continue
 
-    mm.flush()
-    try:
-        os.fsync(mm.fp.fileno())
-    except Exception as e:
-        print(f"[warn] fsync failed: {e}")
-    print(f"[done] saved visible_indices to {out_file} (shape={(N,K)})")
+        # ===== 新增：生成单样本输出路径 =====
+        try:
+            out_path = _make_out_path(
+                video_path=vp,
+                src=args.out_replace_src,
+                dst=args.out_replace_dst,
+                suffix=args.out_suffix,
+            )
+        except Exception as e:
+            sys.stderr.write(f"[ERROR][rank {RANK}] make_out_path failed at idx {i}: {e}\n")
+            continue
+
+        if os.path.exists(out_path) and not bool(args.overwrite):
+            if (c % max(1, args.flush_every)) == 0:
+                print(f"[rank {RANK}] skip exists: {out_path} (c={c}/{len(local_indices)})")
+            continue
+        # =====================================
+
+        vis_idx = process_one_video_mv_res(
+            video_path=vp,
+            seq_len=T,
+            patch_size=p,
+            K=K,
+            hevc_n_parallel=args.hevc_n_parallel,
+            hevc_y_only=bool(args.hevc_y_only),
+        )
+
+        # ===== 新增：保存到单样本文件 =====
+        try:
+            np.save(out_path, vis_idx.astype(np.int32), allow_pickle=False)
+        except Exception as e:
+            sys.stderr.write(f"[ERROR][rank {RANK}] save failed at {out_path}: {e}\n")
+            continue
+        # =================================
+
+        processed += 1
+        if (c % max(1, args.flush_every)) == 0:
+            print(f"[rank {RANK}] processed {c}/{len(local_indices)} (global idx {i}), saved: {out_path}")
+
+    print(f"[rank {RANK}] done. processed={processed}, assigned={len(local_indices)}")
 
 if __name__ == "__main__":
     main()
-
-
-
-
-# import math
-
-# # ==== 输入与输出配置 ====
-# in_path = "/video_vit/train_UniViT/mp4_list_part_3.txt"
-# out_prefix = "/video_vit/train_UniViT/mp4_list_part_3_split_"  # 输出文件名前缀
-# num_parts = 4  # 想分成几份
-
-# # ==== 读取所有非空行 ====
-# with open(in_path, "r", encoding="utf-8") as f:
-#     lines = [ln for ln in f if ln.strip()]
-
-# total = len(lines)
-# chunk = math.ceil(total / num_parts)
-# print(f"总行数: {total}, 每份约 {chunk} 行")
-
-# # ==== 按顺序切分并保存 ====
-# for i in range(num_parts):
-#     part_lines = lines[i * chunk : (i + 1) * chunk]
-#     out_path = f"{out_prefix}{i:02d}.txt"
-#     with open(out_path, "w", encoding="utf-8") as f:
-#         f.writelines(part_lines)
-#     print(f"写出 {len(part_lines)} 行 → {out_path}")
-
-# print("✅ 文件切分完成！")
-
-# python step3_generate_video_residual_index.py --list /video_vit/train_UniViT/mp4_list_part_15.txt --out-file /video_vit/feilong/CVPR/tools_for_hevc/part_15.npy

@@ -80,7 +80,7 @@ parser.add_argument("--opt", default="adamw", help="Optimizer name, e.g., 'adamw
 parser.add_argument("--lr", type=float, default=1e-3, help="Base learning rate / 基础学习率")
 parser.add_argument("--weight_decay", type=float, default=0.05, help="Weight decay for non-PFC params / 非 PFC 参数的权重衰减")
 parser.add_argument("--weight_decay_pfc", type=float, default=0.05, help="Weight decay for PFC params / PFC 参数的权重衰减")
-parser.add_argument("--warmup_ratio", type=float, default=0.1, help="Warmup ratio of total training steps / 训练总步数的预热比例")
+parser.add_argument("--warmup_ratio", type=float, default=0.2, help="Warmup ratio of total training steps / 训练总步数的预热比例")
 parser.add_argument("--backward_passes_per_step", type=int, default=1, help="Gradient accumulation steps before optimizer step / 每次优化前累积的反传次数")
 parser.add_argument("--repeat_pfc", type=int, default=0, help="Repeat factor for PFC ops or rebuild cycles / PFC 重复或重建次数（如适用）")
 parser.add_argument("--save_pfc", type=int, default=1, help="Save PFC weights in checkpoints (0/1) / 是否在检查点中保存 PFC 权重")
@@ -207,7 +207,6 @@ def main():
         assert os.path.exists(args.init_backbone)
         state_dict = torch.load(args.init_backbone, "cpu")
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         backbone.load_state_dict(state_dict, strict=True)
         logger.info(f"Loaded backbone weights from {args.init_backbone}")
 
@@ -246,7 +245,7 @@ def main():
             )
 
         partial_fc.train().cuda()
-        list_module_pfc.append(torch.compile(partial_fc))
+        list_module_pfc.append(partial_fc)
         dict_pfc_modules[head_name] = partial_fc
 
         lr_pfc = args.lr * args.list_lr_pfc_weights[head_id]
@@ -308,8 +307,7 @@ def main():
             find_unused_parameters=True,
             static_graph=True)
 
-    backbone_ddp = wrap_ddp(backbone)
-    backbone_ddp_compiled = torch.compile(backbone_ddp)
+    backbone = wrap_ddp(backbone)
 
     list_dali_dataloader = []
     list_head_names = []
@@ -331,21 +329,16 @@ def main():
 
 
         elif dataset_config.dali_type == "origin":
-            if args.debug:
-                from dataloader.data_v2 import SyntheticDataIter
-                train_iter = SyntheticDataIter(
-                    args.list_batch_sizes[head_id], 224, local_rank
-                )
-            else:
-                from dataloader.data_v2 import MultiRecDALIWarper
-                # print("dataset_config.prefix", dataset_config.prefixes)
-                train_iter = MultiRecDALIWarper(
-                    list_prefix=dataset_config.prefixes,
-                    batch_size=args.list_batch_sizes[head_id],
-                    image_size=args.image_size,
-                    workers=args.workers,
-                    shard_id=dataset_config.shard_id,
-                    num_shards=dataset_config.num_shards
+
+            from dataloader.data_v2 import MultiRecDALIWarper
+            # print("dataset_config.prefix", dataset_config.prefixes)
+            train_iter = MultiRecDALIWarper(
+                list_prefix=dataset_config.prefixes,
+                batch_size=args.list_batch_sizes[head_id],
+                image_size=args.image_size,
+                workers=args.workers,
+                shard_id=dataset_config.shard_id,
+                num_shards=dataset_config.num_shards
         )
         else:
             raise ValueError(
@@ -369,24 +362,6 @@ def main():
         tb_writer=tb_writer,
     )
     log_args(args, logger, writer=tb_writer, save_dir=args.output, rank=rank)
-
-
-    # -------- 这里加一段logger，输出每个rank分到的数据 --------
-
-    for head_id, dataset_config in enumerate(args.list_datasets):
-        name = dataset_config.name if hasattr(dataset_config, "name") else f"head_{head_id}"
-        prefixes = getattr(dataset_config, "prefixes", None)
-        logger.info(
-            f"[rank {rank}][local_rank {local_rank}] head_id={head_id} dataset={name} assigned_prefixes_num={len(prefixes) if prefixes is not None else 'N/A'}"
-        )
-        if prefixes is not None:
-            preview_prefixes = prefixes
-            logger.info(f"[rank {rank}][local_rank {local_rank}] prefixes preview: {preview_prefixes}")
-            # 如需全部打印，可以用:
-            # for p in prefixes:
-            #     logger.info(f"    {p}")
-
-    # -----------------------------------------------------
 
     list_iter = []
     list_next_data_batch = []
@@ -480,7 +455,7 @@ def main():
                     combined_out = out[combined_idx]
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        combined_head_output = backbone_ddp_compiled(combined_head_input, combined_out)["head_output"]
+                        combined_head_output = backbone(combined_head_input, combined_out)["head_output"]
                     combined_head_output = combined_head_output.float()
 
                 # ---------- collage（后20%）: 从 head_input split 出帧，按 frame_sampling 策略抽帧并拼成 8行1列单张图，然后像 origin 一样单独推理 ----------
@@ -524,7 +499,7 @@ def main():
 
                     # 像 origin 一样单独推理（不传 out）
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        collage_head_output = backbone_ddp_compiled(grid)["head_output"]
+                        collage_head_output = backbone(grid)["head_output"]
                     collage_head_output = collage_head_output.float()
 
                 # ---------- 汇总 combined 与 collage 输出，按 batch 顺序放回 ----------
@@ -542,7 +517,7 @@ def main():
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding = backbone_ddp_compiled(head_input)["head_output"]
+                    head_embedding = backbone(head_input)["head_output"]
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)
             else:
@@ -568,9 +543,9 @@ def main():
         is_accumulation_step = (global_step % args.backward_passes_per_step != 0)
         scaled_loss = sum(list_loss) / args.backward_passes_per_step
 
-        if is_accumulation_step:
+        if is_accumulation_step and isinstance(backbone, torch.nn.parallel.DistributedDataParallel):
             # 中间累积步骤，避免DDP通信
-            with backbone_ddp_compiled.no_sync():
+            with backbone.no_sync():
                 scaled_loss.backward()
         else:
             # 最后一步正常backward，会进行梯度同步
@@ -578,7 +553,7 @@ def main():
 
             # 只在累积完成时执行梯度裁剪和优化器更新
             if global_step % args.backward_passes_per_step == 0:
-                clip_grad_norm_(backbone_ddp_compiled.parameters(), max_norm=5, norm_type=2)
+                clip_grad_norm_(backbone.parameters(), max_norm=5, norm_type=2)
                 for pfc in list_module_pfc:
                     clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
                 opt.step()

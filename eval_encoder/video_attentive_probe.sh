@@ -4,7 +4,7 @@ VAL_DATA_ROOT_PATH="${VAL_DATA_ROOT_PATH:-/video_vit/eval_data/val/}"
 VAL_DATA_CSV_PATH="${VAL_DATA_CSV_PATH:-/video_vit/eval_data/annotation/}"
 
 # ---------------- Distributed defaults -----------------
-NUM_GPUS="${NUM_GPUS:-8}"        # 每节点 GPU 数
+NUM_GPUS="${NUM_GPUS:-1}"        # 每节点 GPU 数
 NNODES="${NNODES:-1}"            # 总节点数
 RANK="${RANK:-0}"                # 当前节点 rank
 ADDR="${ADDR:-127.0.0.1}"        # 主节点地址 (MASTER_ADDR)
@@ -21,6 +21,7 @@ CKPT_PATH="${CKPT_PATH:-model.pt}"            # 微调初始权重 / 预训练 c
 EMBEDDING_SIZE="${EMBEDDING_SIZE:-1024}"
 NUM_FRAMES="${NUM_FRAMES:-8}"
 NUM_EPOCH="${NUM_EPOCH:-100}"
+NUM_TARGET="${NUM_TARGET:-1568}"
 INPUT_SIZE="${INPUT_SIZE:-224}"
 TUBELET_SIZE="${TUBELET_SIZE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
@@ -55,6 +56,7 @@ do
                 --seed ${SEED} \
                 --num_shots ${NUM_SHOTS} \
                 --num_step 8 \
+                --num_target ${NUM_TARGET} \
                 --train_data_root_path ${TRAIN_DATA_ROOT_PATH} \
                 --train_data_csv_path ${TRAIN_DATA_CSV_PATH} \
                 --val_data_root_path ${VAL_DATA_ROOT_PATH} \

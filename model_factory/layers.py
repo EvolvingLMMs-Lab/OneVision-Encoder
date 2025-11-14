@@ -457,12 +457,12 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
         Tensor: Pooled representation (B, C).
     """
 
-    def __init__(self, hidden_size, num_attention_heads, intermediate_size):
+    def __init__(self, hidden_size, num_attention_heads, intermediate_size, norm_cls=nn.RMSNorm):
         super().__init__()
 
         self.probe = nn.Parameter(torch.randn(1, 1, hidden_size))
         self.attention = torch.nn.MultiheadAttention(hidden_size, num_attention_heads, batch_first=True)
-        self.norm = nn.RMSNorm(hidden_size, )
+        self.norm = norm_cls(hidden_size)
         self.mlp = Siglip2MLP(hidden_size, intermediate_size)
         self.num_heads = num_attention_heads
 

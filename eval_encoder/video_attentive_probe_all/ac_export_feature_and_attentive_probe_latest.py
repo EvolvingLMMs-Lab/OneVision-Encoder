@@ -72,6 +72,7 @@ def get_args():
     parser.add_argument('--eval_freq', default=10, type=int)
 
     parser.add_argument('--using_normlize', action='store_true')
+    parser.add_argument('--num_target', default=1568, type=int)
     return parser.parse_args()
 
 
@@ -149,7 +150,16 @@ def get_feature(videos, processor, forward_base_model):
                 enc_out = forward_base_model(videos)
                 outputs = enc_out["visible_embeddings"]
 
-    elif args.model_family == "llava_vit_64frames":
+    elif args.model_family == "llava_vit_tiling":
+        # choose seq=8 vertical tiles
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                B, C, T, H, W = videos.shape
+                tiled_imgs = videos[:,:,::8,:,:].reshape(B, C, 8 * H, W)
+                enc_out = forward_base_model(tiled_imgs, None, None)
+                outputs = enc_out["visible_embeddings"]
+
+    elif args.model_family == "llava_vit_sampling":
         # videos: Tensor, shape [bs, 64, ...] 或者至少 device 可用
         # bs = videos.size(0)
         def make_uniform_visible_index(bs, device, frames=64, seq=8, frame_tokens=196):
@@ -169,7 +179,9 @@ def get_feature(videos, processor, forward_base_model):
                 # 使用示例（放在你的上下文里）：
                 bs = videos.size(0)
                 device = videos.device
-                visible_index = make_uniform_visible_index(bs, device, frames=64, seq=8, frame_tokens=196)
+
+                seq = args.num_target // 196  # 计算需要采样的帧数
+                visible_index = make_uniform_visible_index(bs, device, frames=64, seq=seq, frame_tokens=196)
                 # visible_index -> 形状 [bs, 1568]，可以传给后续模块
                 enc_out = forward_base_model(videos, visible_index, mask_ratio=None)
                 outputs = enc_out["visible_embeddings"]
@@ -721,7 +733,7 @@ def get_model(args):
        from transformers import MLCDVisionModel
        base_model = MLCDVisionModel.from_pretrained(args.ckpt_path).cuda()
 
-    elif args.model_family in ['llava_vit', 'llava_vit_si', 'llava_vit_64frames']:
+    elif args.model_family in ['llava_vit', 'llava_vit_si', 'llava_vit_sampling', "llava_vit_tiling"]:
         base_model = create_model(
             args.model_name,
             pretrained=False,)

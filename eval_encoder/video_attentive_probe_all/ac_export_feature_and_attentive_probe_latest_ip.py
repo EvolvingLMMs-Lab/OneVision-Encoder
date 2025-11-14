@@ -12,6 +12,7 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from ac_ap_dataloader_dali_ip import dali_dataloader
+from ac_ap_dataloader_dali_ip_mv import dali_dataloader as dali_dataloader_mv
 #
 from all_utils import (MetricLogger, load_finetune_checkpoint,
                        setup_for_distributed, setup_seed)
@@ -74,6 +75,7 @@ def get_args():
     parser.add_argument('--eval_freq', default=10, type=int)
 
     parser.add_argument('--using_normlize', action='store_true')
+    parser.add_argument('--using_mv', default=0, type=int)
     parser.add_argument('--num_target', default=1568, type=int)
     return parser.parse_args()
 
@@ -87,48 +89,123 @@ def get_feature(videos, res_zero_masks, processor, forward_base_model):
     elif args.model_family == "llava_vit":
         def mask_by_residual_topk(res: torch.Tensor, k_keep: int, patch_size=16):
             """
-            基于残差 res 的 Top-K 掩码。
-            选择 |res| 在 patch 内求和后的得分最高的 K 个 patch 作为可见，其余为 mask。
+            先固定拿第一帧的 patch（数量 = hb*wb，典型为 196），
+            再从剩余帧里按残差 Top-K 选，补齐到 k_keep（即 args.num_target）。
 
             Args:
-                res:  (B, 1, T, H, W)  —— I 帧建议事先置 0，这样自然会优先选到 P 帧。
-                k_keep: int            —— 每个样本保留的可见块数量（Top-K 超参）
+                res:  (B, 1, T, H, W) —— 建议第一帧(I帧)残差已置 0
+                k_keep: int            —— 目标总可见块数（含第一帧）
+                patch_size: int        —— patch 尺寸，默认 16
 
             Returns:
-                visible_indices: LongTensor (B, K)   —— 选中的线性 patch 索引（按升序）
-                visible_mask:    BoolTensor (B, L)   —— L = T * (H/Ph) * (W/Pw)
-                ids_restore:     LongTensor (B, L)   —— MAE 风格的还原下标
+                visible_indices: LongTensor (B, K) —— 选中的线性 patch 索引（升序）
             """
             assert res.dim() == 5 and res.size(1) == 1, "res 需为 (B,1,T,H,W)"
             B, _, T, H, W = res.shape
             ph, pw = patch_size, patch_size
 
-            hb, wb = H // ph, W // pw        # 每帧的 patch 网格
-            L = T * hb * wb                  # 总 patch 数
+            hb, wb = H // ph, W // pw           # 每帧的 patch 网格
+            per_frame = hb * wb                 # 每帧 patch 数（典型为 196）
+            L = T * per_frame                   # 总 patch 数
 
-            # K 边界
+            # 总 K 边界
             K = int(max(0, min(k_keep, L)))
 
-            # 计算每个 patch 的残差得分（|.| 在 patch 内求和） -> (B, T, hb, wb)
-            # 参考：res_c = res[:hb*ph, :wb*pw].reshape(hb, ph, wb, pw); s = |res_c|.sum(axis=(1,3))
-            res_abs = res.abs().squeeze(1)                                 # (B,T,H,W)
-            scores = res_abs.reshape(B, T, hb, ph, wb, pw).sum(dim=(3, 5)) # (B,T,hb,wb)
-            scores = scores.reshape(B, L)                                  # (B, L)
+            # 计算每个 patch 的残差得分（|.| 在 patch 内求和） -> (B, T, hb, wb) -> (B, L)
+            res_abs = res.abs().squeeze(1)                                   # (B,T,H,W)
+            scores = res_abs.reshape(B, T, hb, ph, wb, pw).sum(dim=(3, 5))   # (B,T,hb,wb)
+            scores = scores.reshape(B, L)                                    # (B, L)
 
-            # 选 Top-K（按 batch 独立进行）
-            if K > 0:
-                topk_idx = torch.topk(scores, k=K, dim=1, largest=True, sorted=False).indices  # (B, K)
-                visible_indices = torch.sort(topk_idx, dim=1).values                           # (B, K) 升序，便于后续索引
+            # 1) 先拿第一帧的索引（线性 0..per_frame-1）
+            take_from_first = min(K, per_frame)
+            if take_from_first > 0:
+                first_frame_idx = torch.arange(per_frame, device=res.device, dtype=torch.long)
+                first_frame_idx = first_frame_idx[:take_from_first]          # 若 K < per_frame，只取前 K 个
+                first_frame_idx = first_frame_idx.unsqueeze(0).expand(B, -1) # (B, take_from_first)
             else:
-                visible_indices = torch.empty(B, 0, dtype=torch.long, device=res.device)
+                first_frame_idx = torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+            # 2) 剩余从后续帧中按 Top-K 选
+            remain_k = K - take_from_first
+            if remain_k > 0:
+                # 剩余区域是线性 [per_frame, L)
+                remain_scores = scores[:, per_frame:]                        # (B, L - per_frame)
+                topk_idx_rem = torch.topk(remain_scores, k=remain_k, dim=1, largest=True, sorted=False).indices
+                topk_idx_rem = topk_idx_rem + per_frame                      # 还原到全局线性下标
+            else:
+                topk_idx_rem = torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+            # 3) 合并并升序
+            visible_indices = torch.cat([first_frame_idx, topk_idx_rem], dim=1)  # (B, K)
+            if K > 0:
+                visible_indices, _ = torch.sort(visible_indices, dim=1)
+
             return visible_indices
 
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
                 visible_indices = mask_by_residual_topk(res_zero_masks, k_keep=args.num_target, patch_size=16)
+                # print(visible_indices.max())
+                # print(visible_indices.sum())
+                # print(visible_indices)
                 enc_out = forward_base_model(videos, visible_indices, mask_ratio=None)
                 outputs = enc_out["visible_embeddings"]
-    return outputs
+        return outputs
+ 
+
+    elif args.model_family == "llava_vit_mv":
+        def mask_by_residual_topk(res: torch.Tensor, k_keep: int, patch_size: int = 16, max_index: int | None = None):
+            """
+            更简单的 Top-K 选择：直接在所有 patch（可选地限定前 max_index 个线性索引）上按残差取前 k_keep 个。
+
+            Args:
+                res:        (B, 1, T, H, W)
+                k_keep:     目标总可见块数
+                patch_size: patch 大小，默认 16
+                max_index:  如果给定，只在线性索引 [0, max_index) 范围内选
+
+            Returns:
+                visible_indices: LongTensor (B, K')，K' = min(k_keep, 候选数)，每行升序
+            """
+            assert res.dim() == 5 and res.size(1) == 1, "res 需为 (B,1,T,H,W)"
+            B, _, T, H, W = res.shape
+            ph = pw = patch_size
+            hb, wb = H // ph, W // pw
+            per_frame = hb * wb
+            L = T * per_frame
+
+            K = int(max(0, min(k_keep, L)))
+            if K == 0:
+                return torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+            # 计算每个 patch 的 residual score
+            scores = res.abs().squeeze(1)  # (B, T, H, W)
+            scores = scores.reshape(B, T, hb, ph, wb, pw).sum(dim=(3, 5)).reshape(B, L)  # (B, L)
+
+            # 限定候选区间（若提供）
+            if max_index is not None:
+                max_index = max(0, int(max_index))
+                max_index = min(max_index, L)
+                if max_index == 0:
+                    return torch.empty(B, 0, dtype=torch.long, device=res.device)
+                cand = scores[:, :max_index]
+            else:
+                cand = scores
+
+            cand_len = cand.size(1)
+            if K >= cand_len:
+                idx = torch.arange(cand_len, device=res.device, dtype=torch.long)
+                return idx.unsqueeze(0).expand(B, -1).clone()
+
+            topk_idx = torch.topk(cand, k=K, dim=1, largest=True, sorted=False).indices  # (B, K)
+            visible_indices, _ = torch.sort(topk_idx, dim=1)
+            return visible_indices
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                visible_indices = mask_by_residual_topk(res_zero_masks, k_keep=args.num_target, patch_size=16)
+                enc_out = forward_base_model(videos, visible_indices, mask_ratio=None)
+                outputs = enc_out["visible_embeddings"]
+        return outputs
 
 
 class CustomModel(nn.Module):
@@ -373,7 +450,7 @@ def get_model(args):
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
 
-    elif args.model_family == 'llava_vit':
+    elif args.model_family in ['llava_vit', 'llava_vit_mv']:
         base_model = create_model(
             args.model_name,
             pretrained=True,
@@ -419,6 +496,9 @@ if __name__ == '__main__':
     args.global_rank = args.rank
     setup_for_distributed(args.global_rank == 0)
     setup_seed(seed=args.seed, cuda_deterministic=False)
+
+    if args.using_mv:
+        dali_dataloader = dali_dataloader_mv
 
     print("create data loader start")
     data_loader_train = dali_dataloader(args.train_data_root_path,

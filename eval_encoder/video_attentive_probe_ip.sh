@@ -23,10 +23,12 @@ INPUT_SIZE="${INPUT_SIZE:-224}"
 NUM_FRAMES="${NUM_FRAMES:-8}"
 NUM_EPOCH="${NUM_EPOCH:-100}"
 NUM_TARGET="${NUM_TARGET:-1568}"
-BATCH_SIZE="${BATCH_SIZE:-4}"
-LR="${LR:-1e-4}"
+BATCH_SIZE="${BATCH_SIZE:-32}"
+LR="${LR:-0.0001}"
 TUBELET_SIZE="${TUBELET_SIZE:-1}"
 EVAL_FREQ="${EVAL_FREQ:-10}"
+
+USING_MV="${USING_MV:-0}"  # 是否使用运动矢量作为额外输入
 
 TRAIN_DATA_ROOT_PATH="${TRAIN_DATA_ROOT_PATH:-/video_vit/eval_data/train}"
 TRAIN_DATA_CSV_PATH="${TRAIN_DATA_CSV_PATH:-/video_vit/fewshot_video/ActionRecognition}"
@@ -35,7 +37,7 @@ VAL_DATA_CSV_PATH="${VAL_DATA_CSV_PATH:-/video_vit/eval_data/annotation/}"
 
 
 # ---------------- Distributed defaults -----------------
-NUM_GPUS="${NUM_GPUS:-8}"        # 每节点 GPU 数
+NUM_GPUS="${NUM_GPUS:-1}"        # 每节点 GPU 数
 NNODES="${NNODES:-1}"            # 总节点数
 RANK="${RANK:-0}"                # 当前节点 rank
 ADDR="${ADDR:-127.0.0.1}"        # 主节点地址 (MASTER_ADDR)
@@ -83,8 +85,8 @@ do
                 --num_frames ${NUM_FRAMES} \
                 --input_size ${INPUT_SIZE} \
                 --tubelet_size ${TUBELET_SIZE} \
-                --default_lr_list ${LR}
+                --default_lr_list ${LR} \
+                --using_mv ${USING_MV}
         done
     done
 done
-    
