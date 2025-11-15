@@ -1,10 +1,13 @@
-import os
 import glob
+import logging
 import math
+import os
 
 from dataset.registry import DATASET_REGISTRY
 
 from .properties import Property
+
+logger = logging.getLogger(__file__)
 
 list_coyo = [
     "/vlm/data/coyo400m_part1/coyo700m_00",
@@ -159,12 +162,12 @@ def llava_vit_si_ssd():
     shard_id = card_index - start_indices[prefix_idx]
     num_shards = group_sizes[prefix_idx]
 
-    # 打印调试信息，便于确认分配（生产中可移除或改为 logger）
-    print(f"[llava_vit_si_ssd] all_prefixes={list_prefix}")
-    print(f"[llava_vit_si_ssd] group_sizes={group_sizes}")
-    print(f"[llava_vit_si_ssd] start_indices={start_indices}")
-    print(f"[llava_vit_si_ssd] local_rank={local_rank} -> card_index={card_index}")
-    print(f"[llava_vit_si_ssd] assigned_prefix={assigned_prefix}, shard_id={shard_id}, num_shards={num_shards}")
+    # 打印调试信息，便于确认分配
+    logger.info(f"[llava_vit_si_ssd] all_prefixes={list_prefix}")
+    logger.info(f"[llava_vit_si_ssd] group_sizes={group_sizes}")
+    logger.info(f"[llava_vit_si_ssd] start_indices={start_indices}")
+    logger.info(f"[llava_vit_si_ssd] local_rank={local_rank} -> card_index={card_index}")
+    logger.info(f"[llava_vit_si_ssd] assigned_prefix={assigned_prefix}, shard_id={shard_id}, num_shards={num_shards}")
 
     return Property(
         num_classes=2000000,

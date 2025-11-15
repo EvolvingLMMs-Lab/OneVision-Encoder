@@ -26,9 +26,8 @@ warnings.filterwarnings("ignore")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser("Attentive probing with SigLIP2 head (Meta style)")
     # Data
-    parser.add_argument("--train_data_root_path", default="/data_3/data_attentive_probe/ssv2")
+    parser.add_argument("--data_root", default="/data_3/data_attentive_probe")
     parser.add_argument("--train_data_csv_path", default="ssv2_train_new.csv")
-    parser.add_argument("--val_data_root_path", default="/data_3/data_attentive_probe/ssv2")
     parser.add_argument("--val_data_csv_path", default="ssv2_val_new.csv")
     parser.add_argument("--dataset", default="ssv2")
 
@@ -115,10 +114,10 @@ def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.T
 
 
 def get_feature(
-    args: argparse.Namespace, 
-    videos: torch.Tensor, 
-    model: nn.Module, 
-    frame_indices: torch.Tensor = None, 
+    args: argparse.Namespace,
+    videos: torch.Tensor,
+    model: nn.Module,
+    frame_indices: torch.Tensor = None,
     total_frames: torch.Tensor = None,
     is_training: bool = False
 ) -> torch.Tensor:
@@ -386,42 +385,42 @@ def main() -> None:
     args.num_classes = nb_classes_map[args.dataset]
 
     if args.dataset == "ssv2":
-        args.train_data_root_path = "/data_3/data_attentive_probe/ssv2"
-        args.val_data_root_path = "/data_3/data_attentive_probe/ssv2"
+        args.train_data_root_path = os.path.join(args.data_root, "ssv2")
+        args.val_data_root_path = os.path.join(args.data_root, "ssv2")
         args.train_data_csv_path = "ssv2_train_new.csv"
         args.val_data_csv_path = "ssv2_val_new.csv"
     if args.dataset == "diving48":
-        args.train_data_root_path = "/data_3/data_attentive_probe/diving48"
-        args.val_data_root_path = "/data_3/data_attentive_probe/diving48"
+        args.train_data_root_path = os.path.join(args.data_root, "diving48")
+        args.val_data_root_path = os.path.join(args.data_root, "diving48")
         args.train_data_csv_path = "diving48_train_new.csv"
         args.val_data_csv_path = "diving48_val_new.csv"
     if args.dataset == "epic_verb":
-        args.train_data_root_path = "/data_3/data_attentive_probe/epic_verb"
-        args.val_data_root_path = "/data_3/data_attentive_probe/epic_verb"
+        args.train_data_root_path = os.path.join(args.data_root, "epic_verb")
+        args.val_data_root_path = os.path.join(args.data_root, "epic_verb")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "epic_noun":
-        args.train_data_root_path = "/data_3/data_attentive_probe/epic_noun"
-        args.val_data_root_path = "/data_3/data_attentive_probe/epic_noun"
+        args.train_data_root_path = os.path.join(args.data_root, "epic_noun")
+        args.val_data_root_path = os.path.join(args.data_root, "epic_noun")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "perception_test":
-        args.train_data_root_path = "/data_3/data_attentive_probe/perception_test"
-        args.val_data_root_path = "/data_3/data_attentive_probe/perception_test"
+        args.train_data_root_path = os.path.join(args.data_root, "perception_test")
+        args.val_data_root_path = os.path.join(args.data_root, "perception_test")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "charadesego":
-        args.train_data_root_path = "/data_3/data_attentive_probe/CharadesEgo"
-        args.val_data_root_path = "/data_3/data_attentive_probe/CharadesEgo"
+        args.train_data_root_path = os.path.join(args.data_root, "CharadesEgo")
+        args.val_data_root_path = os.path.join(args.data_root, "CharadesEgo")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "k400":
-        args.train_data_root_path = "/data_3/data_attentive_probe/k400"
-        args.val_data_root_path = "/data_3/data_attentive_probe/k400"
+        args.train_data_root_path = os.path.join(args.data_root, "k400")
+        args.val_data_root_path = os.path.join(args.data_root, "k400")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
 
-    try:
+    try:    
         args.rank = int(os.environ["RANK"])
         args.local_rank = int(os.environ["LOCAL_RANK"])
         args.world_size = int(os.environ["WORLD_SIZE"])
