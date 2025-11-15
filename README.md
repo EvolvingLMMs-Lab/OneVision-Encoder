@@ -95,7 +95,7 @@ LR=5e-4 bash video_attentive_probe.sh
 ## Eval
 
 ```
-
+torchrun--nproc_per_node 8 --master_port 15555 attentive_probe.py --eval_freq 1 --default_lr_list 0.0003 --batch_size 16 --default_weight_decay 0 --dali_py_num_workers 8 --model_family llava_vit_sampling --dataset ssv2
 ```
 
 ## Contributors
