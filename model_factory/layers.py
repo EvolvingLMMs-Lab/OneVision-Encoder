@@ -7,12 +7,33 @@ from typing import Callable, Optional
 
 
 def rotate_half(x):
+    """Swap and negate the two halves of the last dimension.
+
+    This is the standard helper used in Rotary Position Embedding (RoPE):
+    (x1, x2) -> (-x2, x1).
+
+    Args:
+        x (Tensor): Input tensor with an even-sized last dimension.
+
+    Returns:
+        Tensor: Same shape as x.
+    """
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
 
 def apply_rotary_pos_emb_vision(tensor, freqs):
+    """Apply 1D RoPE to a vision tensor.
+
+    Args:
+        tensor (Tensor): Input features (..., D). Only the last dim is used by RoPE.
+        freqs (Tensor): Angular frequencies of shape (L, D/2), typically from VisionRotaryEmbedding,
+            where L matches the sequence length of tensor.
+
+    Returns:
+        Tensor: Tensor with RoPE applied, same shape and dtype as input.
+    """
     orig_dtype = tensor.dtype
     tensor = tensor.float()
     cos = freqs.cos().unsqueeze(1).repeat(1, 1, 2).unsqueeze(0).float()
@@ -24,12 +45,20 @@ def apply_rotary_pos_emb_vision(tensor, freqs):
 def apply_rotary_pos_emb_video_batched(q: torch.Tensor,
                                        k: torch.Tensor,
                                        freqs: torch.Tensor):
-    """
-    q,k: (B, L, H, D)
-    freqs:
-        - (B, L, D/2) per-sample
-        - or (L, D/2) shared
-    returns rotated q,k
+    """Apply 3D-style RoPE to batched queries/keys.
+
+    Args:
+        q (Tensor): Queries of shape (B, L, H, D).
+        k (Tensor): Keys of shape (B, L, H, D).
+        freqs (Tensor): Frequencies for RoPE rotation, either:
+            - (B, L, D/2) per-sample, or
+            - (L, D/2) shared among the batch.
+
+    Returns:
+        Tuple[Tensor, Tensor]: Rotated (q, k), each of shape (B, L, H, D).
+
+    Raises:
+        AssertionError: If L or D/2 do not match between inputs and freqs.
     """
     if freqs.dim() == 2:          # shared
         freqs = freqs.unsqueeze(0)  # (1,L,D/2)
@@ -45,23 +74,50 @@ def apply_rotary_pos_emb_video_batched(q: torch.Tensor,
 
 
 class VisionRotaryEmbedding(nn.Module):
+    """1D Rotary frequency generator for vision/text sequences.
+
+    Given a head dimension 'dim', this module produces angular frequencies for RoPE.
+
+    Args:
+        dim (int): Head dimension used by attention. The number of frequencies produced is dim/2.
+        theta (float, optional): Base for inverse frequency progression. Default: 10000.0.
+
+    Returns (forward):
+        Tensor: Frequencies of shape (L, dim/2), where L is the input sequence length.
+    """
     def __init__(self, dim, theta=10000.0):
         super().__init__()
         inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, seqlen):
+        """Compute frequencies for a sequence length.
+
+        Args:
+            seqlen (int): Sequence length L.
+
+        Returns:
+            Tensor: (L, dim/2) frequency matrix.
+        """
         seq = torch.arange(seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
         return torch.outer(seq, self.inv_freq)
 
 
 class VideoRotaryEmbeddingSplit466(nn.Module):
-    """
-    3D (T,H,W) Rotary 频率构造，按 4:6:6 切分 head_dim//2。
-    t_size : 4 * base
-    h_size : 6 * base
-    w_size : 6 * base
-    base = (head_dim//2) // 16
+    """3D (T,H,W) Rotary frequency constructor with 4:6:6 split.
+
+    The head_dim//2 channel is split into three parts along time/height/width:
+    - t_size : 4 * base_unit
+    - h_size : 6 * base_unit
+    - w_size : 6 * base_unit
+    where base_unit = (head_dim//2)//16.
+
+    Args:
+        head_dim (int): Per-head dimension (must be even and divisible by 16).
+        base (float, optional): Base for inverse frequency progression. Default: 10000.0.
+
+    Returns (forward):
+        Tensor: Frequencies of shape (L, head_dim//2), where L = T*H*W.
     """
     def __init__(self, head_dim: int, base: float = 10000.0):
         super().__init__()
@@ -98,9 +154,17 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
 
     @torch.no_grad()
     def forward(self, t: int, h: int, w: int, device=None, dtype=torch.float32):
-        """
-        返回:
-            freqs: (L, half) 其中 L = t*h*w
+        """Build 3D RoPE frequencies with 4:6:6 split.
+
+        Args:
+            t (int): Temporal length.
+            h (int): Height (patch/grid) length.
+            w (int): Width (patch/grid) length.
+            device (Optional[torch.device]): Target device.
+            dtype (torch.dtype): Target dtype for the frequency tensor.
+
+        Returns:
+            Tensor: Frequencies of shape (L, head_dim//2) with L=t*h*w.
         """
         if device is None:
             device = self.inv_freq_t.device
@@ -128,9 +192,22 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
 
 
 class VisionSdpaAttentionCausal(nn.Module):
-    """
-    扩展版本：支持 attention_mask (B,L,L) bool, True=不允许注意。
-    用法与之前基本一致，只是多一个参数。
+    """Causal self-attention using scaled_dot_product_attention with optional RoPE.
+
+    Supports boolean attention masks and batched/shared RoPE frequencies.
+
+    Args:
+        hidden_size (int): Model dimension C.
+        num_attention_heads (int): Number of heads H (C must be divisible by H).
+        attn_dropout (float, optional): Dropout applied inside attention. Default: 0.0.
+
+    Forward:
+        hidden_states (Tensor): Input of shape (L, B, C), pre-layernorm expected by caller.
+        rotary_pos_emb (Optional[Tensor]): RoPE freqs of shape (L, D/2) or (B, L, D/2).
+        attention_mask (Optional[Tensor]): Bool mask of shape (B, L, L), True means masked.
+
+    Returns:
+        Tensor: Output of shape (L, B, C).
     """
     def __init__(self, hidden_size, num_attention_heads, attn_dropout=0.0):
         super().__init__()
@@ -188,6 +265,27 @@ class VisionSdpaAttentionCausal(nn.Module):
 
 
 class ResidualAttentionBlockCausal(nn.Module):
+    """Pre-LN residual Transformer block with causal self-attention.
+
+    Structure: LN -> causal self-attn (+RoPE/+mask) -> residual,
+               LN -> 2-layer MLP -> residual.
+
+    Args:
+        hidden_size (int): Model dimension.
+        num_attention_heads (int): Number of attention heads.
+        intermediate_size (int): Hidden size of the MLP inner layer.
+        act_layer (Callable, optional): Activation used in the MLP. Default: nn.GELU.
+        attn_dropout (float, optional): Dropout rate inside attention. Default: 0.0.
+        norm_cls (Callable, optional): Layer norm class for pre-norm. Default: nn.LayerNorm.
+
+    Forward:
+        x (Tensor): Input of shape (L, B, C).
+        rotary_pos_emb (Optional[Tensor]): RoPE freqs, (L, D/2) or (B, L, D/2).
+        attention_mask (Optional[Tensor]): Bool mask (B, L, L), True=masked.
+
+    Returns:
+        Tensor: Output of shape (L, B, C).
+    """
     def __init__(self, hidden_size, num_attention_heads, intermediate_size,
                  act_layer=nn.GELU, attn_dropout=0.0, norm_cls: Callable=nn.LayerNorm):
         super().__init__()
@@ -260,6 +358,26 @@ class AttentionPoolingBlock(AttentiveBlock):
 
 
 class TransformerCausal(nn.Module):
+    """Stack of causal ResidualAttentionBlockCausal layers.
+
+    Args:
+        hidden_size (int): Model dimension.
+        num_hidden_layers (int): Number of transformer blocks.
+        num_attention_heads (int): Number of attention heads per block.
+        intermediate_size (int): Inner MLP size for each block.
+        act_layer (Callable, optional): Activation used in MLP. Default: nn.GELU.
+        gradient_checkpointing (bool, optional): Enable checkpointing per block. Default: False.
+        attn_dropout (float, optional): Attention dropout inside each block. Default: 0.0.
+        norm_cls (Callable, optional): Norm class for pre-norm. Default: nn.LayerNorm.
+
+    Forward:
+        x (Tensor): Input (L, B, C).
+        rotary_pos_emb (Optional[Tensor]): RoPE freqs, (L, D/2) or (B, L, D/2).
+        attention_mask (Optional[Tensor]): Bool mask (B, L, L), True=masked.
+
+    Returns:
+        Tensor: Output (L, B, C).
+    """
     def __init__(self,
                  hidden_size,
                  num_hidden_layers,
@@ -293,7 +411,20 @@ class TransformerCausal(nn.Module):
                 x = blk(x, rotary_pos_emb=rotary_pos_emb, attention_mask=attention_mask)
         return x
 
+
 class Siglip2MLP(nn.Module):
+    """Two-layer MLP with GELU activation.
+
+    Args:
+        hidden_size (int): Input/output feature size.
+        intermediate_size (int): Hidden layer size.
+
+    Forward:
+        hidden_states (Tensor): Input (..., hidden_size).
+
+    Returns:
+        Tensor: Output (..., hidden_size).
+    """
     def __init__(self, hidden_size, intermediate_size):
         super().__init__()
         self.activation_fn = F.gelu
@@ -306,15 +437,32 @@ class Siglip2MLP(nn.Module):
         hidden_states = self.fc2(hidden_states)
         return hidden_states
 
-class Siglip2MultiheadAttentionPoolingHead(nn.Module):
-    """Multihead Attention Pooling."""
 
-    def __init__(self, hidden_size, num_attention_heads, intermediate_size):
+class Siglip2MultiheadAttentionPoolingHead(nn.Module):
+    """Multi-Head Attention Pooling with a learned probe (PMA-style).
+
+    A single learnable query ('probe') attends over the token sequence to
+    produce a pooled representation, followed by RMSNorm and a small MLP.
+
+    Args:
+        hidden_size (int): Model dimension.
+        num_attention_heads (int): Number of attention heads in the pooling attention.
+        intermediate_size (int): Hidden size of the post-attention MLP.
+
+    Forward:
+        hidden_state (Tensor): Input tokens (B, N, C).
+        attention_mask (Optional[Tensor]): Not used in current implementation.
+
+    Returns:
+        Tensor: Pooled representation (B, C).
+    """
+
+    def __init__(self, hidden_size, num_attention_heads, intermediate_size, norm_cls=nn.RMSNorm):
         super().__init__()
 
         self.probe = nn.Parameter(torch.randn(1, 1, hidden_size))
         self.attention = torch.nn.MultiheadAttention(hidden_size, num_attention_heads, batch_first=True)
-        self.norm = nn.RMSNorm(hidden_size, )
+        self.norm = norm_cls(hidden_size)
         self.mlp = Siglip2MLP(hidden_size, intermediate_size)
         self.num_heads = num_attention_heads
 

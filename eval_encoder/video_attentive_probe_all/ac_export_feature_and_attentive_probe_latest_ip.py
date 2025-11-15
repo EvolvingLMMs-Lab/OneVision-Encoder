@@ -12,8 +12,8 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from ac_ap_dataloader_dali_ip import dali_dataloader
-# from ac_ap_dataloader_dali_multi_scale import dali_dataloader
-# 
+from ac_ap_dataloader_dali_ip_mv import dali_dataloader as dali_dataloader_mv
+#
 from all_utils import (MetricLogger, load_finetune_checkpoint,
                        setup_for_distributed, setup_seed)
 from timm.loss import LabelSmoothingCrossEntropy
@@ -25,6 +25,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
 
 import model_factory
+from model_factory.layers import Siglip2MultiheadAttentionPoolingHead
 
 
 def get_args():
@@ -74,207 +75,137 @@ def get_args():
     parser.add_argument('--eval_freq', default=10, type=int)
 
     parser.add_argument('--using_normlize', action='store_true')
+    parser.add_argument('--using_mv', default=0, type=int)
+    parser.add_argument('--num_target', default=1568, type=int)
     return parser.parse_args()
 
 
 
 def get_feature(videos, res_zero_masks, processor, forward_base_model):
     # base model export feature
-    if args.model_family == 'pe' or args.model_family == 'ijepa':
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            outputs = [] 
-            for frame_idx in range(videos.shape[2]):
-                frame = videos[:, :,frame_idx,  :, :]
-                with torch.no_grad():
-                    output = forward_base_model(frame)
-                outputs.append(output)
-            outputs = torch.cat(outputs, dim=1)
-    elif args.model_family == 'clip':
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            outputs = [] 
-            for frame_idx in range(videos.shape[2]):
-                frame = videos[:, :,frame_idx,  :, :]
-                inputs = processor(images = frame, return_tensors='pt').to(device)
-                with torch.no_grad():  
-                    output = forward_base_model(**inputs) 
-                outputs.append(output.last_hidden_state[1:])
-            outputs = torch.cat(outputs, dim=1)    
-    elif args.model_family == 'siglip':
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            outputs = [] 
-            for frame_idx in range(videos.shape[2]):
-                frame = videos[:, :,frame_idx,  :, :]
-                inputs = processor(images = frame, padding='max_length', return_tensors='pt')['pixel_values']
-                inputs = inputs.to(dtype=torch.bfloat16, device=device)
-                with torch.no_grad(): 
-                    output = forward_base_model.module.vision_model(inputs)  
-                outputs.append(output.last_hidden_state[1:])
-            outputs = torch.cat(outputs, dim=1)
-    elif args.model_family == 'dino_v2':
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            outputs = [] 
-            for frame_idx in range(videos.shape[2]):
-                frame = videos[:, :,frame_idx,  :, :]
-                inputs = processor(images = frame, return_tensors='pt')
-                with torch.no_grad():  
-                    output = forward_base_model(**inputs)  
-                outputs.append(output.last_hidden_state[1:])
-            outputs = torch.cat(outputs, dim=1)
-    elif args.model_family == 'dino_v3':
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            outputs = []
-            for frame_idx in range(videos.shape[2]):
-                frame = videos[:, :,frame_idx,  :, :]
-                inputs = processor(images = frame, return_tensors='pt')
-                with torch.no_grad():
-                    output = forward_base_model(**inputs)
-                outputs.append(output.last_hidden_state[:, 5:, :])
-            outputs = torch.cat(outputs, dim=1)
-    elif args.model_family == "languagebind":
-        with torch.no_grad():
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                output = forward_base_model.module.vision_model(pixel_values=videos)
-        output=output.last_hidden_state[1:]
-    elif args.model_family == "rice":
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            outputs = []
-            for frame_idx in range(videos.shape[2]):
-                frame = videos[:, :,frame_idx,  :, :]
-                with torch.no_grad():
-                    output = forward_base_model(frame)
-                outputs.append(output.last_hidden_state[:, 1:, :])
-            outputs = torch.cat(outputs, dim=1)
+    if args.model_family == 'pe':
+        pass
 
     elif args.model_family == "llava_vit":
+        def mask_by_residual_topk(res: torch.Tensor, k_keep: int, patch_size=16):
+            """
+            先固定拿第一帧的 patch（数量 = hb*wb，典型为 196），
+            再从剩余帧里按残差 Top-K 选，补齐到 k_keep（即 args.num_target）。
+
+            Args:
+                res:  (B, 1, T, H, W) —— 建议第一帧(I帧)残差已置 0
+                k_keep: int            —— 目标总可见块数（含第一帧）
+                patch_size: int        —— patch 尺寸，默认 16
+
+            Returns:
+                visible_indices: LongTensor (B, K) —— 选中的线性 patch 索引（升序）
+            """
+            assert res.dim() == 5 and res.size(1) == 1, "res 需为 (B,1,T,H,W)"
+            B, _, T, H, W = res.shape
+            ph, pw = patch_size, patch_size
+
+            hb, wb = H // ph, W // pw           # 每帧的 patch 网格
+            per_frame = hb * wb                 # 每帧 patch 数（典型为 196）
+            L = T * per_frame                   # 总 patch 数
+
+            # 总 K 边界
+            K = int(max(0, min(k_keep, L)))
+
+            # 计算每个 patch 的残差得分（|.| 在 patch 内求和） -> (B, T, hb, wb) -> (B, L)
+            res_abs = res.abs().squeeze(1)                                   # (B,T,H,W)
+            scores = res_abs.reshape(B, T, hb, ph, wb, pw).sum(dim=(3, 5))   # (B,T,hb,wb)
+            scores = scores.reshape(B, L)                                    # (B, L)
+
+            # 1) 先拿第一帧的索引（线性 0..per_frame-1）
+            take_from_first = min(K, per_frame)
+            if take_from_first > 0:
+                first_frame_idx = torch.arange(per_frame, device=res.device, dtype=torch.long)
+                first_frame_idx = first_frame_idx[:take_from_first]          # 若 K < per_frame，只取前 K 个
+                first_frame_idx = first_frame_idx.unsqueeze(0).expand(B, -1) # (B, take_from_first)
+            else:
+                first_frame_idx = torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+            # 2) 剩余从后续帧中按 Top-K 选
+            remain_k = K - take_from_first
+            if remain_k > 0:
+                # 剩余区域是线性 [per_frame, L)
+                remain_scores = scores[:, per_frame:]                        # (B, L - per_frame)
+                topk_idx_rem = torch.topk(remain_scores, k=remain_k, dim=1, largest=True, sorted=False).indices
+                topk_idx_rem = topk_idx_rem + per_frame                      # 还原到全局线性下标
+            else:
+                topk_idx_rem = torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+            # 3) 合并并升序
+            visible_indices = torch.cat([first_frame_idx, topk_idx_rem], dim=1)  # (B, K)
+            if K > 0:
+                visible_indices, _ = torch.sort(visible_indices, dim=1)
+
+            return visible_indices
+
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
-                enc_out = forward_base_model(videos, res_zero_masks, mask_ratio=0.5)
+                visible_indices = mask_by_residual_topk(res_zero_masks, k_keep=args.num_target, patch_size=16)
+                # print(visible_indices.max())
+                # print(visible_indices.sum())
+                # print(visible_indices)
+                enc_out = forward_base_model(videos, visible_indices, mask_ratio=None)
                 outputs = enc_out["visible_embeddings"]
+        return outputs
+ 
 
-    elif args.model_family in ["ov_1_5_vit", "mlcd_base", "mlcd"]:
+    elif args.model_family == "llava_vit_mv":
+        def mask_by_residual_topk(res: torch.Tensor, k_keep: int, patch_size: int = 16, max_index: int | None = None):
+            """
+            更简单的 Top-K 选择：直接在所有 patch（可选地限定前 max_index 个线性索引）上按残差取前 k_keep 个。
+
+            Args:
+                res:        (B, 1, T, H, W)
+                k_keep:     目标总可见块数
+                patch_size: patch 大小，默认 16
+                max_index:  如果给定，只在线性索引 [0, max_index) 范围内选
+
+            Returns:
+                visible_indices: LongTensor (B, K')，K' = min(k_keep, 候选数)，每行升序
+            """
+            assert res.dim() == 5 and res.size(1) == 1, "res 需为 (B,1,T,H,W)"
+            B, _, T, H, W = res.shape
+            ph = pw = patch_size
+            hb, wb = H // ph, W // pw
+            per_frame = hb * wb
+            L = T * per_frame
+
+            K = int(max(0, min(k_keep, L)))
+            if K == 0:
+                return torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+            # 计算每个 patch 的 residual score
+            scores = res.abs().squeeze(1)  # (B, T, H, W)
+            scores = scores.reshape(B, T, hb, ph, wb, pw).sum(dim=(3, 5)).reshape(B, L)  # (B, L)
+
+            # 限定候选区间（若提供）
+            if max_index is not None:
+                max_index = max(0, int(max_index))
+                max_index = min(max_index, L)
+                if max_index == 0:
+                    return torch.empty(B, 0, dtype=torch.long, device=res.device)
+                cand = scores[:, :max_index]
+            else:
+                cand = scores
+
+            cand_len = cand.size(1)
+            if K >= cand_len:
+                idx = torch.arange(cand_len, device=res.device, dtype=torch.long)
+                return idx.unsqueeze(0).expand(B, -1).clone()
+
+            topk_idx = torch.topk(cand, k=K, dim=1, largest=True, sorted=False).indices  # (B, K)
+            visible_indices, _ = torch.sort(topk_idx, dim=1)
+            return visible_indices
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            outputs = []
-            temporal_table = None
-            T = videos.shape[2]
-            for frame_idx in range(T):
-                frame = videos[:, :, frame_idx, :, :]
-
-                with torch.no_grad():
-                    output = forward_base_model(frame)
-
-                if args.model_family == "ov_1_5_vit":
-                    feats = output.last_hidden_state[:, 1:, :]  # [B, N_patch, D]
-                else:
-                    feats = output[:, 1:, :]  # [B, N_patch, D]
-
-                # --- NEW: 加时间位置编码（正弦），首帧时一次性构建 ---
-                if temporal_table is None:
-                    B, N_patch, D = feats.shape
-                    device = feats.device
-                    # 构建 [T, D] 正弦时间编码
-                    position = torch.arange(T, device=device).float().unsqueeze(1)
-                    div_term = torch.exp(torch.arange(0, D, 2, device=device).float() * (-math.log(10000.0) / D))
-                    temporal_table = torch.zeros(T, D, device=device)
-                    temporal_table[:, 0::2] = torch.sin(position * div_term)
-                    temporal_table[:, 1::2] = torch.cos(position * div_term)
-                    # temporal_table: [T, D]
-
-                # 取当前帧的编码，加到该帧所有 patch 上
-                feats = feats + temporal_table[frame_idx].view(1, 1, -1)
-                # --- NEW END ---
-
-                outputs.append(feats)
-
-            outputs = torch.cat(outputs, dim=1)  # [B, T*N_patch, D]
-    return outputs
-
-
-class CrossAttention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.0, proj_drop=0.0, attn_head_dim=None, out_dim=None):
-        super().__init__()
-        if out_dim is None:
-            out_dim = dim
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        if attn_head_dim is not None:
-            head_dim = attn_head_dim
-        all_head_dim = head_dim * num_heads
-        assert all_head_dim == dim
-        self.scale = qk_scale or head_dim ** -0.5
-        self.head_dim = head_dim
-        self.q = nn.Linear(dim, all_head_dim, bias=False)
-        self.k = nn.Linear(dim, all_head_dim, bias=False)
-        self.v = nn.Linear(dim, all_head_dim, bias=False)
-        if qkv_bias:
-            self.q_bias = nn.Parameter(torch.zeros(all_head_dim))
-            self.k_bias = nn.Parameter(torch.zeros(all_head_dim))
-            self.v_bias = nn.Parameter(torch.zeros(all_head_dim))
-        else:
-            self.q_bias = None
-            self.k_bias = None
-            self.v_bias = None
-        self.attn_drop_value = attn_drop
-        self.proj = nn.Linear(all_head_dim, out_dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-
-    def forward(self, x, k=None, v=None, attn_mask=None, is_causal=False):
-        B, Nq, C = x.shape
-        if k is None:
-            k = x
-        if v is None:
-            v = k
-        q = F.linear(x, self.q.weight, self.q_bias)
-        k = F.linear(k, self.k.weight, self.k_bias)
-        v = F.linear(v, self.v.weight, self.v_bias)
-        q = q.view(B, Nq, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B, k.shape[1], self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B, v.shape[1], self.num_heads, self.head_dim).transpose(1, 2)
-        default_scale = self.head_dim ** -0.5
-        if abs(self.scale - default_scale) > 1e-12:
-            q = q * (self.scale * (self.head_dim ** 0.5))
-        out = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask,
-            dropout_p=self.attn_drop_value if self.training else 0.0,
-            is_causal=is_causal
-        )
-        out = out.transpose(1, 2).contiguous().view(B, Nq, -1)
-        out = self.proj(out)
-        out = self.proj_drop(out)
-        return out
-
-
-class AttentiveBlock(nn.Module):
-    
-    def __init__(self, dim, num_heads, qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., norm_layer=nn.LayerNorm, attn_head_dim=None, out_dim=None):
-        super().__init__()
-        self.norm1_q = norm_layer(dim)
-        self.norm1_k = norm_layer(dim)
-        self.norm1_v = norm_layer(dim)
-        self.cross_attn = CrossAttention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop,
-            proj_drop=drop, attn_head_dim=attn_head_dim, out_dim=out_dim)
-        
-        if drop_path > 0.:
-            print(f"Use DropPath in projector: {drop_path}")
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
-    def forward(self, x_q, x_kv, pos_q, pos_k, bool_masked_pos, rel_pos_bias=None):
-        x_q = self.norm1_q(x_q + pos_q)
-        x_k = self.norm1_k(x_kv + pos_k)
-        x_v = self.norm1_v(x_kv)
-        x = self.cross_attn(x_q, k=x_k, v=x_v)
-        return x
-
-
-class AttentionPoolingBlock(AttentiveBlock):
-    def forward(self, x):
-        x_q = x.mean(1, keepdim=True)
-        x_kv, pos_q, pos_k = x, 0, 0
-        x = super().forward(x_q, x_kv, pos_q, pos_k, bool_masked_pos=None, rel_pos_bias=None)
-        x = x.squeeze(1)
-        return x
+            with torch.no_grad():
+                visible_indices = mask_by_residual_topk(res_zero_masks, k_keep=args.num_target, patch_size=16)
+                enc_out = forward_base_model(videos, visible_indices, mask_ratio=None)
+                outputs = enc_out["visible_embeddings"]
+        return outputs
 
 
 class CustomModel(nn.Module):
@@ -353,12 +284,13 @@ def train_AdamW(
     use_bf16 = torch.cuda.is_available()
     last_val_stats = {}
     global_step = 0
+    last_val_stats = {"acc1": 0.0, "acc5": 0.0}
 
     for epoch in range(total_epochs):
         cur_ap_model.train()
         metric_logger = MetricLogger(delimiter="  ")
         header = f"Epoch: [{epoch}]"
-        
+
         for data_iter_step, (videos, res_zero_masks, labels) in enumerate(
             metric_logger.log_every(
                 data_loader_train,
@@ -417,10 +349,15 @@ def train_AdamW(
                 data_loader_val=data_loader_val,
                 processor=processor
             )
-            last_val_stats = val_stats
+            # last_val_stats = val_stats
             if hasattr(data_loader_val, "reset"):
                 data_loader_val.reset()
             print(f"[Val][Epoch {epoch}] acc1={val_stats.get('acc1', 0):.4f} acc5={val_stats.get('acc5', 0):.4f}")
+
+            if val_stats.get("acc1", 0) > last_val_stats.get("acc1", 0):
+                last_val_stats = val_stats
+
+            print(f"Best so far: acc1={last_val_stats.get('acc1', 0):.4f} acc5={last_val_stats.get('acc5', 0):.4f}")
 
     if "acc1" not in last_val_stats:
         last_val_stats = {"acc1": 0.0, "acc5": 0.0}
@@ -475,19 +412,18 @@ def find_peak(args, lr, cur_device, base_model, data_loader_train, data_loader_v
         base_model = load_finetune_checkpoint(args, base_model)
 
     base_model.to(cur_device).eval()
-    attentive_probe_model = AttentionPoolingBlock(
-                                        dim=args.embedding_size,
-                                        num_heads=args.default_attentive_head,
-                                        qkv_bias=True,
-                                        qk_scale=None,
-                                        drop=0.0,
-                                        attn_drop=0.0,
-                                        drop_path=0.0,
-                                        norm_layer=partial(nn.LayerNorm, eps=1e-5),
-                                        out_dim=args.default_attentive_out_dim)
-    ap_model = CustomModel(attentive_probe_model,
-                        attentive_dim=args.default_attentive_out_dim,
-                        num_classes=args.num_classes)
+
+    attentive_probe_model = Siglip2MultiheadAttentionPoolingHead(
+        hidden_size=args.embedding_size,
+        num_attention_heads=args.embedding_size // 64,
+        intermediate_size=args.embedding_size * 4,
+    )
+
+    ap_model = CustomModel(
+        attentive_probe_model,
+        attentive_dim=args.embedding_size,
+        num_classes=args.num_classes)
+
     print("create attentive probe model end!")
     cur_ap_model = ap_model.to(cur_device)
     cur_ap_model = torch.nn.parallel.DistributedDataParallel(cur_ap_model, device_ids=[args.local_rank])
@@ -513,195 +449,12 @@ def get_model(args):
             tubelet_size=args.tubelet_size,
             use_mean_pooling=True)
         base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_family == "videomae_v1":
-        import video_models.videomae_v1
-        base_model = create_model(
-            args.model_name,
-            img_size=args.input_size,
-            pretrained=False,
-            num_classes=args.num_classes,
-            all_frames=args.num_frames,
-            tubelet_size=args.tubelet_size,
-            use_mean_pooling=True)
-        base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_family == "videomae_v2":
-        import video_models.videomae_v2
-        base_model = create_model(
-            args.model_name,
-            img_size=args.input_size,
-            pretrained=False,
-            num_classes=args.num_classes,
-            all_frames=args.num_frames,
-            tubelet_size=args.tubelet_size,
-            use_mean_pooling=True)
-        base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_family == "vswift":
-        import video_models.vswift
-        base_model = create_model(
-            args.model_name,
-            img_size=args.input_size,
-            pretrained=False,
-            num_classes=args.num_classes,
-            all_frames=args.num_frames,
-            tubelet_size=args.tubelet_size,
-            use_mean_pooling=True)
-        base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_family == "ov2":
-        import video_models.ov2
-        base_model = create_model(
-            args.model_name,
-            img_size=args.input_size,
-            pretrained=False,
-            num_classes=args.num_classes,
-            all_frames=args.num_frames,
-            tubelet_size=args.tubelet_size,
-            use_mean_pooling=True)
-    elif args.model_family == "viclip":
-        import video_models.viclip
-        base_model = create_model(
-            args.model_name,
-            input_resolution=args.input_size,
-            pretrained=False,
-            kernel_size=args.tubelet_size,
-            center=True, 
-            num_frames=args.num_frames,
-            drop_path=0.0, 
-            checkpoint_num=0,
-            dropout=0.0)
-        base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_family == "internvideo_v1":
-        import video_models.internvidev1
-        base_model = create_model(
-            args.model_name,
-            img_size=args.input_size,
-            pretrained=False,
-            num_classes=args.num_classes,
-            all_frames=args.num_frames,
-            tubelet_size=args.tubelet_size,
-            use_mean_pooling=True)
-        base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_family == "internvideo_v2":
-        import video_models.internvideo_v2
-        base_model = create_model(
-            args.model_name,
-            pretrained=False,
-            num_classes=args.num_classes,
-            num_frames=args.num_frames,
-            tubelet_size=args.tubelet_size,
-            drop_path_rate=0.1,
-            checkpoint_num=0,
-        )
-        base_model.forward= base_model.forward_features_attentive_probe
-    elif args.model_family == "vjepa":
-        if args.model_name=="vit_large":
-            from video_models.vjepa.modeling_finetune import vit_large
-            base_model = vit_large(
-                img_size=args.input_size,
-                pretrained=False,
-                kernel_size=args.tubelet_size,
-                frames_per_clip=args.num_frames,
-                uniform_power=True,
-                use_sdpa=True,
-                use_SiLU=False,
-                tight_SiLU=False)
-        else:
-            from video_models.vjepa.modeling_finetune import vit_huge
-            base_model = vit_huge(
-                img_size=args.input_size,
-                pretrained=False,
-                kernel_size=args.tubelet_size,
-                frames_per_clip=args.num_frames,
-                uniform_power=True,
-                use_sdpa=True,
-                use_SiLU=False,
-                tight_SiLU=False)
-    elif args.model_family == 'univit':
-        import video_models.video_mlcd
-        print("load create univit")
-        base_model = create_model(
-            args.model_name,
-            img_size=224,
-            num_classes=512
-        )
-    elif args.model_family == 'cvpr':
-        import video_models.cvpr
-        print("load create cvpr_model")
-        base_model = create_model(
-            args.model_name,
-            # img_size=224,
-            # num_classes=512
-        )
 
-    elif args.model_family == "rice":
-        from modeling_rice_base import MLCDVisionModel
-        base_model = MLCDVisionModel.from_pretrained("/vlm/xiangan/pretrain_models/deepglint/rice-vit-large-patch14-560-v1")
-
-    elif args.model_family == "ov_1_5_vit":
-       from transformers import MLCDVisionModel
-       base_model = MLCDVisionModel.from_pretrained(args.ckpt_path).cuda()
-
-    elif args.model_family == 'llava_vit':
+    elif args.model_family in ['llava_vit', 'llava_vit_mv']:
         base_model = create_model(
             args.model_name,
             pretrained=True,
             ckpt_path=args.ckpt_path)
-
-    elif args.model_family == 'mlcd':
-        if args.model_name=="vit-bigG-patch14-448":
-            base_model = MLCDVisionModel.from_pretrained(args.ckpt_path)
-        elif args.model_name=="vit-bigG-patch14-224":
-            base_model = MLCDVisionModel.from_pretrained(args.ckpt_path)
-        elif args.model_name=="vit-large-patch14-336":
-            base_model = CLIPVisionModel.from_pretrained(args.ckpt_path)
-
-    elif args.model_family == 'mlcd_base':
-        pretrained_cfg = {
-                "ckpt_path": args.ckpt_path,
-        }
-        base_model = create_model(
-            args.model_name,
-            pretrained=True,
-            pretrained_cfg=pretrained_cfg)
-
-    elif args.model_family == 'languagebind':
-        from languagebind import (LanguageBindVideo,
-                                  LanguageBindVideoProcessor,
-                                  LanguageBindVideoTokenizer)
-        base_model = LanguageBindVideo.from_pretrained(args.ckpt_path)
-        tokenizer = LanguageBindVideoTokenizer.from_pretrained(args.ckpt_path)
-        processor = LanguageBindVideoProcessor(args.model_name.config, tokenizer)
-        return base_model, processor
-    elif args.model_family == 'pe':
-        import core.vision_encoder.pe as pe
-        import core.vision_encoder.transforms as transforms
-        base_model = pe.CLIP.from_config(args.ckpt_path, pretrained=True)  # Downloads from HF
-        processor = transforms.get_image_transform(base_model.image_size)
-        return base_model, processor
-    elif args.model_family == "ijepa":
-        from transformers import AutoModel, AutoProcessor
-        base_model = AutoModel.from_pretrained(args.ckpt_path)
-        processor = AutoProcessor.from_pretrained(args.ckpt_path)
-        return base_model, processor
-    elif args.model_family == "siglip":
-        from transformers import AutoModel, AutoProcessor, AutoTokenizer
-        base_model = AutoModel.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        processor = AutoProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        return base_model, processor
-    elif args.model_family == "dino":
-        from transformers import AutoImageProcessor, AutoModel
-        base_model = AutoModel.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        processor = AutoImageProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        return base_model, processor
-    elif args.model_family == "dino_v3":
-        from transformers import AutoImageProcessor, AutoModel
-        base_model = AutoModel.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        processor = AutoImageProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        return base_model, processor
-    elif args.model_family == "clip":
-        from transformers import AutoProcessor, CLIPVisionModelWithProjection
-        base_model = CLIPVisionModelWithProjection.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        processor = AutoProcessor.from_pretrained(args.ckpt_path, torch_dtype=torch.float32)
-        return base_model, processor
     else:
         raise RuntimeError
     return base_model
@@ -732,21 +485,10 @@ if __name__ == '__main__':
 
     args.num_classes = nb_classes_map[args.dataset]
 
-    try:
-        args.rank = int(os.environ["RANK"])
-        args.local_rank = int(os.environ["LOCAL_RANK"])
-        args.world_size = int(os.environ["WORLD_SIZE"])
-        distributed.init_process_group("nccl")
-    except KeyError:
-        args.rank = 0
-        args.local_rank = 0
-        args.world_size = 1
-        distributed.init_process_group(
-            backend="nccl",
-            init_method="tcp://127.0.0.1:12584",
-            rank=args.rank,
-            world_size=args.world_size,
-        )
+    args.rank = int(os.environ["RANK"])
+    args.local_rank = int(os.environ["LOCAL_RANK"])
+    args.world_size = int(os.environ["WORLD_SIZE"])
+    distributed.init_process_group("nccl")
 
     torch.cuda.set_device(args.local_rank)
     device = torch.device(args.local_rank)
@@ -755,8 +497,9 @@ if __name__ == '__main__':
     setup_for_distributed(args.global_rank == 0)
     setup_seed(seed=args.seed, cuda_deterministic=False)
 
-    if args.model_family == "siglip" or args.model_family == "dino_v2" or args.model_family == "clip" or args.model_family == "dino_v3":
-        from ac_ap_dataloader_dali_no_norm import dali_dataloader
+    if args.using_mv:
+        dali_dataloader = dali_dataloader_mv
+
     print("create data loader start")
     data_loader_train = dali_dataloader(args.train_data_root_path,
                                         args.train_data_csv_path,

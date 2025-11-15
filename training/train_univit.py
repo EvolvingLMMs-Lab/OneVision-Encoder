@@ -15,18 +15,17 @@ from torch.utils.tensorboard import SummaryWriter
 import model_factory
 from dataset import DATASET_REGISTRY, Property
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
-from training.fused_partial_fc_v2 import CombinedMarginLoss, PartialFC_V2
+from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
 
-torch._dynamo.config.optimize_ddp = False
-
+torch._dynamo.config.optimize_ddp = True
+torch._dynamo.config.capture_scalar_outputs = True
 
 parser = argparse.ArgumentParser(description="Multi-dataset video training")
 
 # ---------------------------
 # General / 通用
 # ---------------------------
-parser.add_argument("--debug", type=int, default=0, help="Enable debug mode (0/1). When 1, may reduce dataset size or add extra checks / 是否开启调试模式")
 parser.add_argument("--output", default="output", help="Output directory for logs and checkpoints / 输出目录")
 parser.add_argument("--workers", type=int, default=2, help="Number of DataLoader workers per process / DataLoader 进程内工作线程数")
 parser.add_argument("--local_rank", type=int, default=0, help="Local rank passed by launcher; do not set manually / 启动器传入的本地进程序号，通常无需手动设置")
@@ -40,6 +39,8 @@ parser.add_argument("--image_size", default="224", help="Input size as 'H,W' or 
 parser.add_argument("--input_gray", type=int, default=0, help="Treat input as grayscale (0/1) / 输入按灰度处理（0/1）")
 parser.add_argument("--num_frames", type=int, default=8, help="Number of frames per clip / 每个样本的帧数")
 parser.add_argument("--random_diff", type=int, default=10, help="Random diff for sampling jitter across datasets / 数据集采样抖动的随机扰动")
+parser.add_argument("--use_synthetic_data", action="store_true", help="Use synthetic random inputs/labels instead of loading real datasets.")
+parser.add_argument("--use_fastpfc", action="store_true", help="Use FastPartialFCMulti instead of PartialFC_V2.")
 
 # ---------------------------
 # Multi-dataset (heads) / 多数据集（多头）
@@ -236,7 +237,9 @@ def main():
             )
 
         partial_fc.train().cuda()
-        list_module_pfc.append(partial_fc)
+        compiled_partial_fc = torch.compile(partial_fc)
+        # list_module_pfc.append(partial_fc)
+        list_module_pfc.append(compiled_partial_fc)
         dict_pfc_modules[head_name] = partial_fc
 
         lr_pfc = args.lr * args.list_lr_pfc_weights[head_id]
@@ -298,12 +301,15 @@ def main():
             find_unused_parameters=True,
             static_graph=True)
 
-    backbone = wrap_ddp(backbone)
+    ddp_backbone = wrap_ddp(backbone)
+    compiled_ddp_backbone = torch.compile(ddp_backbone)
 
     list_dali_dataloader = []
     list_head_names = []
     for head_id, dataset_config in enumerate(args.list_datasets):
-        if dataset_config.dali_type == "decord":
+        if args.use_synthetic_data:
+             train_iter = iter(lambda: None, 1)  # sentinel=1 永远不会出现，生成无限 None
+        elif dataset_config.dali_type == "decord":
             from dataloader.data_decord_video import dali_dataloader
 
             train_iter = dali_dataloader(
@@ -374,11 +380,21 @@ def main():
         list_embedding = []
         list_batch_sizes = []
         for head_id, dataset_config in enumerate(args.list_datasets):
-
+            head_batch_size = args.list_batch_sizes[head_id]
             dataset_config: Property
             if dataset_config.dali_type in ["decord", "origin"]:
-                head_input = list_data_batch[head_id]["pixel_values"]
-                list_batch_sizes.append(head_input.size(0))
+
+                if args.use_synthetic_data:
+                    if dataset_config.dali_type in ["decord"]:
+                        head_input = torch.randn(head_batch_size, 3, args.num_frames, *(args.image_size), device="cuda")
+                    elif dataset_config.dali_type in ["origin"]:
+                        head_input = torch.randn(head_batch_size, 3, *(args.image_size), device="cuda")
+                    else:
+                        raise ValueError(f"Unsupported DALI type: {dataset_config.dali_type}")
+                else:
+                    head_input = list_data_batch[head_id]["pixel_values"]
+
+                list_batch_sizes.append(head_batch_size)
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     head_embedding = backbone(head_input)["head_output"]
                 head_embedding = head_embedding.float()
@@ -392,7 +408,13 @@ def main():
         for head_id, pfc in enumerate(list_module_pfc):
             dataset_config = args.list_datasets[head_id]
             head_embedding = list_embedding[head_id]
-            head_label = list_data_batch[head_id]["labels"].long().cuda()
+
+            if args.use_synthetic_data:
+                head_label = torch.zeros((
+                    head_embedding.size(0), dataset_config.random_diff)).long().cuda()
+            else:
+                head_label = list_data_batch[head_id]["labels"].long().cuda()
+
             label_select = dataset_config.label_select
             random_diff = dataset_config.random_diff
             loss_weight = args.list_loss_weights[head_id]
@@ -406,17 +428,18 @@ def main():
         is_accumulation_step = (global_step % args.backward_passes_per_step != 0)
         scaled_loss = sum(list_loss) / args.backward_passes_per_step
 
-        if is_accumulation_step and isinstance(backbone, torch.nn.parallel.DistributedDataParallel):
-            # 中间累积步骤，避免DDP通信
-            with backbone.no_sync():
+        # if is_accumulation_step and isinstance(compiled_ddp_backbone, torch.nn.parallel.DistributedDataParallel):
+        #     # 中间累积步骤，避免DDP通信
+
+        if is_accumulation_step:
+            with compiled_ddp_backbone.no_sync():
                 scaled_loss.backward()
         else:
-            # 最后一步正常backward，会进行梯度同步
-            scaled_loss.backward()
+            scaled_loss.backward() # 最后一步正常backward，会进行梯度同步
 
             # 只在累积完成时执行梯度裁剪和优化器更新
             if global_step % args.backward_passes_per_step == 0:
-                clip_grad_norm_(backbone.parameters(), max_norm=5, norm_type=2)
+                clip_grad_norm_(compiled_ddp_backbone.parameters(), max_norm=5, norm_type=2)
                 for pfc in list_module_pfc:
                     clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
                 opt.step()

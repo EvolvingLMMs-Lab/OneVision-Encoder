@@ -72,6 +72,7 @@ def get_args():
     parser.add_argument('--eval_freq', default=10, type=int)
 
     parser.add_argument('--using_normlize', action='store_true')
+    parser.add_argument('--num_target', default=1568, type=int)
     return parser.parse_args()
 
 
@@ -146,8 +147,45 @@ def get_feature(videos, processor, forward_base_model):
     elif args.model_family == "llava_vit":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
-                enc_out = forward_base_model(videos, mask_ratio=0.5)
+                enc_out = forward_base_model(videos)
                 outputs = enc_out["visible_embeddings"]
+
+    elif args.model_family == "llava_vit_tiling":
+        # choose seq=8 vertical tiles
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                B, C, T, H, W = videos.shape
+                tiled_imgs = videos[:,:,::8,:,:].reshape(B, C, 8 * H, W)
+                enc_out = forward_base_model(tiled_imgs, None, None)
+                outputs = enc_out["visible_embeddings"]
+
+    elif args.model_family == "llava_vit_sampling":
+        # videos: Tensor, shape [bs, 64, ...] 或者至少 device 可用
+        # bs = videos.size(0)
+        def make_uniform_visible_index(bs, device, frames=64, seq=8, frame_tokens=196):
+            # 均匀选 seq 帧 (包含首尾)，例如 frames=64, seq=8 -> 8 等间隔帧
+            frame_idxs = torch.linspace(0, frames - 1, steps=seq, device=device).long()   # [seq]
+            frames_batch = frame_idxs.unsqueeze(0).repeat(bs, 1)                          # [bs, seq]
+
+            per = torch.arange(frame_tokens, device=device)                              # [frame_tokens]
+            pos = (frames_batch.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)      # [bs, seq*frame_tokens]
+
+            # 安全裁剪（总 token 数为 frames*frame_tokens）
+            pos = pos.clamp_max(frames * frame_tokens - 1)
+            return pos.long()  # [bs, seq*frame_tokens]
+
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                # 使用示例（放在你的上下文里）：
+                bs = videos.size(0)
+                device = videos.device
+
+                seq = args.num_target // 196  # 计算需要采样的帧数
+                visible_index = make_uniform_visible_index(bs, device, frames=64, seq=seq, frame_tokens=196)
+                # visible_index -> 形状 [bs, 1568]，可以传给后续模块
+                enc_out = forward_base_model(videos, visible_index, mask_ratio=None)
+                outputs = enc_out["visible_embeddings"]
+
 
     elif args.model_family == "llava_vit_si":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -182,6 +220,12 @@ def get_feature(videos, processor, forward_base_model):
 
             outputs = torch.cat(outputs, dim=1)  # [B, T*N_patch, D]
 
+
+    elif args.model_family == "llava_vit_head":
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                enc_out = forward_base_model(videos)
+                outputs = enc_out["head_output"]
 
     elif args.model_family in ["ov_1_5_vit", "mlcd_base", "mlcd", "mlcd_torch"]:
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -382,10 +426,9 @@ def train_AdamW(
     else:
         criterion = torch.nn.CrossEntropyLoss().to(cur_device)
 
-    use_bf16 = torch.cuda.is_available()
     last_val_stats = {}
     global_step = 0
-
+    last_val_stats = {"acc1": 0.0, "acc5": 0.0}
     for epoch in range(total_epochs):
         cur_ap_model.train()
         metric_logger = MetricLogger(delimiter="  ")
@@ -404,12 +447,12 @@ def train_AdamW(
             labels = labels.to(cur_device, non_blocking=True).view(-1)
 
             with torch.no_grad():
-                with torch.cuda.amp.autocast(enabled=use_bf16, dtype=torch.bfloat16):
+                with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
                     feats = get_feature(videos, processor, forward_base_model)
                     if args.using_normlize:
                         feats = F.normalize(feats, dim=-1)
 
-            with torch.cuda.amp.autocast(enabled=use_bf16, dtype=torch.bfloat16):
+            with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
                 preds = cur_ap_model(feats)
                 loss = criterion(preds, labels)
 
@@ -447,10 +490,15 @@ def train_AdamW(
                 data_loader_val=data_loader_val,
                 processor=processor
             )
-            last_val_stats = val_stats
+            # last_val_stats = val_stats
             if hasattr(data_loader_val, "reset"):
                 data_loader_val.reset()
             print(f"[Val][Epoch {epoch}] acc1={val_stats.get('acc1', 0):.4f} acc5={val_stats.get('acc5', 0):.4f}")
+
+            if val_stats.get("acc1", 0) > last_val_stats.get("acc1", 0):
+                last_val_stats = val_stats
+
+            print(f"Best so far: acc1={last_val_stats.get('acc1', 0):.4f} acc5={last_val_stats.get('acc5', 0):.4f}")
 
     if "acc1" not in last_val_stats:
         last_val_stats = {"acc1": 0.0, "acc5": 0.0}
@@ -500,31 +548,46 @@ def find_peak(args, lr, cur_device, base_model, data_loader_train, data_loader_v
         processor = None
 
     # if args.model_family != "dino_v3" and args.model_family != "ov_1_5_vit" and args.model_family != "rice":
-    if args.model_family not in ["dino_v3", "ov_1_5_vit", "rice", "llava_vit", "mlcd_torch"]:
+    if args.model_family not in ["dino_v3", "ov_1_5_vit", "rice", "llava_vit", "llava_vit_si", "mlcd_torch"]:
         print("have load ckpt")
         base_model = load_finetune_checkpoint(args, base_model)
 
     base_model.to(cur_device).eval()
-    attentive_probe_model = AttentionPoolingBlock(
-                                        dim=args.embedding_size,
-                                        num_heads=args.default_attentive_head,
-                                        qkv_bias=True,
-                                        qk_scale=None,
-                                        drop=0.0,
-                                        attn_drop=0.0,
-                                        drop_path=0.0,
-                                        norm_layer=partial(nn.LayerNorm, eps=1e-5),
-                                        out_dim=args.default_attentive_out_dim)
-    ap_model = CustomModel(attentive_probe_model,
-                        attentive_dim=args.default_attentive_out_dim,
-                        num_classes=args.num_classes)
+    # attentive_probe_model = AttentionPoolingBlock(
+    #     dim=args.embedding_size,
+    #     num_heads=args.default_attentive_head,
+    #     qkv_bias=True,
+    #     qk_scale=None,
+    #     drop=0.0,
+    #     attn_drop=0.0,
+    #     drop_path=0.0,
+    #     norm_layer=partial(nn.LayerNorm, eps=1e-5),
+    #     out_dim=args.default_attentive_out_dim)
+
+    from model_factory.layers import Siglip2MultiheadAttentionPoolingHead
+    attentive_probe_model = Siglip2MultiheadAttentionPoolingHead(
+        hidden_size=args.embedding_size,
+        num_attention_heads=args.embedding_size // 64,
+        intermediate_size=args.embedding_size * 4,
+    )
+
+    ap_model = CustomModel(
+        attentive_probe_model,
+        attentive_dim=args.embedding_size,
+        num_classes=args.num_classes)
     print("create attentive probe model end!")
     cur_ap_model = ap_model.to(cur_device)
     cur_ap_model = torch.nn.parallel.DistributedDataParallel(cur_ap_model, device_ids=[args.local_rank])
     cur_ap_model.train()
-
-    acc_top1, acc_top5 = train_AdamW(args, lr, cur_ap_model, cur_device, base_model, data_loader_train, data_loader_val, processor)
-    return acc_top1, acc_top5
+    return train_AdamW(
+        args,
+        lr,
+        cur_ap_model,
+        cur_device,
+        base_model,
+        data_loader_train,
+        data_loader_val,
+        processor)
 
 
 def mkdir_os(path):
@@ -670,12 +733,13 @@ def get_model(args):
        from transformers import MLCDVisionModel
        base_model = MLCDVisionModel.from_pretrained(args.ckpt_path).cuda()
 
-    elif args.model_family in ['llava_vit', 'llava_vit_si']:
+    elif args.model_family in ['llava_vit', 'llava_vit_si', 'llava_vit_sampling', "llava_vit_tiling"]:
         base_model = create_model(
             args.model_name,
             pretrained=False,)
         state_dict = torch.load(args.ckpt_path, map_location='cpu')
         state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         base_model.load_state_dict(state_dict, strict=True)
 
     elif args.model_family == "mlcd_torch":

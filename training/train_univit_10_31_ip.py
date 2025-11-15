@@ -239,7 +239,7 @@ def main():
 
         partial_fc.train().cuda()
         list_module_pfc.append(partial_fc)
-        dict_pfc_modules[head_name] = partial_fc
+        dict_pfc_modules[head_name] = torch.compile(partial_fc)
 
         lr_pfc = args.lr * args.list_lr_pfc_weights[head_id]
         parameters.append(
@@ -300,7 +300,8 @@ def main():
             find_unused_parameters=True,
             static_graph=True)
 
-    backbone = wrap_ddp(backbone)
+    ddp_backbone = wrap_ddp(backbone)
+    compiled_ddp_backbone = torch.compile(ddp_backbone)
 
     list_dali_dataloader = []
     list_head_names = []
@@ -388,14 +389,14 @@ def main():
 
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding = backbone(head_input, visible_indices)["head_output"]
+                    head_embedding = compiled_ddp_backbone(head_input, visible_indices)["head_output"]
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)
             elif dataset_config.dali_type in ["origin"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding = backbone(head_input)["head_output"]
+                    head_embedding = compiled_ddp_backbone(head_input)["head_output"]
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)  
             else:
@@ -421,9 +422,9 @@ def main():
         is_accumulation_step = (global_step % args.backward_passes_per_step != 0)
         scaled_loss = sum(list_loss) / args.backward_passes_per_step
 
-        if is_accumulation_step and isinstance(backbone, torch.nn.parallel.DistributedDataParallel):
+        if is_accumulation_step:
             # 中间累积步骤，避免DDP通信
-            with backbone.no_sync():
+            with compiled_ddp_backbone.no_sync():
                 scaled_loss.backward()
         else:
             # 最后一步正常backward，会进行梯度同步
@@ -431,7 +432,7 @@ def main():
 
             # 只在累积完成时执行梯度裁剪和优化器更新
             if global_step % args.backward_passes_per_step == 0:
-                clip_grad_norm_(backbone.parameters(), max_norm=5, norm_type=2)
+                clip_grad_norm_(compiled_ddp_backbone.parameters(), max_norm=5, norm_type=2)
                 for pfc in list_module_pfc:
                     clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
                 opt.step()

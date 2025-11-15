@@ -7,6 +7,8 @@ import torch
 from nvidia.dali.pipeline import Pipeline
 from nvidia.dali.plugin.pytorch import DALIClassificationIterator
 import random
+import logging
+logger = logging.getLogger(__name__)
 
 
 class MultiRecDALIWarper(object):
@@ -28,8 +30,8 @@ class MultiRecDALIWarper(object):
             return next(self.dali_iter)
         except StopIteration:
             self.idx_rec += 1
-
             if self.idx_rec < len(self.list_prefix):
+                logger.info("Switching to next rec file: " + self.list_prefix[self.idx_rec])
                 del self.dali_iter
                 nvidia.dali.backend.ReleaseUnusedMemory()
                 self.dali_iter = dali_dataloader(
@@ -47,6 +49,7 @@ class MultiRecDALIWarper(object):
                 return next(self.dali_iter)
             else:
                 self.reset()
+                logger.info("Restarting from first rec file: " + self.list_prefix[0])
                 return next(self.dali_iter)
 
     def __iter__(self):
@@ -86,7 +89,11 @@ class SyntheticDataIter(object):
         self.tensor_label = label
 
     def __next__(self):
-        return self.tensor_data, self.tensor_label
+        # return self.tensor_data, self.tensor_label
+        return {
+            "pixel_values": self.tensor_data,
+            "labels": self.tensor_label
+        }
 
     def __iter__(self):
         return self
@@ -163,9 +170,9 @@ def dali_dataloader(
 
     pipe = Pipeline(
         batch_size=batch_size,
-        num_threads=workers,
+        num_threads=2,
         device_id=local_rank % 8,
-        prefetch_queue_depth=3,
+        prefetch_queue_depth=1,
         seed=seed,
     )
     device_memory_padding = 211025920
@@ -174,12 +181,11 @@ def dali_dataloader(
         jpegs, labels = fn.readers.mxnet(
             path=rec_file,
             index_path=idx_file,
-            initial_fill=16384,
+            initial_fill=16384 * 2,
             num_shards=num_shards,
             shard_id=shard_id,
             random_shuffle=True,
             pad_last_batch=False,
-            # prefetch_queue_depth=4,
             name="train",
             stick_to_shard=True,
         )

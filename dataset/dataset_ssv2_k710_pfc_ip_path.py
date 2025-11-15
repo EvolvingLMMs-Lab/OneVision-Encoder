@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import mmap
 
 from dataset.registry import DATASET_REGISTRY
 
@@ -42,3 +43,21 @@ def k710_ssv2_univit_pfs_ip_path():
         dali_type="decord",
         label=["/video_vit/train_UniViT/list_merged.npy", "/video_vit/train_UniViT/merged_visible_indices_uint16.npy"]
     )
+
+
+@DATASET_REGISTRY.register()
+def k710_ssv2_univit_pfs_fix_ip_fix_size():
+    """"""
+    with open("/video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2/shuf_merged_list", "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    lines = [x.strip().split(",")[0] for x in lines]
+    return Property(
+        name="k710_ssv2_diving48_pfs",
+        prefixes=lines,
+        num_classes=200000,
+        num_examples=0,
+        num_shards=world_size,
+        shard_id=rank,
+        dali_type="decord"
+    )
+    

@@ -16,7 +16,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from linear_probe import search
-from model_factory import MODEL_REGISTRY
+import model_factory
+from timm.models import create_model
 
 # 基于图片中显示的文件列表，定义支持的数据集
 SUPPORTED_DATASETS = [
@@ -30,7 +31,7 @@ SUPPORTED_DATASETS = [
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", default="ucf101")
-parser.add_argument("--model", default="CLIP-ViT-B/32")
+parser.add_argument("--model", default="")
 parser.add_argument("--workers", type=int, default=8)
 parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--debug", type=int, default=0)
@@ -98,8 +99,11 @@ def get_feat(dataset, model, workers=4):
                 feat = model.encode_image(images)
             else:
                 feat = model(images)
+
         if hasattr(feat, "pooler_output"):
             feat = feat.pooler_output
+        if "head_output" in feat:
+            feat = feat["head_output"]
 
         feat = feat.float()
 
@@ -121,44 +125,19 @@ def get_feat(dataset, model, workers=4):
 if __name__ == "__main__":
     setup_seed(2048)
 
-    # 加载模型和transform
-    if args.model[:4] == "CLIP":
-        model_name = args.model.split("CLIP-")[-1]
-        if len(args.model.split(",")) == 1:
-            model, transform = clip.load(args.model.split("CLIP-")[-1], "cpu")
-            model = model.cuda().eval()
-        else:
-            model, transform = clip.load(model_name.split(",")[0], "cpu")
-            model = model.visual
-            path_weight = model_name.split(",")[-1]
-            state_dict = torch.load(path_weight, "cpu")
-            state_dict = {
-                k.replace("_orig_mod.", ""): v for k, v in state_dict.items()
-            }
-            model.load_state_dict(state_dict, strict=True)
-            model = model.cuda().eval()
-    elif args.model[:8] == "OPENCLIP":
-        import open_clip
+    name, weight = args.model.split(",")
+    model = create_model(
+        name,
+        pretrained=False,)
+    state_dict = torch.load(weight, map_location='cpu')
+    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict, strict=True)
 
-        result = args.model.split("OPENCLIP-")[1].split(",")
-        if len(result) == 2:
-            name, pretrained = result
-            model, _, transform = open_clip.create_model_and_transforms(
-                name, pretrained
-            )
-        else:
-            model, _, transform = open_clip.create_model_and_transforms(result[0])
-        model = model.cuda().eval()
-    else:
-        name, weight = args.model.split(",")
-        model = MODEL_REGISTRY.get(name)()
-        state_dict = torch.load(weight, "cpu")
-        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-        model.load_state_dict(state_dict, strict=True)
 
-        # 从CLIP加载 transform
-        from clip.clip import _transform
-        transform = _transform(args.input_size)
+    # 从CLIP加载 transform
+    from clip.clip import _transform
+    transform = _transform(args.input_size)
 
     model = model.cuda().eval()
     # 使用统一的数据集加载函数，同时获取classes和metric

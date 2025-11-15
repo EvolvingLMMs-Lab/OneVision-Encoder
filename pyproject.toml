@@ -10,4 +10,4 @@ authors = [{name=""}]
 dependencies = []
 
 [tool.setuptools]
-packages = ["model_factory", "training"]  # 或使用 find 命令式收集
+packages = ["dataloader", "model_factory", "training"]  # 或使用 find 命令式收集
