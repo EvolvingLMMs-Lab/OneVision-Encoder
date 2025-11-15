@@ -29,37 +29,19 @@ mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retra
 
 ### 1. Docker Build
 
+
 > #### Option 1: Build from Dockerfile
-```bash
+<!-- ```bash
 docker build -t llava_vit:25.11 .
-```
+``` -->
 
 > #### Option 2: Load pre-built Docker image
 ```bash
-docker load -i /video_vit/docker_images/llava_vit_tag_25.11.tar && \
-docker tag $(docker images -q | head -n 1) llava_vit:25.11
+docker load -i /video_vit/docker_images/llava_vit_tag_25.11.15.tar && \
+docker tag $(docker images -q | head -n 1) llava_vit:25.11.15
 ```
 
 
-#### 1. Single Node
-```
-# Run container with -w to set working directory directly to the mounted volume
-docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
-    --ulimit memlock=-1 --ulimit stack=67108864 --rm \
-    -v "$(pwd)":/workspace/LLaVA-ViT \
-    -v /vlm:/vlm \
-    -v /video_vit:/video_vit \
-    -v /train_tmp:/train_tmp \
-    -w /workspace/LLaVA-ViT/ \
-    llava_vit:25.11 /bin/bash
-
-# Inside the container, install the package in editable mode
-
-export http_proxy=http://172.16.5.77:8889
-export https_proxy=http://172.16.5.77:8889
-
-pip install -e .
-```
 #### 2. Multi Node
 
 > [!IMPORTANT]
@@ -84,7 +66,7 @@ pip install -e .
 
 1. Sigle Node
 
-```bash
+<!-- ```bash
 # Example command to start training
 torchrun -m --nproc_per_node 8 training.train_univit \
   --list_batch_size 64 \
@@ -107,6 +89,12 @@ NUM_EPOCH=100 \
 NUM_FRAMES=8 \
 BATCH_SIZE=4 \
 LR=5e-4 bash video_attentive_probe.sh
+``` -->
+
+## Eval
+
+```
+
 ```
 
 ## Contributors

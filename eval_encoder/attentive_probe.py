@@ -26,9 +26,9 @@ warnings.filterwarnings("ignore")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser("Attentive probing with SigLIP2 head (Meta style)")
     # Data
-    parser.add_argument("--train_data_root_path", default="/train_tmp/ssv2")
+    parser.add_argument("--train_data_root_path", default="/data_3/data_attentive_probe/ssv2")
     parser.add_argument("--train_data_csv_path", default="ssv2_train_new.csv")
-    parser.add_argument("--val_data_root_path", default="/train_tmp/ssv2")
+    parser.add_argument("--val_data_root_path", default="/data_3/data_attentive_probe/ssv2")
     parser.add_argument("--val_data_csv_path", default="ssv2_val_new.csv")
     parser.add_argument("--dataset", default="ssv2")
 
@@ -386,38 +386,38 @@ def main() -> None:
     args.num_classes = nb_classes_map[args.dataset]
 
     if args.dataset == "ssv2":
-        args.train_data_root_path = "/train_tmp/ssv2"
-        args.val_data_root_path = "/train_tmp/ssv2"
+        args.train_data_root_path = "/data_3/data_attentive_probe/ssv2"
+        args.val_data_root_path = "/data_3/data_attentive_probe/ssv2"
         args.train_data_csv_path = "ssv2_train_new.csv"
         args.val_data_csv_path = "ssv2_val_new.csv"
     if args.dataset == "diving48":
-        args.train_data_root_path = "/train_tmp/diving48"
-        args.val_data_root_path = "/train_tmp/diving48"
+        args.train_data_root_path = "/data_3/data_attentive_probe/diving48"
+        args.val_data_root_path = "/data_3/data_attentive_probe/diving48"
         args.train_data_csv_path = "diving48_train_new.csv"
         args.val_data_csv_path = "diving48_val_new.csv"
     if args.dataset == "epic_verb":
-        args.train_data_root_path = "/train_tmp/epic_verb"
-        args.val_data_root_path = "/train_tmp/epic_verb"
+        args.train_data_root_path = "/data_3/data_attentive_probe/epic_verb"
+        args.val_data_root_path = "/data_3/data_attentive_probe/epic_verb"
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "epic_noun":
-        args.train_data_root_path = "/train_tmp/epic_noun"
-        args.val_data_root_path = "/train_tmp/epic_noun"
+        args.train_data_root_path = "/data_3/data_attentive_probe/epic_noun"
+        args.val_data_root_path = "/data_3/data_attentive_probe/epic_noun"
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "perception_test":
-        args.train_data_root_path = "/train_tmp/perception_test"
-        args.val_data_root_path = "/train_tmp/perception_test"
+        args.train_data_root_path = "/data_3/data_attentive_probe/perception_test"
+        args.val_data_root_path = "/data_3/data_attentive_probe/perception_test"
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "charadesego":
-        args.train_data_root_path = "/train_tmp/CharadesEgo"
-        args.val_data_root_path = "/train_tmp/CharadesEgo"
+        args.train_data_root_path = "/data_3/data_attentive_probe/CharadesEgo"
+        args.val_data_root_path = "/data_3/data_attentive_probe/CharadesEgo"
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "k400":
-        args.train_data_root_path = "/train_tmp/k400"
-        args.val_data_root_path = "/train_tmp/k400"
+        args.train_data_root_path = "/data_3/data_attentive_probe/k400"
+        args.val_data_root_path = "/data_3/data_attentive_probe/k400"
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
 
