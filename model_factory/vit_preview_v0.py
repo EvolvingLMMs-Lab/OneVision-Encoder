@@ -46,8 +46,6 @@ class LlavaViTEncoder(nn.Module):
             stride=patch_size,
             bias=False
         )
-        scale = hidden_size ** -0.5
-        self.class_embedding = nn.Parameter(scale * torch.randn(hidden_size))
         self.ln_pre = norm_cls(hidden_size)
 
         # 使用带 causal mask 的 Transformer
@@ -251,24 +249,6 @@ class LlavaViTEncoder(nn.Module):
 
 
 @register_model
-def llava_vit_small_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
-    """
-    ViT Encoder for Video MAE-style pretraining."""
-    model = LlavaViTEncoder(
-        patch_size=16,
-        hidden_size=384,
-        head_dim=64,
-        num_hidden_layers=12,
-        intermediate_size=1536,
-        act_layer=nn.GELU,
-        use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
-        use_head=True
-    )
-    return model
-
-
-@register_model
 def llava_vit_base_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
@@ -287,7 +267,25 @@ def llava_vit_base_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
 
 
 @register_model
-def llava_vit_large_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
+def llava_vit_base_ln(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
+    model = LlavaViTEncoder(
+        patch_size=16,
+        hidden_size=768,
+        head_dim=64,
+        num_hidden_layers=12,
+        intermediate_size=3072,
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.LayerNorm,
+        use_head=True
+    )
+    return model
+
+
+@register_model
+def llava_vit_large_ln(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
     model = LlavaViTEncoder(
@@ -298,7 +296,7 @@ def llava_vit_large_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
         intermediate_size=4096,
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
-        norm_cls=nn.RMSNorm,
+        norm_cls=nn.LayerNorm,
         use_head=True
     )
     return model
