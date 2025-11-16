@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding_size", type=int, default=768)
     parser.add_argument("--num_classes", type=int, default=0)
     # ===> 新增：目标帧数参数 <===
-    parser.add_argument("--target_frames", type=int, default=64, 
+    parser.add_argument("--target_frames", type=int, default=64,
                         help="Target number of frames to interpolate to (default: 64)")
 
     # Train
@@ -70,46 +70,46 @@ def parse_args() -> argparse.Namespace:
     # Misc
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--save_report", default="fewshot_video_report/ActionRecognition")
-    
+
     # 分布式相关参数
     parser.add_argument("--rank", type=int, default=0)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--world_size", type=int, default=1)
     parser.add_argument("--global_rank", type=int, default=0)
-    
+
     return parser.parse_args()
 
 
 def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
     """
     将帧索引从原始视频帧数插值到目标帧数
-    
+
     Args:
         frame_indices: [B, seq_len] 原始帧索引
         total_frames: [B] 每个视频的总帧数
         target_frames: 目标帧数 (默认 64)
-    
+
     Returns:
         interpolated_indices: [B, seq_len] 插值后的帧索引，范围在 [0, target_frames-1]
     """
     bs, seq_len = frame_indices.shape
     device = frame_indices.device
-    
+
     # 将 total_frames 转换为浮点数以进行插值计算
     total_frames_float = total_frames.float().view(bs, 1)  # [B, 1]
     frame_indices_float = frame_indices.float()  # [B, seq_len]
-    
+
     # 插值公式: new_idx = (old_idx / (total_frames - 1)) * (target_frames - 1)
-    # 处理 total_frames = 1 的情况
+    # 处理 total_frames = 1 的情况files.trimTrailingWhitespace: truefiles.trimTrailingWhitespace: tru
     total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
     interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
-    
+
     # 四舍五入并转换为整数
     interpolated_indices = torch.round(interpolated_indices).long()
-    
+
     # 确保索引在有效范围内
     interpolated_indices = torch.clamp(interpolated_indices, 0, target_frames - 1)
-    
+
     return interpolated_indices
 
 
@@ -123,7 +123,7 @@ def get_feature(
 ) -> torch.Tensor:
     """
     获取特征，支持视频及图片输入。
-    
+
     Args:
         args: 参数配置
         videos: 视频数据 [B, C, T, H, W] 或图片数据 [B, C, H, W]
@@ -177,7 +177,7 @@ def get_feature(
                 device = videos.device
                 frame_tokens = 196  # 每帧的 token 数量
                 target_frames = args.target_frames  # 目标帧数，默认 64
-                
+
                 if frame_indices is not None and total_frames is not None:
                     # ===> 插值帧索引到 target_frames <===
                     interpolated_indices = interpolate_frame_indices(
@@ -187,26 +187,26 @@ def get_feature(
                     )  # [B, seq_len]
                     # ===> 创建 target_frames 帧的空白视频 <===
                     padded_videos = torch.zeros(bs, C, target_frames, H, W, device=device, dtype=videos.dtype)
-                    
+
                     # ===> 将原始帧放入插值后的对应位置 <===
                     seq_len = frame_indices.shape[1]
-                    
+
                     # 准备 scatter 的索引
                     frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
-                    
+
                     # 将视频帧放入对应位置
                     padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
-                    
+
                     # ===> 计算 visible_index (基于 target_frames) <===
                     per = torch.arange(frame_tokens, device=device)
                     visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
-                    
+
                     enc_out = model(padded_videos, visible_index, mask_ratio=None)
                     outputs = enc_out["visible_embeddings"]
                 else:
                     raise
-                
+
                 return outputs
 
     raise ValueError(f"Unsupported model_family: {args.model_family}")
@@ -271,7 +271,7 @@ def train_one_experiment(
             labels = batch["labels"].view(-1).to(device, non_blocking=True)
             indices = batch["indices"].to(device, non_blocking=True)  # [B, seq_len]
             total_frames = batch["total_frames"].to(device, non_blocking=True)  # [B, 1]
-            
+
             with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 feats = get_feature(args, videos, base_model, frame_indices=indices, total_frames=total_frames, is_training=True)
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -288,14 +288,14 @@ def train_one_experiment(
             optimizer.step()
             if scheduler is not None:
                 scheduler.step()
-            
+
             train_metrics["loss"].update(loss_value)
             train_metrics["lr"].update(optimizer.param_groups[0]["lr"])
             train_metrics["grad_norm"].update(float(grad_norm))
-            
+
             if (i + 1) % args.print_freq == 0:
                 metrics_computed = train_metrics.compute()
-                
+
                 if args.rank == 0:
                     elapsed_time = time.time() - start_time
                     samples_processed = args.print_freq * args.batch_size * args.world_size
@@ -308,13 +308,13 @@ def train_one_experiment(
                         f"LR: {metrics_computed['lr']:.6f}  "
                         f"Grad Norm: {metrics_computed['grad_norm']:.4f}"
                     )
-                
+
                 start_time = time.time()
                 train_metrics.reset()
 
         if hasattr(loader_train, "reset"):
             loader_train.reset()
-        
+
         if epoch % args.eval_freq == 0 or epoch == args.default_epoch - 1:
             stats = evaluate(args, head, device, base_model, loader_val)
             if hasattr(loader_val, "reset"):
@@ -323,7 +323,7 @@ def train_one_experiment(
                 best = stats
             if args.rank == 0:
                 print(f"[Val][Epoch {epoch}] acc1={stats['acc1']:.4f} acc5={stats['acc5']:.4f} | Best acc1={best['acc1']:.4f}")
-    
+
     return best["acc1"], best["acc5"]
 
 
@@ -336,7 +336,7 @@ def evaluate(
     loader_val,
 ) -> Dict[str, float]:
     head.eval()
-    
+
     val_metrics = torchmetrics.MetricCollection({
         "acc1": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=1),
         "acc5": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=5),
@@ -353,21 +353,21 @@ def evaluate(
         feats = get_feature(args, videos, base_model, frame_indices=indices, total_frames=total_frames, is_training=False)
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             logits = head(feats)
-        
+
         val_metrics.update(logits, target)
 
         if (i + 1) % args.print_freq == 0:
             if args.rank == 0:
                 print(f"Eval: [{i + 1}/{steps_val}]")
-    
+
     computed_metrics = val_metrics.compute()
-    
+
     if args.rank == 0:
         print(
             f"* Final Acc@1: {computed_metrics['acc1'] * 100:.1f} "
             f"| Final Acc@5: {computed_metrics['acc5'] * 100:.1f}"
         )
-    
+
     return {k: v.item() * 100 for k, v in computed_metrics.items()}
 
 
@@ -421,7 +421,7 @@ def main() -> None:
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
 
-    try:    
+    try:
         args.rank = int(os.environ["RANK"])
         args.local_rank = int(os.environ["LOCAL_RANK"])
         args.world_size = int(os.environ["WORLD_SIZE"])
@@ -487,10 +487,10 @@ def main() -> None:
         acc1, acc5 = train_one_experiment(args, lr, device, base_model, train_loader, val_loader)
         if acc1 > best_top1:
             best_lr, best_top1, best_top5 = lr, acc1, acc5
-    
+
     if args.rank == 0:
         print(f"best_lr: {best_lr} max_acc_top1: {best_top1} max_acc_top5: {best_top5}")
-        
+
         save_path = os.path.join(args.save_report, f"report_attentive_probe_{os.path.basename(args.ckpt_path)}.txt")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, "a+") as f:
