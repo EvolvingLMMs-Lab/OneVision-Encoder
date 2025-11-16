@@ -143,6 +143,7 @@ def get_feature(
     list_vit_single_image = [
         "clip",
         "siglip2",
+        "dinov2",
         "dinov3",
         "llava_vit_si"
     ]
@@ -160,7 +161,8 @@ def get_feature(
                     if isinstance(hidden_states, dict) and "visible_embeddings" in hidden_states:
                         hidden_states = hidden_states["visible_embeddings"]
 
-                    hidden_states = hidden_states.view(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
+                    # hidden_states = hidden_states.view(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
+                    hidden_states = hidden_states.reshape(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
                     # ===> 新增：sin/cos 时间位置编码（2行代码）<===
                     pos = torch.arange(T, device=videos.device).unsqueeze(1) * torch.exp(torch.arange(0, args.embedding_size, 2, device=videos.device) * (-math.log(10000.0) / args.embedding_size))  # [T, D/2]
                     temporal_pos = torch.stack([torch.sin(pos), torch.cos(pos)], dim=2).flatten(1)[:, :args.embedding_size]  # [T, D]
@@ -442,7 +444,7 @@ def main() -> None:
     if args.model_family == "siglip2":
         args.mean = [0.5, 0.5, 0.5]
         args.std = [0.5, 0.5, 0.5]
-    if args.model_family == "dinov3":
+    if args.model_family in ["dinov2", "dinov3"]:
         args.mean = [0.485, 0.456, 0.406]
         args.std = [0.229, 0.224, 0.225]
 
