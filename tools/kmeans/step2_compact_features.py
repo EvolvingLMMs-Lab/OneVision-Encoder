@@ -123,8 +123,8 @@ def main():
     parser = argparse.ArgumentParser(description="处理NPY特征文件（形状 [num_features, num_frames, dims]）；支持目录或列表文件输入；按目标输出帧数均匀抽帧")
     parser.add_argument("--input", type=str, required=True, help="输入源：目录（含NPY）或包含NPY文件路径的txt列表")
     parser.add_argument("--recursive", action="store_true", help="若 --input 为目录，是否递归查找子目录中的NPY文件")
-    parser.add_argument("--num_processes", type=int, default=None, help="使用的进程数（最大不超过32，默认CPU核心数与32两者的较小值）")
-    parser.add_argument("--dims", type=int, default=None, help="要提取的特征维度数（沿最后一维截取前dims；默认保留全部）")
+    parser.add_argument("--num_processes", type=int, default=64, help="使用的进程数（最大不超过64，默认CPU核心数与64两者的较小值）")
+    parser.add_argument("--dims", type=int, default=512, help="要提取的特征维度数（沿最后一维截取前dims；默认保留全部）")
     parser.add_argument("--frames_out", type=int, default=8, help="目标输出帧数，要求 0 < frames_out < num_frames 且 num_frames 能被 frames_out 整除")
     parser.add_argument("--output_suffix", type=str, default=None, help="输出目录后缀（默认：_processed_dim_{dims or 'all'}_frames_{frames_out}）")
     args = parser.parse_args()
@@ -158,10 +158,10 @@ def main():
     # 进程数限制最大32
     cpu_cnt = mp.cpu_count()
     if args.num_processes is None or args.num_processes <= 0:
-        num_processes = min(cpu_cnt, 32)
+        num_processes = min(cpu_cnt, 64)
     else:
-        num_processes = min(args.num_processes, 32)
-    print(f"使用 {num_processes} 个进程并行处理（CPU:{cpu_cnt}，上限:32）")
+        num_processes = min(args.num_processes, 64)
+    print(f"使用 {num_processes} 个进程并行处理（CPU:{cpu_cnt}，上限:64")
 
     # 参数打包
     process_args = [(file_path, args.dims, args.frames_out, output_dir) for file_path in npy_files]
