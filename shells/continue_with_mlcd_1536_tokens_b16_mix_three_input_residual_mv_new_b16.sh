@@ -8,7 +8,7 @@ export VIZ_MASK=1
 export VIZ_MASK_FRAMES=all
 export VIZ_MASK_INTERVAL=1
 export VIZ_MASK_SAMPLES=1
-export UMT_HEVC_Y_ONLY=1 
+export UMT_HEVC_Y_ONLY=1
 
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
@@ -24,7 +24,7 @@ export NCCL_IB_QPS_PER_CONNECTION=8
 export NCCL_IB_TC=160
 export NCCL_IB_TIMEOUT=22
 export USE_CHECKPOINT=0
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # 主机名列表
 list_hostname=(
