@@ -18,6 +18,21 @@ Usage with DeepSpeed:
         --output /output/features \
         --batch_size 32 \
         --num_frames 8
+    
+    # Example:
+    hostfile content:
+        worker1 slots=8
+        worker2 slots=8
+        ...
+
+    deepspeed \
+    --num_gpus=8 \
+    --num_nodes=12 \
+    --hostfile=hostfile step1_extract_video_features.py \
+    --input /video_vit/dataset/clips_HowTo100M_meta_llava_vit/list_all_valid_part_000 \
+    --output /video_vit/dataset/clips_HowTo100M_meta_llava_vit/output_list_all_valid_part_000 \
+    --batch_size 32 \
+    --num_frames 8
 """
 
 import argparse
@@ -363,8 +378,8 @@ def main(args):
         my_videos = all_videos
         print(f"[Rank {rank}] Processing all {len(my_videos)} videos")
     
-    with open(f"{args.input}_padding.txt", 'w') as f:
-        f.writelines(all_videos)
+    # with open(f"{args.input}_padding.txt", 'w') as f:
+    #     f.writelines(all_videos)
     # Load checkpoint
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)

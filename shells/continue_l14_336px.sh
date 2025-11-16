@@ -28,6 +28,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # 主机名列表
 list_hostname=(
+  instance-5-34
   instance-5-35
   instance-5-36
   instance-5-38
@@ -38,6 +39,7 @@ list_hostname=(
   instance-5-44
   instance-5-45
   instance-5-46
+  instance-5-47
   # instance-5-36
   # instance-5-38
   # instance-5-39

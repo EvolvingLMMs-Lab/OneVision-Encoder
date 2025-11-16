@@ -8,9 +8,11 @@ export VIZ_MASK=1
 export VIZ_MASK_FRAMES=all
 export VIZ_MASK_INTERVAL=1
 export VIZ_MASK_SAMPLES=1
-export UMT_HEVC_Y_ONLY=1
+export UMT_HEVC_Y_ONLY=1 
 
-
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_SOCKET_IFNAME=eth0
 export NCCL_SOCKET_NTHREADS=8
@@ -24,29 +26,32 @@ export NCCL_IB_QPS_PER_CONNECTION=8
 export NCCL_IB_TC=160
 export NCCL_IB_TIMEOUT=22
 export USE_CHECKPOINT=0
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 
+export NCCL_TIMEOUT=1800  # 单位：秒，这里设置为 30 分钟
+export NCCL_BLOCKING_WAIT=1  # 使 NCCL 等待更长时间
 
 # 主机名列表
 list_hostname=(
-  instance-5-35
-  instance-5-36
-  instance-5-38
-  instance-5-39
-  instance-5-40
-  instance-5-41
-  instance-5-42
-  instance-5-44
-  instance-5-45
-  instance-5-46
-  # instance-5-36
-  # instance-5-38
-  # instance-5-39
-  # instance-5-40
-  # instance-5-41
+  instance-5fbzrg73
+  instance-21s8vw5h
+  instance-mtntjld4-01
+  instance-mtntjld4-02
+  instance-mtntjld4-03
+  instance-mtntjld4-04
+  instance-mtntjld4-05
+  instance-mtntjld4-06
+  instance-mtntjld4-07
+  instance-mtntjld4-08
+  instance-mtntjld4-09
+  instance-mtntjld4-10
+  instance-mtntjld4-11
+  instance-mtntjld4-12
+  instance-mtntjld4-13
+  instance-mtntjld4-14
 )
 
 # 主节点地址和端口
-master_addr="172.16.5.35"
+master_addr="172.16.5.19"
 master_port=$((18889 + 305))
 
 # 计算节点总数
@@ -66,19 +71,16 @@ echo "master_port=$master_port"
 echo "nnode=$nnode"
 echo "node_rank=$node_rank"
 
-
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 torchrun --master_addr $master_addr --master_port $master_port \
   --nnode $nnode --node_rank $node_rank --nproc_per_node 8 \
   -m \
-  training.train_univit_11_08_ip_three_input_residual_mv_tmp \
-  --model_name pretrain_encoder_base_patch16_224_v11_09_ln_head_ip \
-  --embedding_size 768 \
-  --list_batch_sizes 32 64 \
-  --lr 1e-4 \
-  --warmup_ratio 0.001 \
-  --list_datasets k710_ssv2_univit_pfs_fix_ip_fix_size llava_vit_si_ssd \
-  --init_backbone /video_vit/xiangan/checkpoint_llava_vit/b16_base/00238000/backbone.pt \
-  --list_init_partial_fc_paths NULL /video_vit/xiangan/checkpoint_llava_vit/b16_base/00238000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt \
+  training.train_univit_11_08_ip_three_input \
+  --model_name llava_vit_large_ln \
+  --embedding_size 1024 \
+  --list_batch_sizes 192 \
+  --lr 6e-4 \
+  --warmup_ratio 0.05 \
+  --list_datasets llava_vit_si_ssd \
   --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
-  --num_sampled_data 480000000
+  --num_sampled_data 13_000_000_000
