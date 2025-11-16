@@ -54,7 +54,7 @@ class VideoExternalSource:
         self.sequence_length: int = source_params["sequence_length"]
         self.use_rgb: bool = source_params["use_rgb"]
         self.seed: int = source_params["seed"]
-        
+
         # ===> decord 线程数参数 <===
         self.decord_num_threads: int = source_params["decord_num_threads"]
 
@@ -116,7 +116,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     input_size = source_params["input_size"]
     mean = source_params["mean"]
     std = source_params["std"]
-    
+
     # ===> 现在返回 4 个输出: videos, labels, indices, total_frames <===
     videos, labels, indices, total_frames = fn.external_source(
         source=VideoExternalSource(mode, source_params),
@@ -126,12 +126,12 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
         dtype=[types.UINT8, types.INT64, types.INT64, types.INT64],
         layout=["FHWC", "C", "C", "C"]
     )
-    
+
     videos = videos.gpu()
     labels = labels.gpu()
     indices = indices.gpu()
     total_frames = total_frames.gpu()
-    
+
     videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, interp_type=types.INTERP_LINEAR)
     if mode == "train":
         videos = fn.random_resized_crop(videos, size=[input_size, input_size], random_area=[0.9, 1.0])
@@ -141,7 +141,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     else:
         videos = fn.crop(videos, crop=[input_size, input_size])
     videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW", mean=[m * 255.0 for m in mean], std=[s * 255.0 for s in std])
-    
+
     return videos, labels, indices, total_frames
 
 # ----------------------------------------------------------------------------
@@ -203,6 +203,6 @@ def get_dali_dataloader(
     )
     steps_per_epoch = len(file_list) // world_size // batch_size
     dataloader = DALIWarper(dali_iter=dali_iter, steps_per_epoch=steps_per_epoch)
-    
+
     print(f"[{mode} loader] DALI pipeline built. Total samples: {len(file_list)}, Steps per epoch: {steps_per_epoch}.")
     return dataloader
