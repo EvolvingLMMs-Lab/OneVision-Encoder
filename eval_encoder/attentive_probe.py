@@ -140,12 +140,13 @@ def get_feature(
         images = videos.permute(0, 2, 1, 3, 4).reshape(-1, C, H, W)  # [B*T, C, H, W]
         return images
 
-    LIST_VIT_SINGLE_IMAGE = [
+    list_vit_single_image = [
+        "clip",
         "siglip2",
         "dinov3",
         "llava_vit_si"
     ]
-    if args.model_family in LIST_VIT_SINGLE_IMAGE:
+    if args.model_family in list_vit_single_image:
         # ===> 专门图片分支 <===
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
