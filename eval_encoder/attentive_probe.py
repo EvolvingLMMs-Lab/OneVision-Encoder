@@ -142,6 +142,7 @@ def get_feature(
 
     list_vit_single_image = [
         "clip",
+        "siglip",
         "siglip2",
         "dinov2",
         "dinov3",
@@ -441,7 +442,7 @@ def main() -> None:
         print("Create data loaders...")
 
 
-    if args.model_family == "siglip2":
+    if args.model_family in ["siglip", "siglip2"]:
         args.mean = [0.5, 0.5, 0.5]
         args.std = [0.5, 0.5, 0.5]
     if args.model_family in ["dinov2", "dinov3"]:
