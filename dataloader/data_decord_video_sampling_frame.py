@@ -3,10 +3,11 @@
 # Date: 2025-11-13 12:26:36 (UTC)
 #
 
+import logging
 import os
-import warnings
 import pickle
-from typing import List, Tuple, Dict, Any
+import warnings
+from typing import Any, Dict, List, Tuple
 
 import decord
 import numpy as np
@@ -14,6 +15,8 @@ import nvidia.dali.fn as fn
 import nvidia.dali.types as types
 from nvidia.dali.pipeline import Pipeline, pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
+
+logger = logging.getLogger(__file__)
 
 # ----------------------------------------------------------------------------
 # 1. DALI Iterator Wrapper (已修改 - 返回 indices 和 total_frames)
@@ -45,17 +48,15 @@ class DALIWarper:
 # 2. DALI External Source for Video Data (已修改 - 返回 indices 和 total_frames)
 # ----------------------------------------------------------------------------
 class VideoExternalSource:
-    def __init__(self, mode: str, source_params: Dict[str, Any]):
+    def __init__(self, mode: str, source_params: dict):
         self.mode = mode
-        self.file_list: List[Tuple[str, int]] = source_params["file_list"]
+        self.file_list: list = source_params["file_list"]
         self.num_shards: int = source_params["num_shards"]
         self.shard_id: int = source_params["shard_id"]
         self.batch_size: int = source_params["batch_size"]
         self.sequence_length: int = source_params["sequence_length"]
         self.use_rgb: bool = source_params["use_rgb"]
         self.seed: int = source_params["seed"]
-
-        # ===> decord 线程数参数 <===
         self.decord_num_threads: int = source_params["decord_num_threads"]
 
         self.shard_size = len(self.file_list) // self.num_shards
@@ -64,9 +65,11 @@ class VideoExternalSource:
 
         self.perm = None
         self.last_seen_epoch = -1
-        self.fallback_example = self.file_list[0] if self.file_list else ("", 0)
 
-    def _get_frame_indices(self, num_frames: int) -> List[int]:
+        # 只用标准logger，不加file handler
+        self.logger = logging.getLogger(__file__)
+
+    def _get_frame_indices(self, num_frames: int) -> list:
         if num_frames < self.sequence_length:
             indices = list(range(num_frames))
             indices += [num_frames - 1] * (self.sequence_length - num_frames)
@@ -78,18 +81,37 @@ class VideoExternalSource:
             indices = [int(seg_size * i + seg_size / 2) for i in range(self.sequence_length)]
         return indices
 
-    def _load_video_data(self, video_path: str) -> Tuple[np.ndarray, np.ndarray, int]:
-        # ===> 在此处使用可配置的线程数，并返回 indices 和 total_frames <===
+    def _load_video_data(self, video_path: str):
         vr = decord.VideoReader(video_path, num_threads=self.decord_num_threads, ctx=decord.cpu(0))
         num_frames = len(vr)
         frame_indices = self._get_frame_indices(num_frames)
         video_data = vr.get_batch(frame_indices).asnumpy()
         if self.use_rgb:
             video_data = video_data[:, :, :, ::-1]
-        # 返回 video_data, indices, 和 total_frames
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
-    def __call__(self, sample_info) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _get_valid_sample(self, sample_idx: int, depth=0) -> tuple:
+        if depth > 5:  # 防止极端递归
+            self.logger.warning("Too many attempts, fallback to first sample.")
+            sample_line = self.file_list[0]
+        else:
+            sample_line = self.file_list[sample_idx]
+        parts = sample_line.strip().split("\t")
+        if len(parts) < 11:
+            self.logger.warning(f"Invalid line format (not enough columns): {sample_line}")
+            new_idx = np.random.randint(0, len(self.file_list))
+            return self._get_valid_sample(new_idx, depth + 1)
+        video_path = parts[0]
+        video_label = [int(x) for x in parts[1:11]]
+        try:
+            video_data, frame_indices, total_frames = self._load_video_data(video_path)
+            return video_data, np.array(video_label, dtype=np.int64), frame_indices, np.int64([total_frames])
+        except Exception as e:
+            self.logger.warning(f"Failed to load video: {video_path}, error: {e}")
+            new_idx = np.random.randint(0, len(self.file_list))
+            return self._get_valid_sample(new_idx, depth + 1)
+
+    def __call__(self, sample_info):
         if sample_info.iteration >= self.full_iterations:
             raise StopIteration
         if self.last_seen_epoch != sample_info.epoch_idx:
@@ -97,15 +119,7 @@ class VideoExternalSource:
             rng = np.random.default_rng(seed=self.seed + sample_info.epoch_idx)
             self.perm = rng.permutation(len(self.file_list))
         sample_idx = self.perm[sample_info.idx_in_epoch + self.shard_offset]
-        video_path, video_label = self.file_list[sample_idx]
-        try:
-            video_data, frame_indices, total_frames = self._load_video_data(video_path)
-        except Exception as e:
-            warnings.warn(f"Failed to load video: {video_path}, error: {e}. Using fallback.")
-            fallback_path, _ = self.fallback_example
-            if not fallback_path: raise IOError(f"Fallback video path is empty!")
-            video_data, frame_indices, total_frames = self._load_video_data(fallback_path)
-        return video_data, np.int64([int(video_label)]), frame_indices, np.int64([total_frames])
+        return self._get_valid_sample(sample_idx, depth=0)
 
 # ----------------------------------------------------------------------------
 # 3. DALI Pipeline Definition (已修改 - 处理 indices 和 total_frames)
@@ -168,9 +182,7 @@ def get_dali_dataloader(
     try:
         with open(data_csv_path, "r") as f:
             for line in f:
-                offset_path, label = line.strip().split(",")
-                full_path = os.path.join(data_root_path, offset_path)
-                file_list.append((full_path, int(label)))
+                file_list.append(line.rstrip("\n"))  # 每行原始内容，无分割处理
     except FileNotFoundError:
         raise FileNotFoundError(f"Data list file not found at: {data_csv_path}")
     if not file_list:
@@ -195,7 +207,6 @@ def get_dali_dataloader(
     )
     pipe.build()
 
-    # ===> output_map 增加 "indices" 和 "total_frames" <===
     dali_iter = DALIGenericIterator(
         pipelines=[pipe],
         output_map=["videos", "labels", "indices", "total_frames"],
