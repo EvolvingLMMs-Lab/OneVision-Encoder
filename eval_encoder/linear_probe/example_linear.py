@@ -21,11 +21,11 @@ from timm.models import create_model
 
 # 基于图片中显示的文件列表，定义支持的数据集
 SUPPORTED_DATASETS = [
-    "birdsnap","caltech101", "cifar10", "cifar100", "clevr", "coco", 
-    "country211", "dtd", "eurosat", "fer2013", "fgvc_aircraft", 
-    "flickr30k", "flowers", "food101", "gtsrb", "hateful_memes_raw", 
-    "hateful_memes", "imagenet", "kinetics700", "kitti", "mnist", 
-    "patchcamelyon", "pets", "resisc45", "sst2", "stanford_car", 
+    "birdsnap","caltech101", "cifar10", "cifar100", "clevr", "coco",
+    "country211", "dtd", "eurosat", "fer2013", "fgvc_aircraft",
+    "flickr30k", "flowers", "food101", "gtsrb", "hateful_memes_raw",
+    "hateful_memes", "imagenet", "kinetics700", "kitti", "mnist",
+    "patchcamelyon", "pets", "resisc45", "sst2", "stanford_car",
     "stl10", "sun397", "ucf101", "voc2007"
 ]
 
@@ -55,29 +55,29 @@ def setup_seed(seed, cuda_deterministic=True):
 
 def get_dataset_loaders(dataset_name, transform):
     """从dataloader_rec目录加载数据集，并获取相关参数"""
-    
+
     # 断言检查请求的数据集是否支持
     assert dataset_name in SUPPORTED_DATASETS, f"Dataset '{dataset_name}' is not supported. Supported datasets: {SUPPORTED_DATASETS}"
-    
+
     # 从dataloader_rec目录导入对应模块
     try:
         module = importlib.import_module(f"dataloader_rec.{dataset_name}")
-        
+
         # 获取classes (必需)
         if hasattr(module, "num_classes"):
             classes = module.num_classes
         else:
             raise AttributeError(f"Module 'dataloader_rec.{dataset_name}' does not define 'num_classes'")
-        
+
         # 获取metric (可选，默认为"acc")
         metric = getattr(module, "metric", "acc")
-        
+
         # 获取数据集
-        dataset_train = module.get_loader_train(transform, None, None, 2333)[0]
-        dataset_test = module.get_loader_test(transform, None, None, 2333)[0]
-        
+        dataset_train = module.get_loader_train(transform, 32, 8, 2333)[0]
+        dataset_test = module.get_loader_test(transform, 32, 8, 2333)[0]
+
         return dataset_train, dataset_test, classes, metric
-        
+
     except (ImportError, AttributeError) as e:
         raise Exception(f"Failed to load dataset '{dataset_name}' from dataloader_rec: {e}")
 
@@ -142,7 +142,7 @@ if __name__ == "__main__":
     model = model.cuda().eval()
     # 使用统一的数据集加载函数，同时获取classes和metric
     dataset_train, dataset_test, classes, metric = get_dataset_loaders(args.dataset, transform)
-    
+
     # 计算特征
     x_train, y_train = get_feat(dataset_train, model, args.workers)
     x_test, y_test = get_feat(dataset_test, model, args.workers)
