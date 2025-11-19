@@ -91,14 +91,14 @@ class VideoExternalSource:
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
     def _get_valid_sample(self, sample_idx: int, depth=0) -> tuple:
-        if depth > 5:  # 防止极端递归
-            self.logger.warning("Too many attempts, fallback to first sample.")
+        if depth > 3:  # 防止极端递归
+            self.logger.info("Too many attempts, fallback to first sample.")
             sample_line = self.file_list[0]
         else:
             sample_line = self.file_list[sample_idx]
         parts = sample_line.strip().split("\t")
         if len(parts) < 11:
-            self.logger.warning(f"Invalid line format (not enough columns): {sample_line}")
+            self.logger.info(f"Invalid line format (not enough columns): {sample_line}")
             new_idx = np.random.randint(0, len(self.file_list))
             return self._get_valid_sample(new_idx, depth + 1)
         video_path = parts[0]
@@ -107,7 +107,7 @@ class VideoExternalSource:
             video_data, frame_indices, total_frames = self._load_video_data(video_path)
             return video_data, np.array(video_label, dtype=np.int64), frame_indices, np.int64([total_frames])
         except Exception as e:
-            self.logger.warning(f"Failed to load video: {video_path}, error: {e}")
+            self.logger.info(f"Failed to load video: {video_path}, error: {e}")
             new_idx = np.random.randint(0, len(self.file_list))
             return self._get_valid_sample(new_idx, depth + 1)
 
@@ -176,6 +176,8 @@ def get_dali_dataloader(
     dali_py_num_workers: int = 8,
     decord_num_threads: int = 2,
     seed: int = 0,
+    shard_id = None,
+    num_shards = None,
 ) -> DALIWarper:
     print(f"[{mode} loader] Reading for: {data_csv_path}")
     file_list = []
@@ -191,9 +193,12 @@ def get_dali_dataloader(
     rank = int(os.getenv("RANK", "0"))
     local_rank = int(os.getenv("LOCAL_RANK", "0"))
     world_size = int(os.getenv("WORLD_SIZE", "1"))
+    if num_shards is None or shard_id is None:
+        num_shards = world_size
+        shard_id = rank
 
     source_params = {
-        "num_shards": world_size, "shard_id": rank, "file_list": file_list,
+        "num_shards": num_shards, "shard_id": shard_id, "file_list": file_list,
         "batch_size": batch_size, "sequence_length": sequence_length, "seed": seed + rank,
         "use_rgb": use_rgb, "input_size": input_size, "short_side_size": short_side_size,
         "mean": mean, "std": std,
