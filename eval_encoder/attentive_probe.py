@@ -146,6 +146,7 @@ def get_feature(
         "siglip2",
         "dinov2",
         "dinov3",
+        "metaclip",
         "llava_vit_si"
     ]
     if args.model_family in list_vit_single_image:
