@@ -200,8 +200,24 @@ def howto100m_kinetics_104948429_400000_split_80():
         name="howto100m_kinetics_104948429_400000_split_80",
         prefixes=[list_mp4_label_path],
         num_classes=400000,
-        num_examples=104948429,
+        num_examples=104948429 // world_size,
         num_shards=1,
         shard_id=0,
         dali_type="decord",
+    )
+
+
+@DATASET_REGISTRY.register()
+def fake_data():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+    return Property(
+        name="fake_data",
+        prefixes=["/video_vit/xiangan/LLaVA-ViT/fake_data/fake_data"],
+        num_classes=10000,
+        num_examples=0,
+        num_shards=world_size,
+        shard_id=rank,
+        dali_type="origin",
     )

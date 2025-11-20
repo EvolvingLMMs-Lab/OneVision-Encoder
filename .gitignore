@@ -15,6 +15,7 @@
 *.ckpt
 *.mp4
 *.bin
+*.pdf
 
 ########################################
 # Python bytecode / interpreter artefacts
@@ -490,3 +491,7 @@ cache/
 # !models/.gitkeep
 # !outputs/.gitkeep
 # !checkpoints/.gitkeep
+
+list_*
+tmp
+*.json
