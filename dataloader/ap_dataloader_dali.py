@@ -2,7 +2,7 @@
 # Created by anxiangsir
 # Date: 2025-11-13 12:26:36 (UTC)
 #
-
+ 
 import os
 import warnings
 import pickle
@@ -14,6 +14,12 @@ import nvidia.dali.fn as fn
 import nvidia.dali.types as types
 from nvidia.dali.pipeline import Pipeline, pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
+try:
+    import cv2
+    _HAS_CV2 = True
+except Exception:
+    _HAS_CV2 = False
+
 
 # ----------------------------------------------------------------------------
 # 1. DALI Iterator Wrapper (已修改 - 返回 indices 和 total_frames)
@@ -105,6 +111,7 @@ class VideoExternalSource:
             fallback_path, _ = self.fallback_example
             if not fallback_path: raise IOError(f"Fallback video path is empty!")
             video_data, frame_indices, total_frames = self._load_video_data(fallback_path)
+
         return video_data, np.int64([int(video_label)]), frame_indices, np.int64([total_frames])
 
 # ----------------------------------------------------------------------------
@@ -131,16 +138,30 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     labels = labels.gpu()
     indices = indices.gpu()
     total_frames = total_frames.gpu()
-
-    videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, interp_type=types.INTERP_LINEAR)
+    
     if mode == "train":
-        videos = fn.random_resized_crop(videos, size=[input_size, input_size], random_area=[0.9, 1.0])
-        videos = fn.brightness_contrast(videos, contrast=fn.random.uniform(range=(0.6, 1.4)), brightness=fn.random.uniform(range=(-0.125, 0.125)))
-        videos = fn.saturation(videos, saturation=fn.random.uniform(range=[0.6, 1.4]))
-        videos = fn.hue(videos, hue=fn.random.uniform(range=[-0.2, 0.2]))
+
+        videos = fn.resize(videos, device="gpu", resize_shorter=input_size, interp_type=types.INTERP_CUBIC)
+        videos = fn.crop_mirror_normalize(videos, device="gpu", crop=[input_size, input_size], crop_pos_x=0.5, crop_pos_y=0.5, dtype=types.UINT8, output_layout="FHWC")
+        brightness_contrast_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
+        if brightness_contrast_probability:
+            videos = fn.brightness_contrast(videos, contrast=fn.random.uniform(range=(0.6, 1.4)),
+                                            brightness=fn.random.uniform(range=(-0.125, 0.125)), device="gpu")
+        saturation_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
+        if saturation_probability:
+            videos = fn.saturation(videos, saturation=fn.random.uniform(range=[0.6, 1.4]), device="gpu")
+        hue_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
+        if hue_probability:
+            videos = fn.hue(videos, hue=fn.random.uniform(range=[-0.2, 0.2]), device="gpu")
+        color_space_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.1)
+        if color_space_probability:
+            videos = fn.color_space_conversion(videos, image_type=types.RGB, output_type=types.BGR, device="gpu")
+
     else:
-        videos = fn.crop(videos, crop=[input_size, input_size])
-    videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW", mean=[m * 255.0 for m in mean], std=[s * 255.0 for s in std])
+        videos = fn.resize(videos, device="gpu", resize_shorter=input_size, interp_type=types.INTERP_CUBIC)
+        videos = fn.crop_mirror_normalize(videos, device="gpu", crop=[input_size, input_size], crop_pos_x=0.5, crop_pos_y=0.5, dtype=types.UINT8, output_layout="FHWC")
+    videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout = "CFHW",
+                                            mean=[m*255.0 for m in mean], std=[m*255.0 for m in std], device="gpu")
 
     return videos, labels, indices, total_frames
 
