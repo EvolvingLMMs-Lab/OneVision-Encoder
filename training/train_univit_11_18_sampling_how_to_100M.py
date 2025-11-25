@@ -115,6 +115,7 @@ parser.add_argument("--vis_interval", type=int, default=10, help="Visualization 
 parser.add_argument("--total_indices", type=int, default=2000, help="Visible indices total count / 可见索引总数")
 parser.add_argument("--target_num", type=int, default=1568, help="Sampled indices count / 采样索引个数")
 parser.add_argument("--must_num", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
+parser.add_argument("--num_tokens_per_frame", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
 
 args = parser.parse_args()
 
@@ -211,8 +212,26 @@ def main():
         backbone.load_state_dict(state_dict, strict=True)
         logger.info(f"Loaded backbone weights from {args.init_backbone}")
 
-    backbone.requires_grad_(bool(args.finetune_backbone))
-    backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
+        # 根据 finetune_backbone 控制哪些层参与训练：
+        # - finetune_backbone = 1: 整个 backbone 可训练
+        # - finetune_backbone = 0: 只有 head 可训练，其它全部冻结
+        if args.finetune_backbone:
+            backbone.requires_grad_(True)
+        else:
+            # 先全部冻结
+            backbone.requires_grad_(False)
+            # 仅打开 head 的梯度（假设 LlavaViTEncoder 上有 .head）
+            backbone_module = unwrap_module(backbone)
+            if hasattr(backbone_module, "head"):
+                for p in backbone_module.head.parameters():
+                    p.requires_grad = True
+            else:
+                raise RuntimeError(
+                    "finetune_backbone==0 但 backbone 上没有属性 'head'，"
+                    "请确认使用的是 LlavaViTEncoder 并且 use_head=True。"
+                )
+
+        backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
 
     dict_pfc_modules = {}
     list_module_pfc = []
@@ -438,7 +457,6 @@ def main():
 
                 bs, C, T, H, W = videos.shape
                 target_frames = 64
-                frame_tokens = 196
 
                 # === 插值indices到目标帧数 ===
                 interpolated_indices = interpolate_frame_indices(
@@ -455,9 +473,9 @@ def main():
                 padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
 
                 # 计算可见帧token编号
-                per = torch.arange(frame_tokens, device="cuda")
-                visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
-                visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
+                per = torch.arange(args.num_tokens_per_frame, device="cuda")
+                visible_index = (interpolated_indices.unsqueeze(-1) * args.num_tokens_per_frame + per).reshape(bs, -1)
+                visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
 
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     head_embedding  = backbone_ddp_compiled(padded_videos, visible_index)["head_output"]
