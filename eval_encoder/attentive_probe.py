@@ -33,8 +33,8 @@ def parse_args() -> argparse.Namespace:
 
     # Model
     parser.add_argument("--model_family", default="llava_vit_sampling")
-    parser.add_argument("--model_name", default="pretrain_encoder_base_patch16_224_v11_09_ln_head_ip")
-    parser.add_argument("--ckpt_path", default="/video_vit/xiangan/checkpoint_llava_vit/continue_with_mlcd_1536_tokens_b16_mix_three_input_residual_mv_new_b16/00056000/backbone.pt")
+    parser.add_argument("--model_name", default="llava_vit_base_ln")
+    parser.add_argument("--model_weight", default="NULL")
     parser.add_argument("--num_frames", type=int, default=8)
     parser.add_argument("--num_tokens", type=int, default=1568)
     parser.add_argument("--input_size", type=int, default=224)
@@ -55,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--smoothing", type=float, default=0.1)
     parser.add_argument("--print_freq", type=int, default=10)
     parser.add_argument("--eval_freq", type=int, default=1)
+    parser.add_argument("--frames_token_num", type=int, default=196)
 
     # Dataloader
     parser.add_argument("--dali_num_threads", type=int, default=2)
@@ -153,7 +154,8 @@ def get_feature(
         "dinov2",
         "dinov3",
         "metaclip",
-        "llava_vit_si"
+        "llava_vit_si",
+        "aimv2"
     ]
     if args.model_family in list_vit_single_image:
         # ===> 专门图片分支 <===
@@ -185,7 +187,7 @@ def get_feature(
             with torch.no_grad():
                 bs, C, T, H, W = videos.shape
                 device = videos.device
-                frame_tokens = 196  # 每帧的 token 数量
+                frame_tokens = args.frames_token_num  # 每帧的 token 数量
                 target_frames = args.target_frames  # 目标帧数，默认 64
 
                 if frame_indices is not None and total_frames is not None:
@@ -407,7 +409,7 @@ def evaluate(
 def get_model(args: argparse.Namespace) -> nn.Module:
     model = create_model(args.model_name, pretrained=False)
     if args.model_family in ["llava_vit_sampling"]:
-        state_dict = torch.load(args.ckpt_path, map_location="cpu")
+        state_dict = torch.load(args.model_weight, map_location="cpu")
         state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=True)
     return model
@@ -443,9 +445,9 @@ def main() -> None:
         args.val_data_root_path = os.path.join(args.data_root, "perception_test")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
-    if args.dataset == "charadesego":
-        args.train_data_root_path = os.path.join(args.data_root, "CharadesEgo")
-        args.val_data_root_path = os.path.join(args.data_root, "CharadesEgo")
+    if args.dataset == "hmdb51":
+        args.train_data_root_path = os.path.join(args.data_root, "hmdb51")
+        args.val_data_root_path = os.path.join(args.data_root, "hmdb51")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "k400":
@@ -453,7 +455,11 @@ def main() -> None:
         args.val_data_root_path = os.path.join(args.data_root, "k400")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
-
+    if args.dataset == "charadesego":
+        args.train_data_root_path = os.path.join(args.data_root, "charadesego")
+        args.val_data_root_path = os.path.join(args.data_root, "charadesego")
+        args.train_data_csv_path = "train_new.csv"
+        args.val_data_csv_path = "val_new.csv"
     try:
         args.rank = int(os.environ["RANK"])
         args.local_rank = int(os.environ["LOCAL_RANK"])
@@ -527,7 +533,7 @@ def main() -> None:
     if args.rank == 0:
         print(f"best_lr: {best_lr} max_acc_top1: {best_top1} max_acc_top5: {best_top5}")
 
-        save_path = os.path.join(args.save_report, f"report_attentive_probe_{os.path.basename(args.ckpt_path)}.txt")
+        save_path = os.path.join(args.save_report, f"report_attentive_probe_{os.path.basename(args.model_weight)}.txt")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, "a+") as f:
             f.write(f"{args.dataset} {best_top1}\n")
