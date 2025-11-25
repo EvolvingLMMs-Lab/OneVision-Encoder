@@ -37,8 +37,8 @@ docker build -t llava_vit:25.11 .
 
 > #### Option 2: Load pre-built Docker image
 ```bash
-docker load -i /video_vit/docker_images/llava_vit_tag_25.11.15.tar && \
-docker tag $(docker images -q | head -n 1) llava_vit:25.11.15
+docker load -i /video_vit/docker_images/llava_vit_tag_25.11.22.tar && \
+docker tag $(docker images -q | head -n 1) llava_vit:25.11.22
 ```
 
 
@@ -57,7 +57,7 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
     -w /workspace/LLaVA-ViT/ \
     -e NCCL_TIMEOUT=1800 -e CUDA_DEVICE_MAX_CONNECTIONS=1 -e NCCL_SOCKET_IFNAME=eth0 -e NCCL_IB_GID_INDEX=3 -e NCCL_IB_DISABLE=0 -e NCCL_IB_HCA="mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1" -e NCCL_NET_GDR_LEVEL=2 -e NCCL_IB_QPS_PER_CONNECTION=4 -e NCCL_IB_TC=160 -e NCCL_IB_TIMEOUT=22 -e NCCL_CROSS_NIC=1 -e NCCL_MIN_NCHANNELS=8 -e NCCL_MAX_NCHANNELS=16 \
     -e http_proxy=http://172.16.5.77:8889 -e https_proxy=http://172.16.5.77:8889 \
-    llava_vit:25.11.15 bash -c "service ssh restart; bash; "
+    llava_vit:25.11.22 bash -c "service ssh restart; bash; "
 
 # Inside the container, install the package in editable mode
 pip install -e .
@@ -159,3 +159,4 @@ Thanks so much to all of our amazing contributors!
 </table>
 <!-- readme: collaborators,contributors -end -->
 
+# LLava-ViT
