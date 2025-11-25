@@ -485,8 +485,10 @@ class LlavaViTPreTrainedModel(PreTrainedModel):
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
         elif isinstance(module, (nn.LayerNorm, nn.RMSNorm)):
-            module.bias.data.zero_()
+            # 修复：RMSNorm 没有 bias，必须先检查 hasattr
             module.weight.data.fill_(1.0)
+            if hasattr(module, 'bias') and module.bias is not None:
+                module.bias.data.zero_()
 
 
 @add_start_docstrings(
@@ -612,7 +614,7 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
 # TIMM Registry Functions
 # ---------------------------------------------------------------------------
 @register_model
-def llava_vit_small_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
+def hf_llava_vit_small_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config = LlavaViTConfig(
         patch_size=16,
         hidden_size=384,
@@ -627,7 +629,7 @@ def llava_vit_small_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
     return model
 
 @register_model
-def llava_vit_base_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
+def hf_llava_vit_base_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config = LlavaViTConfig(
         patch_size=16,
         hidden_size=768,
@@ -642,7 +644,7 @@ def llava_vit_base_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
     return model
 
 @register_model
-def llava_vit_large_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
+def hf_llava_vit_large_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config = LlavaViTConfig(
         patch_size=14,
         hidden_size=1024,
@@ -657,7 +659,7 @@ def llava_vit_large_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
     return model
 
 @register_model
-def llava_vit_huge_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
+def hf_llava_vit_huge_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config = LlavaViTConfig(
         patch_size=14,
         hidden_size=1280,
@@ -672,7 +674,7 @@ def llava_vit_huge_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
     return model
 
 @register_model
-def llava_vit_giant_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
+def hf_llava_vit_giant_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config = LlavaViTConfig(
         patch_size=14,
         hidden_size=1536,
@@ -692,11 +694,11 @@ def llava_vit_giant_ln_hf(pretrained: bool = False, ckpt_path=None, **kwargs):
 if __name__ == "__main__":
     import timm
 
-    model = timm.create_model("llava_vit_large_ln_hf", pretrained=False)
+    model = timm.create_model("hf_llava_vit_large_ln", pretrained=False)
 
     bs = 4
     test_input = torch.randn(bs, 3, 224, 224, device=model.device)
-    last_hidden_state = model(test_input)
+    last_hidden_state = model(test_input).last_hidden_state
 
     print(f"Input shape: {test_input.shape}")
     print(f"Last hidden state shape: {last_hidden_state.shape}")
