@@ -2,7 +2,7 @@
 # Created by anxiangsir
 # Date: 2025-11-13 12:26:36 (UTC)
 #
-
+ 
 import os
 import warnings
 from typing import Any, Dict, List, Tuple
@@ -13,6 +13,12 @@ import nvidia.dali.fn as fn
 import nvidia.dali.types as types
 from nvidia.dali.pipeline import pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
+try:
+    import cv2
+    _HAS_CV2 = True
+except Exception:
+    _HAS_CV2 = False
+
 
 
 # ----------------------------------------------------------------------------
@@ -105,6 +111,7 @@ class VideoExternalSource:
             fallback_path, _ = self.fallback_example
             if not fallback_path: raise IOError(f"Fallback video path is empty!")
             video_data, frame_indices, total_frames = self._load_video_data(fallback_path)
+
         return video_data, np.int64([int(video_label)]), frame_indices, np.int64([total_frames])
 
 

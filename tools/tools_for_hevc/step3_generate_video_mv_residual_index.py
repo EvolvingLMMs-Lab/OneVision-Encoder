@@ -252,23 +252,10 @@ def process_one_video_mv_res(
         vr = decord.VideoReader(video_path, num_threads=max(4, hevc_n_parallel), ctx=decord.cpu(0))
         duration = len(vr)
 
-        T = seq_len
-        if duration >= T:
-            frame_id_list = list(range(T))
-        else:
-            frame_id_list = list(range(duration)) + [duration - 1] * (T - duration)
-
-        # I 帧（相对 T 片段的位置）
-        key_idx = None
-        if hasattr(vr, "get_key_indices"):
-            key_idx = vr.get_key_indices()
-        elif hasattr(vr, "get_keyframes"):
-            key_idx = vr.get_keyframes()
-        if key_idx is not None:
-            I_global = set(int(i) for i in np.asarray(key_idx).tolist())
-        else:
-            I_global = set(int(i) for i in range(0, duration, 16))
-        I_pos = set([i for i, fid in enumerate(frame_id_list) if fid in I_global])
+        ## 抽帧全覆盖
+        frame_id_list = np.linspace(0, duration - 1, num=seq_len, dtype=int).tolist()
+        ## 第一帧为I帧 其余是P帧
+        I_pos = {0}
 
         # 读残差（Y 通道），I 位置置 0
         Tsel = T
