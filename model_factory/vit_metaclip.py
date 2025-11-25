@@ -23,9 +23,26 @@ class MetaCLIPBase(nn.Module):
         return last_hidden_state
 
 @register_model
-def metaclip_base(pretrained: bool = False, **kwargs):
+def metaclip_base16_fullcc(pretrained: bool = False, **kwargs):
     model = MetaCLIPBase(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-b16-fullcc2.5b/"),
+        device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
+    )
+    return model
+
+@register_model
+def metaclip_large14_fullcc(pretrained: bool = False, **kwargs):
+    model = MetaCLIPBase(
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-l14-fullcc2.5b/"),
+        device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
+    )
+    return model
+
+
+@register_model
+def metaclip2_large14(pretrained: bool = False, **kwargs):
+    model = MetaCLIPBase(
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-2-worldwide-l14"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model

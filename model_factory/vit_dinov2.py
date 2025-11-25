@@ -57,6 +57,15 @@ def dinov2_base(pretrained: bool = False, **kwargs):
     )
     return model
 
+@register_model
+def dinov2_large(pretrained: bool = False, **kwargs):
+    model = DINOv2Base(
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/dinov2-large"),
+        device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
+        local_files_only=kwargs.get("local_files_only", True),
+    )
+    return model
+
 
 if __name__ == "__main__":
     import timm

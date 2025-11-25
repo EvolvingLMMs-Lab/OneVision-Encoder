@@ -38,6 +38,15 @@ def siglip_base(pretrained=False, **kwargs):
     )
     return model
 
+
+@register_model
+def siglip_large_patch16_256(pretrained=False, **kwargs):
+    model = SiglipBase(
+        ckpt="/video_vit/pretrain_models/siglip-large-patch16-256",
+        device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
+    )
+    return model
+
 if __name__ == "__main__":
     import timm
 
