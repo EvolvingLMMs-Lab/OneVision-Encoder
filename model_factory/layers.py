@@ -477,3 +477,33 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
         hidden_state = residual + self.mlp(hidden_state)
 
         return hidden_state[:, 0]
+
+
+class Siglip2TransformerAttentionPoolingHead(nn.Module):
+    def __init__(
+        self,
+        hidden_size,
+        num_attention_heads,
+        num_layers=2,
+        norm_cls=nn.LayerNorm,
+    ):
+        super().__init__()
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_size,
+            nhead=num_attention_heads,
+            batch_first=True,
+            norm_first=True,
+            activation='gelu',
+        )
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers,
+            norm=norm_cls(hidden_size)
+        )
+        self.probe = nn.Parameter(torch.randn(1, 1, hidden_size))
+
+    def forward(self, hidden_state: torch.Tensor) -> torch.Tensor:
+        batch_size = hidden_state.shape[0]
+        probe = self.probe.expand(batch_size, -1, -1)  # (B, 1, C)
+        cat = torch.cat([probe, hidden_state], dim=1)  # (B, N+1, C)
+        return self.transformer(cat)[:, 0]

@@ -1,7 +1,7 @@
 import argparse
 import math
 import os
-import time  # <--- 引入 time 模块
+import time
 import warnings
 from typing import Dict
 
@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import LinearLR
 
 # Ensure custom models and layers are registered
 import model_factory
-from model_factory.layers import Siglip2MultiheadAttentionPoolingHead
+from model_factory.layers import Siglip2MultiheadAttentionPoolingHead, Siglip2TransformerAttentionPoolingHead
 
 warnings.filterwarnings("ignore")
 
@@ -33,8 +33,8 @@ def parse_args() -> argparse.Namespace:
 
     # Model
     parser.add_argument("--model_family", default="llava_vit_sampling")
-    parser.add_argument("--model_name", default="pretrain_encoder_base_patch16_224_v11_09_ln_head_ip")
-    parser.add_argument("--ckpt_path", default="/video_vit/xiangan/checkpoint_llava_vit/continue_with_mlcd_1536_tokens_b16_mix_three_input_residual_mv_new_b16/00056000/backbone.pt")
+    parser.add_argument("--model_name", default="llava_vit_base_ln")
+    parser.add_argument("--model_weight", default="NULL")
     parser.add_argument("--num_frames", type=int, default=8)
     parser.add_argument("--num_tokens", type=int, default=1568)
     parser.add_argument("--input_size", type=int, default=224)
@@ -55,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--smoothing", type=float, default=0.1)
     parser.add_argument("--print_freq", type=int, default=10)
     parser.add_argument("--eval_freq", type=int, default=1)
+    parser.add_argument("--frames_token_num", type=int, default=196)
 
     # Dataloader
     parser.add_argument("--dali_num_threads", type=int, default=2)
@@ -76,6 +77,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--world_size", type=int, default=1)
     parser.add_argument("--global_rank", type=int, default=0)
+
+    # 新增：时序空间crop参数（默认与dali默认一致）
+    parser.add_argument("--num_temporal_crops", type=int, default=1, help="Number of temporal crops for evaluation")
+    parser.add_argument("--num_spatial_crops", type=int, default=1, help="Number of spatial crops for evaluation")
+
+    parser.add_argument("--probe_size", default=1, type=int)
 
     return parser.parse_args()
 
@@ -142,10 +149,13 @@ def get_feature(
 
     list_vit_single_image = [
         "clip",
+        "siglip",
         "siglip2",
         "dinov2",
         "dinov3",
-        "llava_vit_si"
+        "metaclip",
+        "llava_vit_si",
+        "aimv2"
     ]
     if args.model_family in list_vit_single_image:
         # ===> 专门图片分支 <===
@@ -177,7 +187,7 @@ def get_feature(
             with torch.no_grad():
                 bs, C, T, H, W = videos.shape
                 device = videos.device
-                frame_tokens = 196  # 每帧的 token 数量
+                frame_tokens = args.frames_token_num  # 每帧的 token 数量
                 target_frames = args.target_frames  # 目标帧数，默认 64
 
                 if frame_indices is not None and total_frames is not None:
@@ -215,9 +225,15 @@ def get_feature(
 
 
 class ClassificationHead(nn.Module):
-    def __init__(self, hidden_dim: int, num_classes: int, init_scale: float = 1e-3) -> None:
+    def __init__(self, hidden_dim: int, num_classes: int, init_scale: float = 1e-3, probe_size=1) -> None:
         super().__init__()
         self.pool = Siglip2MultiheadAttentionPoolingHead(hidden_size=hidden_dim, num_attention_heads=max(1, hidden_dim // 64), intermediate_size=hidden_dim * 4,)
+        # self.pool = Siglip2TransformerAttentionPoolingHead(
+        #     hidden_size=hidden_dim,
+        #     num_attention_heads=max(1, hidden_dim // 64),
+        #     num_layers=probe_size,
+        #     norm_cls=nn.LayerNorm
+        # )
         self.norm = nn.LayerNorm(hidden_dim)
         self.fc = nn.Linear(hidden_dim, num_classes)
         self.apply(self._init_weights)
@@ -247,7 +263,7 @@ def train_one_experiment(
     loader_val,
 ) -> tuple[float, float]:
     base_model.to(device).eval()
-    head = ClassificationHead(hidden_dim=args.embedding_size, num_classes=args.num_classes)
+    head = ClassificationHead(hidden_dim=args.embedding_size, num_classes=args.num_classes, probe_size=args.probe_size)
     head.to(device)
     head = torch.nn.parallel.DistributedDataParallel(head, device_ids=[args.local_rank])
     optimizer = torch.optim.AdamW(head.parameters(), lr=lr, eps=1e-8, betas=(0.9, 0.999), weight_decay=args.default_weight_decay)
@@ -338,45 +354,62 @@ def evaluate(
     loader_val,
 ) -> Dict[str, float]:
     head.eval()
-
     val_metrics = torchmetrics.MetricCollection({
         "acc1": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=1),
         "acc5": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=5),
     }).to(device)
 
+    num_crops = args.num_temporal_crops * args.num_spatial_crops
+
+    all_logits, all_targets = [], []
     steps_val = len(loader_val)
     for i, batch in enumerate(loader_val):
-        # ===> 从字典中解包数据（包括 total_frames） <===
-        videos = batch["videos"].to(device, non_blocking=True)
-        target = batch["labels"].view(-1).to(device, non_blocking=True)
-        indices = batch["indices"].to(device, non_blocking=True)  # [B, seq_len]
-        total_frames = batch["total_frames"].to(device, non_blocking=True)  # [B, 1]
+        videos = batch["videos"].to(device, non_blocking=True)    # [B*N, C, T, H, W]
+        labels = batch["labels"].view(-1).to(device, non_blocking=True)  # [B*N]
+        indices = batch["indices"].to(device, non_blocking=True)
+        total_frames = batch["total_frames"].to(device, non_blocking=True)
 
-        feats = get_feature(args, videos, base_model, frame_indices=indices, total_frames=total_frames, is_training=False)
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            logits = head(feats)
+        B = videos.shape[0] // num_crops
+        # reshape为 [B, num_crops, ...]
+        videos = videos.view(B, num_crops, *videos.shape[1:])
+        labels = labels.view(B, num_crops)[:, 0]   # [B]，同一个视频的labels一样
+        indices = indices.view(B, num_crops, *indices.shape[1:])
+        total_frames = total_frames.view(B, num_crops)[:, 0]
 
-        val_metrics.update(logits, target)
+        logits_per_crop = []
+        for crop_id in range(num_crops):
+            feats = get_feature(args, videos[:, crop_id], base_model, frame_indices=indices[:, crop_id], total_frames=total_frames, is_training=False)
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                logits = head(feats)      # [B, num_classes]
+                logits_per_crop.append(logits)
+        # [num_crops, B, num_classes] -> [B, num_crops, num_classes]
+        logits_all = torch.stack(logits_per_crop, dim=1)
+        # 对 crop 维求平均（可 softmax 再平均/直接logit平均）
+        logits_mean = logits_all.mean(dim=1)   # [B, num_classes]
+        # 收集
+        all_logits.append(logits_mean)
+        all_targets.append(labels)
 
-        if (i + 1) % args.print_freq == 0:
-            if args.rank == 0:
-                print(f"Eval: [{i + 1}/{steps_val}]")
+        if (i + 1) % args.print_freq == 0 and args.rank == 0:
+            print(f"Eval: [{i + 1}/{steps_val}]")
 
+    all_logits = torch.cat(all_logits, dim=0)        # [total_B, num_classes]
+    all_targets = torch.cat(all_targets, dim=0)      # [total_B]
+
+    val_metrics.update(all_logits, all_targets)
     computed_metrics = val_metrics.compute()
-
     if args.rank == 0:
         print(
             f"* Final Acc@1: {computed_metrics['acc1'] * 100:.1f} "
             f"| Final Acc@5: {computed_metrics['acc5'] * 100:.1f}"
         )
-
     return {k: v.item() * 100 for k, v in computed_metrics.items()}
 
 
 def get_model(args: argparse.Namespace) -> nn.Module:
     model = create_model(args.model_name, pretrained=False)
     if args.model_family in ["llava_vit_sampling"]:
-        state_dict = torch.load(args.ckpt_path, map_location="cpu")
+        state_dict = torch.load(args.model_weight, map_location="cpu")
         state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=True)
     return model
@@ -412,9 +445,9 @@ def main() -> None:
         args.val_data_root_path = os.path.join(args.data_root, "perception_test")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
-    if args.dataset == "charadesego":
-        args.train_data_root_path = os.path.join(args.data_root, "CharadesEgo")
-        args.val_data_root_path = os.path.join(args.data_root, "CharadesEgo")
+    if args.dataset == "hmdb51":
+        args.train_data_root_path = os.path.join(args.data_root, "hmdb51")
+        args.val_data_root_path = os.path.join(args.data_root, "hmdb51")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
     if args.dataset == "k400":
@@ -422,7 +455,11 @@ def main() -> None:
         args.val_data_root_path = os.path.join(args.data_root, "k400")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
-
+    if args.dataset == "charadesego":
+        args.train_data_root_path = os.path.join(args.data_root, "charadesego")
+        args.val_data_root_path = os.path.join(args.data_root, "charadesego")
+        args.train_data_csv_path = "train_new.csv"
+        args.val_data_csv_path = "val_new.csv"
     try:
         args.rank = int(os.environ["RANK"])
         args.local_rank = int(os.environ["LOCAL_RANK"])
@@ -441,7 +478,7 @@ def main() -> None:
         print("Create data loaders...")
 
 
-    if args.model_family == "siglip2":
+    if args.model_family in ["siglip", "siglip2"]:
         args.mean = [0.5, 0.5, 0.5]
         args.std = [0.5, 0.5, 0.5]
     if args.model_family in ["dinov2", "dinov3"]:
@@ -462,6 +499,7 @@ def main() -> None:
         dali_py_num_workers=args.dali_py_num_workers,
         decord_num_threads=args.decord_num_threads,
         seed=args.seed
+        # 训练不需要传入 num_temporal_crops/num_spatial_crops（仅eval使用）
     )
     val_loader = get_dali_dataloader(
         data_root_path=args.val_data_root_path,
@@ -476,7 +514,9 @@ def main() -> None:
         dali_num_threads=args.dali_num_threads,
         dali_py_num_workers=args.dali_py_num_workers,
         decord_num_threads=args.decord_num_threads,
-        seed=1024
+        seed=1024,
+        # num_temporal_crops=args.num_temporal_crops,   # 新增！
+        # num_spatial_crops=args.num_spatial_crops     # 新增！
     )
     if args.rank == 0:
         print("Data loaders ready.")
@@ -493,7 +533,7 @@ def main() -> None:
     if args.rank == 0:
         print(f"best_lr: {best_lr} max_acc_top1: {best_top1} max_acc_top5: {best_top5}")
 
-        save_path = os.path.join(args.save_report, f"report_attentive_probe_{os.path.basename(args.ckpt_path)}.txt")
+        save_path = os.path.join(args.save_report, f"report_attentive_probe_{os.path.basename(args.model_weight)}.txt")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, "a+") as f:
             f.write(f"{args.dataset} {best_top1}\n")

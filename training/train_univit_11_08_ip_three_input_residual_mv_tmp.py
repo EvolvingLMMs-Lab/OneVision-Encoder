@@ -202,7 +202,7 @@ def main():
 
     # Initialize models
     backbone = create_model(args.model_name).cuda().train()
-    
+
     if args.init_backbone != "NULL":
         assert os.path.exists(args.init_backbone)
         state_dict = torch.load(args.init_backbone, "cpu")
@@ -708,18 +708,18 @@ class BatchEndCallBack(object):
                     # Add to TensorBoard if rank 0
                     if rank == 0 and self.tb_writer:
                         self.tb_writer.add_scalar(
-                            f"loss/{name}", 
+                            f"loss/{name}",
                             self.list_loss_metric[head_id].avg,
                             global_step
                         )
                         self.tb_writer.add_scalar(
-                            f"lr/{name}", 
+                            f"lr/{name}",
                             lr_scheduler.get_last_lr()[head_id + 1],
                             global_step
                         )
 
                         self.tb_writer.add_scalar(
-                            f"samples vs. loss/{name}", 
+                            f"samples vs. loss/{name}",
                             self.list_loss_metric[head_id].avg,
                             num_samples,
                         )
@@ -767,7 +767,7 @@ def save_video_as_gif(tensor, path, fps=10, mean=None, std=None):
     import imageio
     """
     Save a video tensor as a GIF file with proper denormalization.
-    
+
     Args:
         tensor: Tensor of shape [3, num_frames, height, width]
         path: Path to save the GIF
@@ -779,30 +779,30 @@ def save_video_as_gif(tensor, path, fps=10, mean=None, std=None):
 
     # Make sure the directory exists
     Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
-    
+
     # Set default ImageNet mean and std if not provided
     if mean is None:
         mean = [x * 255 for x in [0.48145466, 0.4578275, 0.40821073]]
     if std is None:
         std = [x * 255 for x in [0.26862954, 0.26130258, 0.27577711]]
-    
+
     # Convert mean and std to tensors with proper shape for broadcasting
     mean_tensor = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
     std_tensor = torch.tensor(std).view(3, 1, 1).to(tensor.device)
-    
+
     # Convert to numpy array and ensure it's in the right format for imageio
     frames = []
     for i in range(tensor.shape[1]):  # Iterate through frames
         # Properly denormalize: pixel = pixel * std + mean
         frame = tensor[:, i] * std_tensor + mean_tensor
-        
+
         # Convert from [3, H, W] to [H, W, 3]
         frame = frame.permute(1, 2, 0).cpu().detach().numpy()
-        
+
         # Clip values to valid range and convert to uint8
         frame = np.clip(frame, 0, 255).astype(np.uint8)
         frames.append(frame)
-    
+
     # Save as GIF
     imageio.mimsave(path, frames, fps=fps)
     return path

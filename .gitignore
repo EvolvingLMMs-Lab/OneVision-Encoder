@@ -1,3 +1,5 @@
+*.txt
+
 ################################################################################
 # Universal Python / Data / ML / Web / Frontend / Docs .gitignore (Extremely Comprehensive)
 # Start by keeping this whole file; prune later once your project stabilizes.
@@ -15,6 +17,7 @@
 *.ckpt
 *.mp4
 *.bin
+*.pdf
 
 ########################################
 # Python bytecode / interpreter artefacts
@@ -490,3 +493,7 @@ cache/
 # !models/.gitkeep
 # !outputs/.gitkeep
 # !checkpoints/.gitkeep
+
+list_*
+tmp
+*.json

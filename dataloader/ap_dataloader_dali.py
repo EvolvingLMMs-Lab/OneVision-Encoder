@@ -5,20 +5,20 @@
  
 import os
 import warnings
-import pickle
-from typing import List, Tuple, Dict, Any
+from typing import Any, Dict, List, Tuple
 
 import decord
 import numpy as np
 import nvidia.dali.fn as fn
 import nvidia.dali.types as types
-from nvidia.dali.pipeline import Pipeline, pipeline_def
+from nvidia.dali.pipeline import pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
 try:
     import cv2
     _HAS_CV2 = True
 except Exception:
     _HAS_CV2 = False
+
 
 
 # ----------------------------------------------------------------------------
@@ -114,6 +114,72 @@ class VideoExternalSource:
 
         return video_data, np.int64([int(video_label)]), frame_indices, np.int64([total_frames])
 
+
+def preprocess_videos(videos, mode, input_size, mean, std):
+    # 统一 resize + 中心裁剪
+    videos = fn.resize(
+        videos,
+        device="gpu",
+        resize_shorter=input_size,
+        interp_type=types.INTERP_CUBIC,
+    )
+    videos = fn.crop_mirror_normalize(
+        videos,
+        device="gpu",
+        crop=[input_size, input_size],
+        crop_pos_x=0.5,
+        crop_pos_y=0.5,
+        dtype=types.UINT8,
+        output_layout="FHWC",
+    )
+
+    if mode == "train":
+        # 亮度/对比度
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
+            videos = fn.brightness_contrast(
+                videos,
+                contrast=fn.random.uniform(range=(0.6, 1.4)),
+                brightness=fn.random.uniform(range=(-0.125, 0.125)),
+                device="gpu",
+            )
+
+        # 饱和度
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
+            videos = fn.saturation(
+                videos,
+                saturation=fn.random.uniform(range=[0.6, 1.4]),
+                device="gpu",
+            )
+
+        # 色相
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
+            videos = fn.hue(
+                videos,
+                hue=fn.random.uniform(range=[-0.2, 0.2]),
+                device="gpu",
+            )
+
+        # 色彩空间转换
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.1):
+            videos = fn.color_space_conversion(
+                videos,
+                image_type=types.RGB,
+                output_type=types.BGR,
+                device="gpu",
+            )
+
+    # 统一归一化到 FLOAT / CFHW
+    videos = fn.crop_mirror_normalize(
+        videos,
+        dtype=types.FLOAT,
+        output_layout="CFHW",
+        mean=[m * 255.0 for m in mean],
+        std=[m * 255.0 for m in std],
+        device="gpu",
+    )
+    return videos
+
+
 # ----------------------------------------------------------------------------
 # 3. DALI Pipeline Definition (已修改 - 处理 indices 和 total_frames)
 # ----------------------------------------------------------------------------
@@ -138,32 +204,10 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     labels = labels.gpu()
     indices = indices.gpu()
     total_frames = total_frames.gpu()
-    
-    if mode == "train":
 
-        videos = fn.resize(videos, device="gpu", resize_shorter=input_size, interp_type=types.INTERP_CUBIC)
-        videos = fn.crop_mirror_normalize(videos, device="gpu", crop=[input_size, input_size], crop_pos_x=0.5, crop_pos_y=0.5, dtype=types.UINT8, output_layout="FHWC")
-        brightness_contrast_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
-        if brightness_contrast_probability:
-            videos = fn.brightness_contrast(videos, contrast=fn.random.uniform(range=(0.6, 1.4)),
-                                            brightness=fn.random.uniform(range=(-0.125, 0.125)), device="gpu")
-        saturation_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
-        if saturation_probability:
-            videos = fn.saturation(videos, saturation=fn.random.uniform(range=[0.6, 1.4]), device="gpu")
-        hue_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
-        if hue_probability:
-            videos = fn.hue(videos, hue=fn.random.uniform(range=[-0.2, 0.2]), device="gpu")
-        color_space_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.1)
-        if color_space_probability:
-            videos = fn.color_space_conversion(videos, image_type=types.RGB, output_type=types.BGR, device="gpu")
-
-    else:
-        videos = fn.resize(videos, device="gpu", resize_shorter=input_size, interp_type=types.INTERP_CUBIC)
-        videos = fn.crop_mirror_normalize(videos, device="gpu", crop=[input_size, input_size], crop_pos_x=0.5, crop_pos_y=0.5, dtype=types.UINT8, output_layout="FHWC")
-    videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout = "CFHW",
-                                            mean=[m*255.0 for m in mean], std=[m*255.0 for m in std], device="gpu")
-
+    videos = preprocess_videos(videos, mode, input_size, mean, std)
     return videos, labels, indices, total_frames
+
 
 # ----------------------------------------------------------------------------
 # 4. Main Dataloader Function (已修改 - output_map 增加 indices 和 total_frames)
@@ -184,10 +228,12 @@ def get_dali_dataloader(
     decord_num_threads: int = 2,
     seed: int = 0,
 ) -> DALIWarper:
+    """
+    """
     print(f"[{mode} loader] Reading for: {data_csv_path}")
     file_list = []
     try:
-        with open(data_csv_path, "r") as f:
+        with open(data_csv_path, "r", encoding="utf-8") as f:
             for line in f:
                 offset_path, label = line.strip().split(",")
                 full_path = os.path.join(data_root_path, offset_path)

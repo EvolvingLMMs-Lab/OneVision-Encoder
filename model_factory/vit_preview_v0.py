@@ -267,6 +267,24 @@ def llava_vit_base_rms(pretrained: bool = False, ckpt_path=None,**kwargs):
 
 
 @register_model
+def llava_vit_small_ln(pretrained: bool = False, ckpt_path=None,**kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining."""
+    model = LlavaViTEncoder(
+        patch_size=16,
+        hidden_size=384,
+        head_dim=64,
+        num_hidden_layers=6,
+        intermediate_size=1536,
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.LayerNorm,
+        use_head=True
+    )
+    return model
+
+
+@register_model
 def llava_vit_base_ln(pretrained: bool = False, ckpt_path=None,**kwargs):
     """
     ViT Encoder for Video MAE-style pretraining."""
@@ -294,6 +312,44 @@ def llava_vit_large_ln(pretrained: bool = False, ckpt_path=None,**kwargs):
         head_dim=64,
         num_hidden_layers=24,
         intermediate_size=4096,
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.LayerNorm,
+        use_head=True
+    )
+    return model
+
+
+@register_model
+def llava_vit_huge_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining (huge size).
+    """
+    model = LlavaViTEncoder(
+        patch_size=14,
+        hidden_size=1280,          # 比 large 的 1024 更宽
+        head_dim=64,               # 与 hidden_size 对应放大
+        num_hidden_layers=32,      # 比 large 的 24 更深
+        intermediate_size=5120,    # 比 large 的 4096 更大
+        act_layer=nn.GELU,
+        use_gradient_checkpointing=False,
+        norm_cls=nn.LayerNorm,
+        use_head=True
+    )
+    return model
+
+
+@register_model
+def llava_vit_giant_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
+    """
+    ViT Encoder for Video MAE-style pretraining (giant size).
+    """
+    model = LlavaViTEncoder(
+        patch_size=14,
+        hidden_size=1536,          # 再加一档宽度
+        head_dim=96,               # 对应地放大 head 维度
+        num_hidden_layers=40,      # 深度进一步增加
+        intermediate_size=6144,    # MLP hidden 更大
         act_layer=nn.GELU,
         use_gradient_checkpointing=False,
         norm_cls=nn.LayerNorm,

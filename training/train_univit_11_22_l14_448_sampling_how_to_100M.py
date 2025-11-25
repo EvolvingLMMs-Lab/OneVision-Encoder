@@ -37,8 +37,9 @@ parser.add_argument("--local_rank", type=int, default=0, help="Local rank passed
 parser.add_argument("--dataloader-type", default="dali", help="Data loader backend, e.g., 'dali' or 'torch' / 数据加载后端")
 parser.add_argument("--dali_is_training", type=int, default=1, help="DALI training mode (0/1). 1 enables training augmentations / DALI 是否处于训练模式")
 parser.add_argument("--image_size", default="224", help="Input size as 'H,W' or single 'S' (interpreted as S,S) / 输入尺寸，'H,W' 或单值 'S'(等价于 S,S)")
+parser.add_argument("--image_size_video", default="224", help="Input size as 'H,W' or single 'S' (interpreted as S,S) / 输入尺寸，'H,W' 或单值 'S'(等价于 S,S)")
 parser.add_argument("--input_gray", type=int, default=0, help="Treat input as grayscale (0/1) / 输入按灰度处理（0/1）")
-parser.add_argument("--num_frames", type=int, default=64, help="Number of frames per clip / 每个样本的帧数")
+parser.add_argument("--num_frames", type=int, default=8, help="Number of frames per clip / 每个样本的帧数")
 parser.add_argument("--random_diff", type=int, default=10, help="Random diff for sampling jitter across datasets / 数据集采样抖动的随机扰动")
 
 # ---------------------------
@@ -115,6 +116,7 @@ parser.add_argument("--vis_interval", type=int, default=10, help="Visualization 
 parser.add_argument("--total_indices", type=int, default=2000, help="Visible indices total count / 可见索引总数")
 parser.add_argument("--target_num", type=int, default=1568, help="Sampled indices count / 采样索引个数")
 parser.add_argument("--must_num", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
+parser.add_argument("--num_tokens_per_frame", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
 
 args = parser.parse_args()
 
@@ -162,6 +164,9 @@ def main():
     args.image_size = [int(x) for x in args.image_size.split(",")]
     if len(args.image_size) == 1:
         args.image_size = args.image_size * 2
+    args.image_size_video = [int(x) for x in args.image_size_video.split(",")]
+    if len(args.image_size_video) == 1:
+        args.image_size_video = args.image_size_video * 2
 
     # 实例化数据集（使用复数参数名）
     args.list_datasets = [DATASET_REGISTRY.get(x)() for x in args.list_datasets]
@@ -211,8 +216,26 @@ def main():
         backbone.load_state_dict(state_dict, strict=True)
         logger.info(f"Loaded backbone weights from {args.init_backbone}")
 
-    backbone.requires_grad_(bool(args.finetune_backbone))
-    backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
+        # 根据 finetune_backbone 控制哪些层参与训练：
+        # - finetune_backbone = 1: 整个 backbone 可训练
+        # - finetune_backbone = 0: 只有 head 可训练，其它全部冻结
+        if args.finetune_backbone:
+            backbone.requires_grad_(True)
+        else:
+            # 先全部冻结
+            backbone.requires_grad_(False)
+            # 仅打开 head 的梯度（假设 LlavaViTEncoder 上有 .head）
+            backbone_module = unwrap_module(backbone)
+            if hasattr(backbone_module, "head"):
+                for p in backbone_module.head.parameters():
+                    p.requires_grad = True
+            else:
+                raise RuntimeError(
+                    "finetune_backbone==0 但 backbone 上没有属性 'head'，"
+                    "请确认使用的是 LlavaViTEncoder 并且 use_head=True。"
+                )
+
+        backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
 
     dict_pfc_modules = {}
     list_module_pfc = []
@@ -316,14 +339,34 @@ def main():
     # print("开始加载数据了")
     for head_id, dataset_config in enumerate(args.list_datasets):
         if dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video_fix_ip_fix_size import dali_dataloader
+            from dataloader.data_decord_video_sampling_frame import get_dali_dataloader
 
-            train_iter = dali_dataloader(
-                file_list=dataset_config.prefixes,
-                dali_num_threads=4,
+            # def get_dali_dataloader(
+            #     data_root_path: str,
+            #     data_csv_path: str,
+            #     mode: str = "val",
+            #     batch_size: int = 32,
+            #     sequence_length: int = 16,
+            #     input_size: int = 224,
+            #     short_side_size: int = 224,
+            #     use_rgb: bool = True,
+            #     mean: List[float] = [0.48145466, 0.4578275, 0.40821073],
+            #     std: List[float] = [0.26862954, 0.26130258, 0.27577711],
+            #     dali_num_threads: int = 4,
+            #     dali_py_num_workers: int = 8,
+            #     decord_num_threads: int = 2,
+            #     seed: int = 0,
+            # ) -> DALIWarper:
+
+
+            train_iter = get_dali_dataloader(
+                data_root_path="",
+                data_csv_path=dataset_config.prefixes[0],
+                mode="train",
+                dali_num_threads=2,
                 dali_py_num_workers=8,
                 batch_size=args.list_batch_sizes[head_id],
-                input_size=args.image_size[0],
+                input_size=args.image_size_video[0],
                 sequence_length=args.num_frames,
                 seed=0+rank,
                 shard_id=dataset_config.shard_id,
@@ -411,132 +454,37 @@ def main():
 
             dataset_config: Property
             if dataset_config.dali_type in ["decord"]:
-                # 原始输入
-                head_input = list_data_batch[head_id]["pixel_values"]
-                list_batch_sizes.append(head_input.size(0))
-                visible_indices = list_data_batch[head_id]["visible_indices"]  # [bs, ?]，需要至少 args.total_indices 合法列
+                videos = list_data_batch[head_id]["videos"]       # [B, C, T, H, W]
+                labels = list_data_batch[head_id]["labels"].view(-1)
+                frame_indices = list_data_batch[head_id]["indices"]   # [B, seq_len]
+                total_frames = list_data_batch[head_id]["total_frames"]  # [B, 1] or [B]
 
-                bs = visible_indices.shape[0]
-                dev = visible_indices.device
+                bs, C, T, H, W = videos.shape
+                target_frames = 64
 
-                # 初始化 out：默认使用 visible_indices 的前 args.target_num 列的拷贝
-                out = visible_indices[:, :args.target_num].clone()
+                # === 插值indices到目标帧数 ===
+                interpolated_indices = interpolate_frame_indices(
+                    frame_indices,
+                    total_frames.view(-1),
+                    target_frames
+                )   # [B, seq_len]
 
-                # 按 batch 固定划分：前40% residual, 中40% frame_sampling, 后20% collage
-                n1 = int(bs * 0.4)
-                n2 = int(bs * 0.8)
+                padded_videos = torch.zeros(bs, C, target_frames, H, W, device="cuda", dtype=videos.dtype)
+                # 为scatter准备indices
+                seq_len = frame_indices.shape[1]
+                frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
+                # scatter填充各帧
+                padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
 
-                idx_range = torch.arange(bs, device=dev)
-                mask_residual = idx_range < n1
-                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)
-                mask_collage = idx_range >= n2
+                # 计算可见帧token编号
+                per = torch.arange(args.num_tokens_per_frame, device="cuda")
+                visible_index = (interpolated_indices.unsqueeze(-1) * args.num_tokens_per_frame + per).reshape(bs, -1)
+                visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
 
-                # ---------- residual（前40%）: 生成 out 行 ----------
-                if mask_residual.any():
-                    vis_a = visible_indices[mask_residual, :args.total_indices]
-                    must = vis_a[:, :args.must_num]
-                    candidates = vis_a[:, args.must_num:args.total_indices]
-                    k = max(0, args.target_num - args.must_num)
-                    k = min(k, candidates.size(1))
-                    if k > 0:
-                        scores = torch.rand(vis_a.size(0), candidates.size(1), device=dev)
-                        idx = scores.topk(k, dim=1).indices
-                        sampled = torch.gather(candidates, 1, idx)
-                        sel_a = torch.cat([must, sampled], dim=1)
-                    else:
-                        sel_a = must
-                    if sel_a.size(1) < args.target_num:
-                        pad = sel_a[:, -1:].repeat(1, args.target_num - sel_a.size(1))
-                        sel_a = torch.cat([sel_a, pad], dim=1)
-                    out[mask_residual] = sel_a
-
-                # ---------- frame_sampling（中40%）: 生成 out 行 ----------
-                if mask_frame_sampling.any():
-                    nB = visible_indices[mask_frame_sampling].size(0)
-                    SEQ = 8
-                    FRAMES = 64
-                    avg = FRAMES // SEQ
-                    base = torch.arange(SEQ, device=dev) * avg
-                    offs = torch.randint(avg, (nB, SEQ), device=dev)
-                    frames = base + offs  # [nB, 8]
-
-                    per = torch.arange(args.must_num, device=dev)
-                    pos = (frames.unsqueeze(-1) * args.must_num + per).reshape(nB, -1)  # [nB, 8*args.must_num]
-                    sel_b = pos.to(visible_indices.dtype)
-
-                    if sel_b.size(1) == args.target_num:
-                        out[mask_frame_sampling] = sel_b
-                    elif sel_b.size(1) > args.target_num:
-                        out[mask_frame_sampling] = sel_b[:, :args.target_num]
-                    else:
-                        pad = sel_b[:, -1:].repeat(1, args.target_num - sel_b.size(1))
-                        out[mask_frame_sampling] = torch.cat([sel_b, pad], dim=1)
-
-                # ---------- combined: residual + frame_sampling 一起推理（有 out） ----------
-                combined_mask = mask_residual | mask_frame_sampling
-                if combined_mask.any():
-                    combined_idx = torch.nonzero(combined_mask, as_tuple=False).squeeze(1)
-                    combined_head_input = head_input[combined_idx]  # 保持原样（可能为 [n, C, H, W] 或其他）
-                    combined_out = out[combined_idx]
-
-                    with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        combined_head_output = backbone_ddp_compiled(combined_head_input, combined_out)["head_output"]
-                    combined_head_output = combined_head_output.float()
-
-                # ---------- collage（后20%）: 从 head_input split 出帧，按 frame_sampling 策略抽帧并拼成 8行1列单张图，然后像 origin 一样单独推理 ----------
-                if mask_collage.any():
-                    coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)
-                    nC = coll_idx.numel()
-                    SEQ = 8
-                    FRAMES = 64  # assume fixed 64 frames for head_subset
-
-                    # 从 head_input 中选出需要做 collage 的样本，期望形状为 [nC, C, 64, H, W]
-                    head_subset = head_input[coll_idx]  # [nC, C, 64, H, W] (must hold)
-
-                    # 检查形状
-                    if head_subset.dim() != 5 or head_subset.size(2) != FRAMES:
-                        raise RuntimeError(
-                            f"collage branch expects head_subset shape [nC, C, {FRAMES}, H, W], got {tuple(head_subset.shape)}"
-                        )
-
-                    nC = head_subset.size(0)
-                    Cf = head_subset.size(1)
-                    Hf = head_subset.size(3)
-                    Wf = head_subset.size(4)
-
-                    # 与 frame_sampling 一致的抽帧策略（在 64 帧上均匀分段后随机 offset）
-                    avg = FRAMES // SEQ  # 8
-                    base = torch.arange(SEQ, device=dev) * avg
-                    offs = torch.randint(avg, (nC, SEQ), device=dev)
-                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [nC, SEQ], 范围在 [0, 63]
-
-                    # 用 gather 从 head_subset 采样：gather 在 time 维 (dim=2)
-                    # 为 gather 准备索引形状 [nC, Cf, SEQ, Hf, Wf]
-                    idx_expand = frames_idx.view(nC, 1, SEQ, 1, 1).expand(-1, Cf, -1, Hf, Wf).to(head_subset.device)
-                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [nC, Cf, SEQ, Hf, Wf]
-
-                    # 为拼接方便，转为 [nC, SEQ, Cf, Hf, Wf]
-                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [nC, SEQ, Cf, Hf, Wf]
-
-                    # 竖向拼接为 8 行 1 列图 -> [nC, Cf, Hf*SEQ, Wf]
-                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(SEQ)]
-                    grid = torch.cat(grid_rows, dim=-2)  # [nC, Cf, Hf*SEQ, Wf]
-
-                    # 像 origin 一样单独推理（不传 out）
-                    with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        collage_head_output = backbone_ddp_compiled(grid)["head_output"]
-                    collage_head_output = collage_head_output.float()
-
-                # ---------- 汇总 combined 与 collage 输出，按 batch 顺序放回 ----------
-                D = combined_head_output.size(1)
-
-                head_embedding_full = torch.zeros(bs, D, device=dev, dtype=torch.float32)
-                if combined_mask.any():
-                    head_embedding_full[combined_idx] = combined_head_output
-                if mask_collage.any():
-                    head_embedding_full[coll_idx] = collage_head_output
-
-                list_embedding.append(head_embedding_full)
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    head_embedding  = backbone_ddp_compiled(padded_videos, visible_index)["head_output"]
+                head_embedding = head_embedding.float()
+                list_embedding.append(head_embedding)
 
             elif dataset_config.dali_type in ["origin"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
@@ -625,6 +573,22 @@ def main():
             )
             exit()
             logger.info(f"Training completed at step {global_step}")
+
+
+def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
+    """
+    插值原始帧索引到目标帧数
+    """
+    bs, seq_len = frame_indices.shape
+    device = frame_indices.device
+    total_frames_float = total_frames.float().view(bs, 1)
+    frame_indices_float = frame_indices.float()
+    total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
+    interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
+    interpolated_indices = torch.round(interpolated_indices).long()
+    interpolated_indices = torch.clamp(interpolated_indices, 0, target_frames - 1)
+    return interpolated_indices
+
 
 class BatchEndCallBack(object):
     def __init__(

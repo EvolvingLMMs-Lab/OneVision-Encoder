@@ -181,3 +181,67 @@ def llava_vit_si_ssd():
         dali_type="origin",
         random_diff=10,
     )
+
+
+@DATASET_REGISTRY.register()
+def howto100m_kinetics_104948429_400000_split_80():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
+    assert world_size <= 80
+
+    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_0/preshuffled_trainset_split_80/preshuffled_trainset_part.lst_{rank:03d}"
+    # with open(list_mp4_label, "r", encoding="utf-8") as f:
+        # lines = f.readlines()
+
+    # lines = [x.strip().split(",")[0] for x in lines]
+    return Property(
+        name="howto100m_kinetics_104948429_400000_split_80",
+        prefixes=[list_mp4_label_path],
+        num_classes=400000,
+        num_examples=104948429 // world_size,
+        num_shards=1,
+        shard_id=0,
+        dali_type="decord",
+    )
+
+
+@DATASET_REGISTRY.register()
+def howto100m_kinetics_104948429_400000_split_128():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
+    assert world_size <= 128
+
+    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_0/preshuffled_trainset_split_128/preshuffled_trainset_part.lst_{rank:03d}"
+    # with open(list_mp4_label, "r", encoding="utf-8") as f:
+        # lines = f.readlines()
+
+    # lines = [x.strip().split(",")[0] for x in lines]
+    return Property(
+        name="howto100m_kinetics_104948429_400000_split_128",
+        prefixes=[list_mp4_label_path],
+        num_classes=400000,
+        num_examples=104948429 // world_size,
+        num_shards=1,
+        shard_id=0,
+        dali_type="decord",
+    )
+
+
+@DATASET_REGISTRY.register()
+def fake_data():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+    return Property(
+        name="fake_data",
+        prefixes=["/video_vit/xiangan/LLaVA-ViT/fake_data/fake_data"],
+        num_classes=10000,
+        num_examples=0,
+        num_shards=world_size,
+        shard_id=rank,
+        dali_type="origin",
+    )

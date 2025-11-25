@@ -71,20 +71,20 @@ class ExternalInputCallable:
                     np.ones(sequence_length, dtype = int) * (average_duration // 2))
         elif duration > sequence_length:
             if self.mode == 'train':
-                all_index = list(np.sort(np.random.randint(duration, 
+                all_index = list(np.sort(np.random.randint(duration,
                                                             size = sequence_length)))
             else:
                 all_index = list(range(sequence_length))
         else:
             all_index = [0] * (sequence_length - duration) + list(range(duration))
         frame_id_list = list(np.array(all_index))
-        
+
         decord_vr.seek(0)
-        video_data = decord_vr.get_batch(frame_id_list).asnumpy()            
+        video_data = decord_vr.get_batch(frame_id_list).asnumpy()
         if self.use_rgb:
             video_data = video_data[:,:,:,::-1]
         return video_data
-        
+
 
     def __call__(self, sample_info):
         #sample_info
@@ -99,7 +99,7 @@ class ExternalInputCallable:
             self.last_seen_epoch = sample_info.epoch_idx
             cur_seed = self.seed + sample_info.epoch_idx
             self.perm = np.random.default_rng(seed=cur_seed).permutation(len(self.file_list))
-            
+
         sample_idx = self.perm[sample_info.idx_in_epoch + self.shard_offset]
 
         example_info = self.file_list[sample_idx]
@@ -117,7 +117,7 @@ class ExternalInputCallable:
 
 @pipeline_def(enable_conditionals=True)
 def dali_pipeline(mode, source_params):
-    
+
     short_side_size = source_params['short_side_size']
     input_size = source_params['input_size']
     mean = source_params['mean']
@@ -133,11 +133,11 @@ def dali_pipeline(mode, source_params):
                 layout = ["FHWC", "C"]
             )
             videos = videos.gpu()
-            videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, 
+            videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True,
                                 interp_type=types.INTERP_LINEAR, device="gpu")
-            videos = fn.random_resized_crop(videos, size=[input_size, input_size], num_attempts=50, 
+            videos = fn.random_resized_crop(videos, size=[input_size, input_size], num_attempts=50,
                                             random_area=[0.9, 1.0], device="gpu")
-            
+
             brightness_contrast_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
             if brightness_contrast_probability:
                 videos = fn.brightness_contrast(videos, contrast=fn.random.uniform(range=(0.6, 1.4)),
@@ -165,7 +165,7 @@ def dali_pipeline(mode, source_params):
                 layout = ["FHWC", "C"]
             )
             videos = videos.gpu()
-            videos = fn.resize(videos, resize_shorter=input_size, antialias=True, 
+            videos = fn.resize(videos, resize_shorter=input_size, antialias=True,
                                 interp_type=types.INTERP_LINEAR, device="gpu")
             videos = fn.crop(videos, crop=[input_size, input_size], device="gpu")
             videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW",
@@ -184,7 +184,7 @@ def dali_pipeline(mode, source_params):
             )
             videos = videos.gpu()
             # 调整大小至 short_side_size
-            videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, 
+            videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True,
                             interp_type=types.INTERP_LINEAR, device="gpu")
 
             # 定义裁剪视角数量
@@ -195,9 +195,9 @@ def dali_pipeline(mode, source_params):
 
             for i in range(num_views):
                 # 为每个视角应用随机裁剪
-                view = fn.random_resized_crop(videos, size=[crop_size, crop_size], num_attempts=50, 
+                view = fn.random_resized_crop(videos, size=[crop_size, crop_size], num_attempts=50,
                                             random_area=[0.9, 1.0], device="gpu")
-                
+
                 # 应用数据增强
                 brightness_contrast_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.8)
                 if brightness_contrast_probability:
@@ -212,7 +212,7 @@ def dali_pipeline(mode, source_params):
                 color_space_probability = fn.random.coin_flip(dtype=types.BOOL, probability=0.1)
                 if color_space_probability:
                     view = fn.color_space_conversion(view, image_type=types.RGB, output_type=types.BGR, device="gpu")
-                
+
                 # 应用归一化
                 view = fn.crop_mirror_normalize(view, dtype=types.FLOAT, output_layout="CFHW",
                                                 mean=[m*255.0 for m in mean], std=[m*255.0 for m in std], device="gpu")
@@ -231,7 +231,7 @@ def dali_pipeline(mode, source_params):
             )
             videos = videos.gpu()
             # 调整大小至 short_side_size
-            videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, 
+            videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True,
                             interp_type=types.INTERP_LINEAR, device="gpu")
 
             # 定义裁剪视角数量
@@ -247,14 +247,14 @@ def dali_pipeline(mode, source_params):
                 crop_pos = i / (num_views - 1) if num_views > 1 else 0.5  # 归一化位置 [0, 1]
 
                 # 应用裁剪（crop_size x crop_size）
-                view = fn.crop(videos, crop=[crop_size, crop_size], 
-                            crop_pos_x=0.5 if short_side_size == videos.shape[2] else crop_pos, 
-                            crop_pos_y=0.5 if short_side_size == videos.shape[1] else crop_pos, 
+                view = fn.crop(videos, crop=[crop_size, crop_size],
+                            crop_pos_x=0.5 if short_side_size == videos.shape[2] else crop_pos,
+                            crop_pos_y=0.5 if short_side_size == videos.shape[1] else crop_pos,
                             device="gpu")
-                
+
                 # 应用归一化
                 view = fn.crop_mirror_normalize(view, dtype=types.FLOAT, output_layout="CFHW",
-                                                mean=[m*255.0 for m in mean], std=[m*255.0 for m in std], 
+                                                mean=[m*255.0 for m in mean], std=[m*255.0 for m in std],
                                                 device="gpu")
                 all_views.append(view)
 
@@ -300,7 +300,7 @@ def dali_dataloader(data_root_path,
                     file_list.append([video_path, int(video_label)])
     else:
         raise NotImplementedError("This function is not implemented yet")
-            
+
 
     rank = int(os.getenv("RANK", 0))
     local_rank = int(os.getenv("LOCAL_RANK", 0))
@@ -346,5 +346,5 @@ def dali_dataloader(data_root_path,
             prepare_first_batch=False),
         step_data_num = len(file_list) // world_size // batch_size,
     )
-    
+
     return dataloader

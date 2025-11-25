@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLaVA-ViT: Unified ViT for Images and Videos</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+
+        /* --- Universal Utils --- */
+        .gradient-text {
+            background: linear-gradient(to right, #2563eb, #4f46e5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-bg {
+            background: radial-gradient(circle at top left, #eff6ff, #ffffff);
+        }
+
+        /* --- Component Styles --- */
+        .nav-link {
+            transition: color 0.3s;
+        }
+        .nav-link:hover { color: #2563eb; }
+
+        /* Buttons */
+        .btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            border-radius: 9999px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .btn-primary { background-color: #111827; color: white; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .btn-primary:hover { background-color: #1f2937; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
+
+        .btn-accent { background-color: #2563eb; color: white; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .btn-accent:hover { background-color: #1d4ed8; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
+
+        .btn-secondary { background-color: #f3f4f6; color: #111827; }
+        .btn-secondary:hover { background-color: #e5e7eb; }
+
+        /* Feature Cards */
+        .feature-card {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            border: 1px solid #f3f4f6;
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        .icon-box {
+            height: 3rem; width: 3rem;
+            border-radius: 0.75rem;
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+        }
+
+        /* --- Table Styles --- */
+        .data-table th {
+            padding: 0.75rem 0.5rem;
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        /* Sticky First Column */
+        .data-table .sticky-col {
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            padding: 0.75rem;
+            white-space: nowrap;
+            font-weight: 500;
+            background-color: white;
+            text-align: left;
+        }
+        .data-table td {
+            padding: 0.75rem 0.5rem;
+            text-align: center;
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+
+        /* Table Hover */
+        .data-table tbody tr:not(.section-header):hover td {
+            background-color: #f9fafb;
+        }
+
+        /* Section Header */
+        .section-header td {
+            text-align: left;
+            padding: 1rem 1.5rem;
+            background-color: #f8fafc;
+            font-weight: 700;
+            color: #1f2937;
+            font-size: 0.875rem;
+            letter-spacing: 0.025em;
+            border-bottom: 1px solid #e5e7eb;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        /* Highlight Row (Ours) */
+        .row-highlight td {
+            color: #1d4ed8 !important; /* blue-700 */
+            font-weight: 700;
+            background-color: #eff6ff; /* blue-50 */
+        }
+        .row-highlight .sticky-col {
+            background-color: #eff6ff !important;
+            box-shadow: 2px 0 5px -2px rgba(0,0,0,0.1);
+        }
+        .highlight-val {
+            background-color: #dbeafe; /* blue-100 */
+            font-weight: 800 !important;
+        }
+        .bg-header-gray { background-color: #f9fafb; }
+    </style>
+</head>
+<body class="text-gray-800 bg-white">
+
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex-shrink-0 flex items-center gap-2">
+                    <span class="font-bold text-xl tracking-tight text-blue-600">LLaVA-ViT</span>
+                </div>
+                <div class="hidden md:block">
+                    <div class="ml-10 flex items-baseline space-x-8">
+                        <a href="#abstract" class="nav-link">Abstract</a>
+                        <a href="#method" class="nav-link">Method</a>
+                        <a href="#results" class="nav-link">Results</a>
+                        <a href="#bibtex" class="nav-link">BibTeX</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <div class="hero-bg pt-32 pb-16 sm:pt-40 sm:pb-24">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h1 class="text-4xl sm:text-6xl font-bold text-gray-900 tracking-tight mb-6">
+                <span class="gradient-text">LLaVA-ViT</span> <br>
+                Unified ViT for Images and Videos
+            </h1>
+
+            <div class="mt-6 text-lg text-gray-600">
+                <p class="font-medium">LLaVA-OneVision Community Contributors</p>
+                <p class="text-sm text-gray-500 mt-2">EvolvingLMMs-Lab</p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="mt-10 flex justify-center gap-4 flex-wrap">
+                <a href="#" class="btn btn-primary">
+                    <i class="fa-solid fa-file-pdf"></i> Paper
+                </a>
+                <a href="https://github.com/EvolvingLMMs-Lab/LLaVA-ViT" class="btn btn-accent">
+                    <i class="fa-brands fa-github"></i> Code
+                </a>
+                <a href="#" class="btn btn-secondary">
+                    <i class="fa-solid fa-database"></i> Models
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teaser Image -->
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 mb-20">
+        <div class="bg-white rounded-2xl shadow-2xl p-2 border border-gray-100">
+            <!-- Updated src to the provided PDF path -->
+            <img src="images/method.png" alt="LLaVA-ViT Framework" class="w-full rounded-xl">
+            <p class="text-center text-gray-500 text-sm mt-4 px-8 pb-4 italic">
+                Overview of the LLaVA-ViT framework. We introduce <b>C³-Input</b> formulations (Dense Video-codec, Chunk-wise Sampling, Cross-frame Tiling) and a unified cluster discrimination objective.
+            </p>
+        </div>
+    </div>
+
+    <!-- Abstract -->
+    <section id="abstract" class="py-16 bg-white">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-900 mb-8 border-l-4 border-blue-600 pl-4">Abstract</h2>
+            <p class="text-lg text-gray-600 leading-relaxed text-justify">
+                Pre-training video transformers remains computationally intensive, constrained by dense frame requirements and limited scalability across temporal scales and spatial resolutions. In this work, we present <b>LLaVA-ViT</b>, a cluster discrimination vision transformer for efficient and scalable video representation learning.
+                <br><br>
+                A core design of LLaVA-ViT is the <b>C³-Input</b> formulations with a 3D rotary positional encoding. Specifically, we introduce:
+                (a) <b>Dense video-codec decomposition</b> inspired by HEVC to mask out ~90% redundant pixels while preserving temporal fidelity;
+                (b) <b>Chunk-wise sampling</b> for adaptive frame-rate scalability; and
+                (c) <b>Cross-frame tiling</b> for high-resolution spatial scalability.
+                <br><br>
+                Furthermore, our cluster discrimination contrastive objective leverages semantic clustering to jointly model object-level and motion-level semantics. Extensive experiments demonstrate that LLaVA-ViT achieves state-of-the-art performance under probing and fine-tuning across both image and video tasks.
+            </p>
+        </div>
+    </section>
+
+    <!-- Key Innovations / Methodology -->
+    <section id="method" class="py-16 bg-slate-50">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-gray-900">The C³-Input Formulation</h2>
+                <p class="mt-4 text-gray-600">Three core strategies to unify dense input efficiency, temporal flexibility, and spatial scalability.</p>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <!-- Card 1 -->
+                <div class="feature-card">
+                    <div class="icon-box bg-blue-100 text-blue-600">
+                        <i class="fa-solid fa-file-video"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Dense Video-Codec</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Inspired by HEVC. We decompose dense inputs into <b>I-frames</b> (complete context) and <b>P-frames</b> (residuals). Using motion vectors, we mask out ~90% of redundant pixels, focusing computation only on dynamic regions.
+                    </p>
+                </div>
+
+                <!-- Card 2 -->
+                <div class="feature-card">
+                    <div class="icon-box bg-green-100 text-green-600">
+                        <i class="fa-solid fa-layer-group"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Chunk-wise Sampling</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Dynamically selects frames from fixed temporal chunks. This ensures the model is robust to varying temporal densities and enables scalable frame-rate handling during inference.
+                    </p>
+                </div>
+
+                <!-- Card 3 -->
+                <div class="feature-card">
+                    <div class="icon-box bg-purple-100 text-purple-600">
+                        <i class="fa-solid fa-border-all"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Cross-frame Tiling</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Vertically concatenates consecutive frames into a single high-resolution spatial grid. This expands spatial coverage, allowing the model to learn high-resolution details effectively.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Visualization Figure -->
+            <div class="mt-16 bg-white rounded-2xl shadow-lg p-4 border border-gray-200">
+                <div class="grid md:grid-cols-2 gap-8 items-center">
+                    <div>
+                        <img src="https://placehold.co/600x400/f3f4f6/9ca3af?text=Insert+Fig+1+C3+Input+Here" alt="C3 Input" class="w-full rounded-lg">
+                    </div>
+                    <div class="pr-4">
+                        <h4 class="text-xl font-bold mb-4">Spatio-Temporal Efficiency</h4>
+                        <p class="text-gray-600 text-sm mb-4">
+                            Visualization of the C³-Input strategy. (a) Decomposing dense videos, (b) Random sampling, and (c) Concatenating frames.
+                        </p>
+                        <h4 class="text-xl font-bold mb-4">Cluster Discrimination</h4>
+                        <p class="text-gray-600 text-sm">
+                            We employ a single-step offline clustering to capture both object-level semantics (images) and motion-level semantics (videos), aligning representations within semantic clusters while pushing dissimilar ones apart.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Results Section -->
+    <section id="results" class="py-16 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-900 mb-10 text-center">Attentive Probe Performance</h2>
+
+            <div class="overflow-x-auto bg-white rounded-xl shadow border border-gray-200">
+                <table class="min-w-full divide-y divide-gray-200 data-table">
+                    <thead class="bg-header-gray">
+                        <tr>
+                            <th scope="col" class="sticky-col w-32 bg-header-gray">Method</th>
+                            <th scope="col" class="w-20">Arch.</th>
+                            <th scope="col" class="w-16">Res.</th>
+                            <th scope="col" class="w-16 text-blue-600 bg-blue-50">AVG</th>
+                            <th scope="col" class="w-1/12">SSV2</th>
+                            <th scope="col" class="w-1/12">Diving48</th>
+                            <th scope="col" class="w-1/12">Percep.</th>
+                            <th scope="col" class="w-1/12">Charades</th>
+                            <th scope="col" class="w-1/12">Epic Verb</th>
+                            <th scope="col" class="w-1/12">Epic Noun</th>
+                            <th scope="col" class="w-1/12">K400</th>
+                            <th scope="col" class="w-1/12">HMDB51</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+
+                        <!-- Group: ViT-B/16 -->
+                        <tr class="section-header">
+                            <td colspan="12">
+                                <i class="fa-solid fa-cube mr-2 text-gray-400"></i> ViT-Base Models
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td class="sticky-col text-gray-900">CLIP</td>
+                            <td>ViT-B/16</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">36.8</td>
+                            <td>37.5</td><td>14.5</td><td>35.0</td><td>8.3</td><td>40.0</td><td>23.5</td><td>70.3</td><td>65.1</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">SigLIP</td>
+                            <td>ViT-B/16</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">43.1</td>
+                            <td>45.7</td><td>24.2</td><td>42.4</td><td>9.3</td><td>45.3</td><td>32.9</td><td>72.4</td><td>72.4</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">SigLIP2</td>
+                            <td>ViT-B/16</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">45.4</td>
+                            <td>50.7</td><td>24.1</td><td>44.9</td><td>10.0</td><td>49.9</td><td>36.0</td><td>74.6</td><td>73.0</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">MetaCLIP</td>
+                            <td>ViT-B/16</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">38.9</td>
+                            <td>41.0</td><td>18.2</td><td>37.8</td><td>8.5</td><td>43.0</td><td>24.9</td><td>69.8</td><td>67.8</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">DINOv2</td>
+                            <td>ViT-B/14</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">-</td>
+                            <td class="text-gray-300">-</td>
+                            <td class="text-gray-300">-</td>
+                            <td class="text-gray-300">-</td>
+                            <td class="text-gray-300">-</td>
+                            <td class="text-gray-300">-</td>
+                            <td class="text-gray-300">-</td>
+                            <td class="text-gray-300">-</td>
+                            <td class="text-gray-300">-</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">DINOv3</td>
+                            <td>ViT-B/16</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">48.7</td>
+                            <td>53.1</td><td>29.2</td><td>49.7</td><td>10.9</td><td>56.3</td><td>41.2</td><td>76.3</td><td>72.9</td>
+                        </tr>
+                        <tr class="row-highlight border-t border-b border-blue-100">
+                            <td class="sticky-col">
+                                LLaVA-ViT <span class="text-[10px] font-normal opacity-80">(Ours)</span>
+                            </td>
+                            <td>ViT-B/16</td><td>224</td><td class="highlight-val">50.3</td>
+                            <td>50.1</td><td>45.4</td><td>50.8</td><td>10.5</td><td>48.0</td><td>45.8</td><td>78.0</td><td>73.5</td>
+                        </tr>
+
+                        <!-- Group: ViT-L/14 -->
+                        <tr class="section-header">
+                            <td colspan="12">
+                                <i class="fa-solid fa-cubes mr-2 text-gray-400"></i> ViT-Large Models
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td class="sticky-col text-gray-900">CLIP</td>
+                            <td>ViT-L/14</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">46.3</td>
+                            <td>48.2</td><td>17.8</td><td>47.2</td><td>10.8</td><td>52.8</td><td>36.1</td><td>79.3</td><td>78.0</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">SigLIP</td>
+                            <td>ViT-L/14</td><td>256</td><td class="font-bold text-gray-800 bg-gray-50">47.8</td>
+                            <td>50.7</td><td>27.6</td><td>46.7</td><td>10.9</td><td>52.2</td><td>39.1</td><td>78.2</td><td>77.0</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">SigLIP2</td>
+                            <td>ViT-L/14</td><td>256</td><td class="font-bold text-gray-800 bg-gray-50">53.7</td>
+                            <td>57.9</td><td>37.0</td><td>54.0</td><td>12.8</td><td>58.8</td><td>45.2</td><td>81.3</td><td>82.1</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">MetaCLIP</td>
+                            <td>ViT-L/14</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">46.8</td>
+                            <td>50.6</td><td>20.9</td><td>44.6</td><td>10.4</td><td>54.1</td><td>37.1</td><td>79.6</td><td>77.1</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">DINOv2</td>
+                            <td>ViT-L/14</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">54.6</td>
+                            <td>58.9</td><td>42.7</td><td>54.0</td><td>13.2</td><td>60.4</td><td>48.6</td><td>80.6</td><td>78.4</td>
+                        </tr>
+                        <tr>
+                            <td class="sticky-col text-gray-900">DINOv3</td>
+                            <td>ViT-L/14</td><td>224</td><td class="font-bold text-gray-800 bg-gray-50">53.2</td>
+                            <td>56.1</td><td>32.0</td><td>54.8</td><td>12.4</td><td>60.0</td><td>47.9</td><td>81.4</td><td>81.4</td>
+                        </tr>
+                        <tr class="row-highlight border-t border-b border-blue-100">
+                            <td class="sticky-col">
+                                LLaVA-ViT <span class="text-[10px] font-normal opacity-80">(Ours)</span>
+                            </td>
+                            <td>ViT-L/14</td><td>224</td><td class="highlight-val">56.0</td>
+                            <td>55.9</td><td>50.6</td><td>56.0</td><td>11.6</td><td>58.9</td><td>51.0</td><td>83.8</td><td>80.1</td>
+                        </tr>
+
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 text-right">* Evaluation under few-shot attentive probe settings. '-' indicates data not available.</p>
+        </div>
+    </section>
+
+    <!-- BibTeX -->
+    <section id="bibtex" class="py-16 bg-gray-50">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-2xl font-bold text-gray-900 mb-6">Citation</h2>
+            <div class="bg-gray-800 rounded-xl p-6 shadow-inner overflow-x-auto">
+<pre class="text-gray-300 text-sm font-mono">
+@article{llava-vit2025,
+  title={Unified ViT for Images and Videos},
+  author={LLaVA-OneVision Community Contributors},
+  journal={arXiv preprint},
+  year={2025}
+}
+</pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 py-8">
+        <div class="max-w-6xl mx-auto px-4 text-center text-gray-500 text-sm">
+            <p>&copy; 2025 EvolvingLMMs-Lab. All rights reserved.</p>
+            <div class="mt-2">
+                <a href="#" class="hover:text-blue-600 mx-2">Project Page Template</a>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>
