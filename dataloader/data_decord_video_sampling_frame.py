@@ -1,19 +1,12 @@
-#
-# Created by anxiangsir
-# Date: 2025-11-13 12:26:36 (UTC)
-#
-
 import logging
 import os
-import pickle
-import warnings
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 import decord
 import numpy as np
 import nvidia.dali.fn as fn
 import nvidia.dali.types as types
-from nvidia.dali.pipeline import Pipeline, pipeline_def
+from nvidia.dali.pipeline import pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
 
 logger = logging.getLogger(__file__)
@@ -61,7 +54,8 @@ class VideoExternalSource:
 
         self.shard_size = len(self.file_list) // self.num_shards
         self.shard_offset = self.shard_size * self.shard_id
-        self.full_iterations = self.shard_size // self.batch_size
+        # 【删除】 self.full_iterations 不再需要用于抛出异常
+        # self.full_iterations = self.shard_size // self.batch_size
 
         self.perm = None
         self.last_seen_epoch = -1
@@ -112,13 +106,12 @@ class VideoExternalSource:
             return self._get_valid_sample(new_idx, depth + 1)
 
     def __call__(self, sample_info):
-        if sample_info.iteration >= self.full_iterations:
-            raise StopIteration
         if self.last_seen_epoch != sample_info.epoch_idx:
             self.last_seen_epoch = sample_info.epoch_idx
             rng = np.random.default_rng(seed=self.seed + sample_info.epoch_idx)
             self.perm = rng.permutation(len(self.file_list))
-        sample_idx = self.perm[sample_info.idx_in_epoch + self.shard_offset]
+        idx_in_shard = sample_info.idx_in_epoch % self.shard_size
+        sample_idx = self.perm[idx_in_shard + self.shard_offset]
         return self._get_valid_sample(sample_idx, depth=0)
 
 # ----------------------------------------------------------------------------
@@ -146,16 +139,43 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     indices = indices.gpu()
     total_frames = total_frames.gpu()
 
-    videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, interp_type=types.INTERP_LINEAR)
-    if mode == "train":
-        videos = fn.random_resized_crop(videos, size=[input_size, input_size], random_area=[0.9, 1.0])
-        videos = fn.brightness_contrast(videos, contrast=fn.random.uniform(range=(0.6, 1.4)), brightness=fn.random.uniform(range=(-0.125, 0.125)))
-        videos = fn.saturation(videos, saturation=fn.random.uniform(range=[0.6, 1.4]))
-        videos = fn.hue(videos, hue=fn.random.uniform(range=[-0.2, 0.2]))
-    else:
-        videos = fn.crop(videos, crop=[input_size, input_size])
-    videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW", mean=[m * 255.0 for m in mean], std=[s * 255.0 for s in std])
+    videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, interp_type=types.INTERP_CUBIC)
+    videos = fn.crop_mirror_normalize(videos, device="gpu", crop=[input_size, input_size], crop_pos_x=0.5, crop_pos_y=0.5, dtype=types.UINT8, output_layout="FHWC",)
 
+    if mode == "train":
+        # 亮度/对比度
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
+            videos = fn.brightness_contrast(
+                videos,
+                contrast=fn.random.uniform(range=(0.6, 1.4)),
+                brightness=fn.random.uniform(range=(-0.125, 0.125)),
+                device="gpu",
+            )
+        # 饱和度
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
+            videos = fn.saturation(
+                videos,
+                saturation=fn.random.uniform(range=[0.6, 1.4]),
+                device="gpu",
+            )
+        # 色相
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
+            videos = fn.hue(
+                videos,
+                hue=fn.random.uniform(range=[-0.2, 0.2]),
+                device="gpu",
+            )
+
+        # 色彩空间转换
+        if fn.random.coin_flip(dtype=types.BOOL, probability=0.1):
+            videos = fn.color_space_conversion(
+                videos,
+                image_type=types.RGB,
+                output_type=types.BGR,
+                device="gpu",
+            )
+
+    videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW", mean=[m * 255.0 for m in mean], std=[s * 255.0 for s in std])
     return videos, labels, indices, total_frames
 
 # ----------------------------------------------------------------------------
@@ -217,7 +237,7 @@ def get_dali_dataloader(
         output_map=["videos", "labels", "indices", "total_frames"],
         auto_reset=True
     )
-    steps_per_epoch = len(file_list) // world_size // batch_size
+    steps_per_epoch = len(file_list) // batch_size // num_shards
     dataloader = DALIWarper(dali_iter=dali_iter, steps_per_epoch=steps_per_epoch)
 
     print(f"[{mode} loader] DALI pipeline built. Total samples: {len(file_list)}, Steps per epoch: {steps_per_epoch}.")
