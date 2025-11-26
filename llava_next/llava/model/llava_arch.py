@@ -216,7 +216,6 @@ class LlavaMetaForCausalLM(ABC):
             videos_or_images_features, h, w = vision_tower(videos_or_images, return_spatial_dims=True)
         else:
             videos_or_images_features = vision_tower(videos_or_images)
-            h, w = None, None
             
         per_videos_or_images_features = torch.split(videos_or_images_features, split_sizes, dim=0)  # tuple, (dim_1, 576, 4096)
         all_videos_or_images_features = []
