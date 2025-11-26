@@ -14,14 +14,14 @@ REPORT_DIR_SUFFIX="_64frames"
 
 # Custom dataset list
 DATASETS=(
-    # "ssv2"
+    "ssv2"
     "diving48"
-    # "perception_test"
-    # "epic_verb"
-    # "epic_noun"
-    # "hmdb51"
-    # "k400"
-    # "charadesego"
+    "perception_test"
+    "epic_verb"
+    "epic_noun"
+    "hmdb51"
+    "k400"
+    "charadesego"
 )
 
 # Run evaluation
