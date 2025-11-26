@@ -9,7 +9,7 @@ MODEL_NAME="llava_vit_base_ln"
 MODEL_WEIGHT=$1
 
 # 修改点：使用变量拼接路径
-BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}"
+BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}_16frames"
 
 # 要测试的数据集列表
 DATASETS=(
