@@ -134,7 +134,7 @@ class SpatialMergeProjector(nn.Module):
         if not factors:
             # Fallback: try square root approach
             h = w = int(round(N ** 0.5))
-            if h * w == N:
+            if h * w == N and h % merge_size == 0 and w % merge_size == 0:
                 return h, w
             raise ValueError(f"Cannot find valid H, W factors for N={N} divisible by merge_size={merge_size}")
         
