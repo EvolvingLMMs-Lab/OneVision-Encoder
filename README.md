@@ -127,6 +127,13 @@ Thanks so much to all of our amazing contributors!
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/yiyexy">
+                    <img src="https://avatars.githubusercontent.com/u/35927125?v=4" width="80;" alt="yiyexy"/>
+                    <br />
+                    <sub><b>yiyexy</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/wideyard">
                     <img src="https://avatars.githubusercontent.com/u/101321826?v=4" width="80;" alt="wideyard"/>
                     <br />
