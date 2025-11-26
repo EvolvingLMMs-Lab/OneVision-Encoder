@@ -12,7 +12,7 @@ export PYTHONPATH=$(pwd)
 
 LLM_VERSION="/vlm/pretrain_models/Qwen/Qwen2.5-7B-Instruct"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
-VISION_MODEL_VERSION="/video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone_hevc_vit_hf"
+VISION_MODEL_VERSION="/video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone_hevc_vit_hf_336px"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 DATA_ROOT="/vlm/data/pretrain_data"
 
@@ -52,5 +52,4 @@ deepspeed --hostfile host_80 \
     --model_max_length 8192 \
     --gradient_checkpointing True \
     --dataloader_num_workers 2 \
-    --lazy_preprocess True \
-    --attn_implementation sdpa
+    --lazy_preprocess True

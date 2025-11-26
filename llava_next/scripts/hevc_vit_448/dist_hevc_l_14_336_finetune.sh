@@ -12,7 +12,7 @@ export PYTHONPATH=$(pwd)
 
 LLM_VERSION="/vlm/pretrain_models/Qwen/Qwen2.5-7B-Instruct"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
-VISION_MODEL_VERSION="/video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone_hevc_vit_hf"
+VISION_MODEL_VERSION="/video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone_hevc_vit_hf_336px"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 DATA_ROOT="/vlm/data/train_images/LLaVA-NeXT-Data"
 
@@ -34,7 +34,7 @@ deepspeed --hostfile host_80 \
     --image_folder ${DATA_ROOT}/llava_next_raw_format \
     --pretrain_mm_mlp_adapter /video_vit/xiangan/checkpoint_llava_next/projectors/${PROJECTOR_NAME}/mm_projector.bin \
     --mm_tunable_parts mm_vision_tower,mm_mlp_adapter,mm_language_model \
-    --mm_vision_tower_lr 1e-5 \
+    --mm_vision_tower_lr 2e-6 \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
     --mm_use_im_start_end False \
@@ -47,7 +47,7 @@ deepspeed --hostfile host_80 \
     --run_name $BASE_RUN_NAME \
     --output_dir "/video_vit/xiangan/checkpoint_llava_next/${BASE_RUN_NAME}" \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --save_strategy "steps" \
@@ -60,7 +60,7 @@ deepspeed --hostfile host_80 \
     --logging_steps 1 \
     --tf32 True \
     --model_max_length 32768 \
-    --dataloader_num_workers 2 \
+    --dataloader_num_workers 16 \
     --lazy_preprocess True \
     --report_to wandb \
     --dataloader_drop_last True

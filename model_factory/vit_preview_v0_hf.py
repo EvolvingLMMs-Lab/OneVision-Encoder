@@ -175,10 +175,20 @@ def get_norm_layer(config):
         return nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
 
+# def rotate_half(x):
+#     x1 = x[..., : x.shape[-1] // 2]
+#     x2 = x[..., x.shape[-1] // 2 :]
+#     return torch.cat((-x2, x1), dim=-1)
+
+
 def rotate_half(x):
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
-    return torch.cat((-x2, x1), dim=-1)
+    """
+    Interleaved rotation to match Source model's implementation.
+    (x1, x2, x3, x4) -> (-x2, x1, -x4, x3)
+    """
+    x_even = x[..., ::2]
+    x_odd = x[..., 1::2]
+    return torch.stack((-x_odd, x_even), dim=-1).flatten(-2)
 
 
 def apply_rotary_pos_emb(q, k, freqs):
@@ -341,6 +351,11 @@ class LlavaViTAttention(nn.Module):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
+        # 确保所有状态张量类型一致
+        target_dtype = query_states.dtype
+        key_states = key_states.to(target_dtype)
+        value_states = value_states.to(target_dtype)
+
         # (B, L, H, D) -> Transpose to (B, H, L, D)
         query_states = query_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -348,22 +363,39 @@ class LlavaViTAttention(nn.Module):
 
         if rotary_pos_emb is not None:
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
+            # 确保rotary embedding后类型仍然一致
+            key_states = key_states.to(target_dtype)
 
-        attn_weights = (query_states @ key_states.transpose(-2, -1)) * self.scale
+        # 在计算前再次确保类型完全一致
+        query_states = query_states.to(target_dtype)
+        key_states = key_states.to(target_dtype)
+
+        # 计算注意力权重，确保类型一致性
+        attn_weights = (query_states @ key_states.transpose(-2, -1))
+
+        # 将scale转换为正确的张量类型并应用
+        scale_tensor = torch.tensor(self.scale, dtype=target_dtype, device=query_states.device)
+        attn_weights = attn_weights * scale_tensor
 
         if attention_mask is not None:
             if attention_mask.size() != (batch_size, 1, q_len, q_len):
                 if attention_mask.dim() == 3:
                      attention_mask = attention_mask.unsqueeze(1)
 
+            # 确保attention_mask类型与attn_weights兼容
             if attention_mask.dtype == torch.bool:
-                attn_weights = attn_weights.masked_fill(attention_mask, float("-inf"))
+                attn_weights = attn_weights.masked_fill(attention_mask, torch.finfo(attn_weights.dtype).min)
             else:
+                # 确保attention_mask与attn_weights类型一致
+                attention_mask = attention_mask.to(attn_weights.dtype)
                 attn_weights = attn_weights + attention_mask
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        # dropout保持与attn_weights相同的数据类型
         attn_weights = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
 
+        # 确保value_states与attn_weights类型一致
+        value_states = value_states.to(attn_weights.dtype)
         attn_output = (attn_weights @ value_states)
 
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -593,17 +625,24 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
 
         sequence_output = encoder_outputs[0]
 
+        # === 修改开始 ===
+        # Source Logic: out = self.ln_post(out); head_output = self.head(out)
+        # 为了对齐，我们在 encoder 输出后立即应用 Post-Norm
+        if self.layernorm_post is not None:
+            sequence_output = self.layernorm_post(sequence_output)
+
         # 5. Pooling Head
         pooled_output = None
-        if self.head is not None and self.layernorm_post is not None:
-            head_input = self.layernorm_post(sequence_output)
-            pooled_output = self.head(head_input)
+        if self.head is not None:
+            # 因为 sequence_output 已经 Norm 过了，这里直接传给 head
+            pooled_output = self.head(sequence_output)
+        # === 修改结束 ===
 
         if not return_dict:
             return (sequence_output, pooled_output) + encoder_outputs[1:]
 
         return BaseModelOutputWithPooling(
-            last_hidden_state=sequence_output,
+            last_hidden_state=sequence_output, # 现在这包含了 ln_post 的效果
             pooler_output=pooled_output,
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,

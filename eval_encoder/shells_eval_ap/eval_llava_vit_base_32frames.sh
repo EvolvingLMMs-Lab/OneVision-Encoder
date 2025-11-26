@@ -9,7 +9,7 @@ MODEL_NAME="llava_vit_base_ln"
 MODEL_WEIGHT=$1
 
 # 修改点：使用变量拼接路径
-BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}_16frames"
+BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}_32frames"
 
 # 要测试的数据集列表
 DATASETS=(
@@ -71,7 +71,7 @@ for DATASET in "${DATASETS[@]}"; do
         --save_report "${SAVE_DIR}" \
         --frames_token_num 196 \
         --embedding_size 768 \
-        --num_frames 16
+        --num_frames 32
 
     echo "Finished testing ${DATASET}"
     echo ""

@@ -38,7 +38,7 @@ deepspeed --hostfile host_80 \
     --bf16 True \
     --output_dir /video_vit/xiangan/checkpoint_llava_next/projectors/${BASE_RUN_NAME} \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --save_strategy "no" \
@@ -52,5 +52,4 @@ deepspeed --hostfile host_80 \
     --model_max_length 8192 \
     --gradient_checkpointing True \
     --dataloader_num_workers 2 \
-    --lazy_preprocess True \
-    --attn_implementation sdpa
+    --lazy_preprocess True

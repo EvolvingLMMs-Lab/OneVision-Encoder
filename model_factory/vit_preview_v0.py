@@ -236,11 +236,12 @@ class LlavaViTEncoder(nn.Module):
             attention_mask=attention_mask        # (B,N,N) or None
         )
         out = out.permute(1, 0, 2)  # (B,N,C)
+        out = self.ln_post(out)
 
         if self.use_head:
-            out = self.ln_post(out)
             head_output = self.head(out)  # (B, hidden_size)
-
+        else:
+            head_output = None
 
         return {
             "visible_embeddings": out,
