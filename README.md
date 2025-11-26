@@ -19,6 +19,7 @@
 - [Training](#-training)
 - [Evaluation](#-evaluation)
 - [Contributors](#-contributors)
+- [License](#-license)
 
 ---
 
@@ -217,4 +218,4 @@ Thanks so much to all of our amazing contributors!
 
 ## 📄 License
 
-This project is open source. Please check the license file for more details.
+This project is open source.
