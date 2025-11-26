@@ -7,7 +7,12 @@ height and width parameters for dynamic resolution support.
 
 import torch
 import torch.nn as nn
-from builder import SpatialMergeProjector
+
+# Use try-except to support both direct execution and import
+try:
+    from llava.model.multimodal_projector.builder import SpatialMergeProjector
+except ImportError:
+    from builder import SpatialMergeProjector
 
 
 def example_basic_usage():
