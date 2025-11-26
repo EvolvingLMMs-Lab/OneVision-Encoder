@@ -47,8 +47,21 @@ class HEVCViTVisionTower(nn.Module):
     def feature_select(self, image_forward_outs):
         return image_forward_outs.last_hidden_state
 
-    def forward(self, images):
+    def forward(self, images, return_spatial_dims=False):
+        """
+        Args:
+            images: Input images
+            return_spatial_dims: If True, return (features, h, w) tuple for spatial_merge projector
+        """
+        # Calculate spatial dimensions from input images
         if type(images) is list:
+            # For list of images, use the first image to determine dimensions
+            sample_image = images[0]
+            if sample_image.ndim == 4:  # (C, H, W) - single image
+                height, width = sample_image.shape[-2:]
+            else:  # (T, C, H, W) - video
+                height, width = sample_image.shape[-2:]
+                
             image_features = []
             for image in images:
                 image_forward_out = self.vision_tower(
@@ -58,12 +71,24 @@ class HEVCViTVisionTower(nn.Module):
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
                 image_features.append(image_feature)
         else:
+            # Extract height and width from batch of images
+            if images.ndim == 5:  # (B, C, T, H, W) - video batch
+                height, width = images.shape[-2:]
+            else:  # (B, C, H, W) - image batch
+                height, width = images.shape[-2:]
+                
             image_forward_outs = self.vision_tower(
                 images.to(device=self.device, dtype=self.dtype),
                 output_hidden_states=True
             )
             image_features = self.feature_select(image_forward_outs).to(images.dtype)
 
+        # Calculate h and w in patch coordinates
+        h = height // self.config.patch_size
+        w = width // self.config.patch_size
+        
+        if return_spatial_dims:
+            return image_features, h, w
         return image_features
 
     @property

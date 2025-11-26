@@ -130,6 +130,28 @@ deepspeed llava/train/train_mem.py \
     ...
 ```
 
+### How h and w are passed during training
+
+The training pipeline automatically handles passing h and w to the merger:
+
+1. **In HEVCViTVisionTower**: When `return_spatial_dims=True`, the vision tower extracts h and w from the input images:
+   ```python
+   # Extract from image dimensions
+   height, width = images.shape[-2:]  # Get H, W from input
+   h = height // self.config.patch_size  # Convert to patch coordinates
+   w = width // self.config.patch_size
+   return image_features, h, w
+   ```
+
+2. **In encode_images (llava_arch.py)**: When `mm_projector_type == "spatial_merge"`, the encoder automatically requests and passes h and w:
+   ```python
+   if projector_type == "spatial_merge":
+       image_features, h, w = vision_tower(images, return_spatial_dims=True)
+       image_features = mm_projector(image_features, height=h, width=w)
+   ```
+
+3. **No manual intervention needed**: During training, you just set `--mm_projector_type spatial_merge` and the framework handles everything automatically.
+
 ## Examples with Different Resolutions
 
 ### Square resolutions

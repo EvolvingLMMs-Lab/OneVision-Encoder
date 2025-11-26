@@ -190,21 +190,46 @@ class LlavaMetaForCausalLM(ABC):
         return image_feature
 
     def encode_images(self, images):
-        image_features = self.get_model().get_vision_tower()(images)
-        # image_features = self.get_model().vision_resampler(image_features, images=images)
-        image_features = self.get_model().mm_projector(image_features)
+        # Check if we need spatial dimensions for spatial_merge projector
+        projector_type = getattr(self.config, "mm_projector_type", "linear")
+        vision_tower = self.get_model().get_vision_tower()
+        
+        if projector_type == "spatial_merge":
+            # Request spatial dimensions from vision tower for spatial_merge
+            image_features, h, w = vision_tower(images, return_spatial_dims=True)
+            # Pass h and w to the projector
+            image_features = self.get_model().mm_projector(image_features, height=h, width=w)
+        else:
+            # Standard flow for other projector types
+            image_features = vision_tower(images)
+            # image_features = self.get_model().vision_resampler(image_features, images=images)
+            image_features = self.get_model().mm_projector(image_features)
         return image_features
 
     def encode_multimodals(self, videos_or_images, video_idx_in_batch, split_sizes=None):
-        videos_or_images_features = self.get_model().get_vision_tower()(videos_or_images)
+        # Check if we need spatial dimensions for spatial_merge projector
+        projector_type = getattr(self.config, "mm_projector_type", "linear")
+        vision_tower = self.get_model().get_vision_tower()
+        
+        if projector_type == "spatial_merge":
+            # Get features with spatial dimensions
+            videos_or_images_features, h, w = vision_tower(videos_or_images, return_spatial_dims=True)
+        else:
+            videos_or_images_features = vision_tower(videos_or_images)
+            h, w = None, None
+            
         per_videos_or_images_features = torch.split(videos_or_images_features, split_sizes, dim=0)  # tuple, (dim_1, 576, 4096)
         all_videos_or_images_features = []
         all_faster_video_features = []
         cur_mm_spatial_pool_stride = self.config.mm_spatial_pool_stride
 
         for idx, feat in enumerate(per_videos_or_images_features):
-
-            feat = self.get_model().mm_projector(feat)
+            # Apply projector with spatial dims if using spatial_merge
+            if projector_type == "spatial_merge":
+                feat = self.get_model().mm_projector(feat, height=h, width=w)
+            else:
+                feat = self.get_model().mm_projector(feat)
+                
             faster_video_feature = 0
             slower_img_feat = 0
             if idx in video_idx_in_batch and cur_mm_spatial_pool_stride > 1:
