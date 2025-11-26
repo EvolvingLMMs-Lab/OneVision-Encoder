@@ -210,7 +210,7 @@ Thanks so much to all of our amazing contributors!
                 </a>
             </td>
 		</tr>
-	</tbody>
+	<tbody>
 </table>
 <!-- readme: collaborators,contributors -end -->
 
