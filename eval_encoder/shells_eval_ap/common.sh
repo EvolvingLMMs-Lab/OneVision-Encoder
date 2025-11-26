@@ -1,13 +1,13 @@
 #!/bin/bash
 # ============================================================================
-# 通用配置脚本 - 用于 attentive_probe 评估
-# 使用方法: 在各个模型脚本中 source 此文件后调用 run_attentive_probe
+# Common Configuration Script - for attentive_probe evaluation
+# Usage: Source this file in model scripts, then call run_attentive_probe
 # ============================================================================
 
-# 环境变量设置
+# Environment setup
 export PYTHONPATH=../
 
-# 默认数据集列表 (可在调用脚本中覆盖)
+# Default dataset list (can be overridden in calling script)
 DEFAULT_DATASETS=(
     "ssv2"
     "diving48"
@@ -20,8 +20,8 @@ DEFAULT_DATASETS=(
 )
 
 # ============================================================================
-# 根据数据集名称获取 batch size
-# 参数: $1 - 数据集名称
+# Get batch size based on dataset name
+# Args: $1 - dataset name
 # ============================================================================
 get_batch_size() {
     local dataset="$1"
@@ -35,8 +35,8 @@ get_batch_size() {
 }
 
 # ============================================================================
-# 根据数据集名称获取 epochs
-# 参数: $1 - 数据集名称
+# Get epochs based on dataset name
+# Args: $1 - dataset name
 # ============================================================================
 get_epochs() {
     local dataset="$1"
@@ -48,34 +48,34 @@ get_epochs() {
 }
 
 # ============================================================================
-# 运行 attentive_probe 评估
-# 需要预先设置的变量:
-#   - MODEL_FAMILY: 模型系列 (必需)
-#   - MODEL_NAME: 模型名称 (必需)
-#   - MODEL_WEIGHT: 模型权重路径 (可选, 默认 "NULL")
-#   - FRAMES_TOKEN_NUM: token 数量 (可选, 默认 196)
-#   - EMBEDDING_SIZE: embedding 维度 (可选, 默认 768)
-#   - INPUT_SIZE: 输入尺寸 (可选, 不设置则不传递此参数)
-#   - NUM_FRAMES: 帧数 (可选, 不设置则不传递此参数)
-#   - DATASETS: 数据集数组 (可选, 默认使用 DEFAULT_DATASETS)
-#   - REPORT_DIR_SUFFIX: 报告目录后缀 (可选, 如 "_16frames")
+# Run attentive_probe evaluation
+# Required variables to set before calling:
+#   - MODEL_FAMILY: model family (required)
+#   - MODEL_NAME: model name (required)
+#   - MODEL_WEIGHT: model weight path (optional, default "NULL")
+#   - FRAMES_TOKEN_NUM: token count (optional, default 196)
+#   - EMBEDDING_SIZE: embedding dimension (optional, default 768)
+#   - INPUT_SIZE: input size (optional, not passed if unset)
+#   - NUM_FRAMES: number of frames (optional, not passed if unset)
+#   - DATASETS: dataset array (optional, uses DEFAULT_DATASETS if unset/empty)
+#   - REPORT_DIR_SUFFIX: report directory suffix (optional, e.g. "_16frames")
 # ============================================================================
 run_attentive_probe() {
-    # 设置默认值
+    # Set default values
     MODEL_WEIGHT="${MODEL_WEIGHT:-NULL}"
     FRAMES_TOKEN_NUM="${FRAMES_TOKEN_NUM:-196}"
     EMBEDDING_SIZE="${EMBEDDING_SIZE:-768}"
     REPORT_DIR_SUFFIX="${REPORT_DIR_SUFFIX:-}"
 
-    # 使用自定义数据集或默认数据集
-    if [[ ${#DATASETS[@]} -eq 0 ]]; then
+    # Use custom datasets or default datasets
+    if [[ -z "${DATASETS+x}" ]] || [[ ${#DATASETS[@]} -eq 0 ]]; then
         DATASETS=("${DEFAULT_DATASETS[@]}")
     fi
 
-    # 构建报告目录
+    # Build report directory
     BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}${REPORT_DIR_SUFFIX}"
 
-    # 循环遍历每个数据集进行测试
+    # Loop through each dataset for testing
     for DATASET in "${DATASETS[@]}"; do
         BATCH_SIZE=$(get_batch_size "$DATASET")
         EPOCHS=$(get_epochs "$DATASET")
@@ -89,11 +89,11 @@ run_attentive_probe() {
         echo "Report Dir: ${BASE_REPORT_DIR}/${DATASET}"
         echo "========================================================"
 
-        # 构建输出目录
+        # Build output directory
         SAVE_DIR="${BASE_REPORT_DIR}/${DATASET}"
         mkdir -p "$SAVE_DIR"
 
-        # 构建额外参数
+        # Build extra arguments
         EXTRA_ARGS=""
         if [[ -n "${INPUT_SIZE}" ]]; then
             EXTRA_ARGS="${EXTRA_ARGS} --input_size ${INPUT_SIZE}"

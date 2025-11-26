@@ -1,15 +1,15 @@
 #!/bin/bash
-# 获取脚本所在目录
+# Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
-# 模型配置
+# Model configuration
 MODEL_FAMILY="clip"
 MODEL_NAME="clip_vit_large_patch14"
 FRAMES_TOKEN_NUM=256
 EMBEDDING_SIZE=1024
 
-# 自定义数据集列表
+# Custom dataset list
 DATASETS=(
     # "ssv2"
     # "diving48"
@@ -21,5 +21,5 @@ DATASETS=(
     "charadesego"
 )
 
-# 运行评估
+# Run evaluation
 run_attentive_probe
