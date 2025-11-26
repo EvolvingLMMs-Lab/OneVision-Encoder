@@ -21,6 +21,7 @@ cmd += " GLOO_SOCKET_IFNAME=eth0"
 cmd += " http_proxy=http://172.16.5.79:18000"
 cmd += " https_proxy=http://172.16.5.79:18000"
 cmd += " HF_ENDPOINT=https://hf-mirror.com"
+cmd += " TOKENIZERS_PARALLELISM=false"
 
 # export http_proxy=http://172.16.5.79:18000
 # export https_proxy=http://172.16.5.79:18000
