@@ -315,6 +315,26 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
         if hasattr(tgt_model, "save_pretrained"):
             tgt_model.save_pretrained(output_dir)
 
+            # {
+            # "crop_size": 336,
+            # "do_center_crop": true,
+            # "do_normalize": true,
+            # "do_resize": true,
+            # "feature_extractor_type": "CLIPFeatureExtractor",
+            # "image_mean": [
+            #     0.48145466,
+            #     0.4578275,
+            #     0.40821073
+            # ],
+            # "image_std": [
+            #     0.26862954,
+            #     0.26130258,
+            #     0.27577711
+            # ],
+            # "resample": 3,
+            # "size": 336
+            # }
+
             # --- 保存 CLIPImageProcessor ---
             print("    Saving CLIPImageProcessor config...")
             processor = CLIPImageProcessor(
