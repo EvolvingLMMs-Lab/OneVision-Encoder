@@ -74,8 +74,13 @@ class SpatialMergeProjector(nn.Module):
         """
         B, N, C = x.size()
         # Assume square image: H = W = sqrt(N)
-        H = W = int(N ** 0.5)
+        H = W = int(round(N ** 0.5))
         assert H * W == N, f"Expected square grid, got N={N}"
+
+        # Validate divisibility by merge_size
+        merge_size = self.spatial_merge_size
+        assert H % merge_size == 0 and W % merge_size == 0, \
+            f"Grid size ({H}, {W}) not divisible by merge_size {merge_size}"
 
         # Apply LayerNorm
         x = self.ln_q(x)
@@ -85,7 +90,6 @@ class SpatialMergeProjector(nn.Module):
 
         # Merge 2x2 spatial patches
         # (B, H, W, C) -> (B, H//2, 2, W//2, 2, C) -> (B, H//2, W//2, 2, 2, C)
-        merge_size = self.spatial_merge_size
         new_H = H // merge_size
         new_W = W // merge_size
         x = x.view(B, new_H, merge_size, new_W, merge_size, C)
