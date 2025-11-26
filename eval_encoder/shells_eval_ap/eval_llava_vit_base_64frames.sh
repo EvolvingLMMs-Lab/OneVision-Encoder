@@ -6,21 +6,21 @@ export PYTHONPATH=../
 # 模型配置
 MODEL_FAMILY="llava_vit_sampling"
 MODEL_NAME="llava_vit_base_ln"
-MODEL_WEIGHT="/video_vit/xiangan/checkpoint_llava_vit/2025_11_19_new_b16_continue_80gpus_how_to_100m_continue/00040000/backbone.pt"
+MODEL_WEIGHT=$1
 
 # 修改点：使用变量拼接路径
-BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}"
+BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}_64frames"
 
 # 要测试的数据集列表
 DATASETS=(
-    "ssv2"
+    # "ssv2"
     "diving48"
-    "perception_test"
-    "epic_verb"
-    "epic_noun"
-    "hmdb51"
-    "k400"
-    "charadesego"
+    # "perception_test"
+    # "epic_verb"
+    # "epic_noun"
+    # "hmdb51"
+    # "k400"
+    # "charadesego"
 )
 
 # 循环遍历每个数据集进行测试
@@ -70,7 +70,8 @@ for DATASET in "${DATASETS[@]}"; do
         --dataset "${DATASET}" \
         --save_report "${SAVE_DIR}" \
         --frames_token_num 196 \
-        --embedding_size 768
+        --embedding_size 768 \
+        --num_frames 64
 
     echo "Finished testing ${DATASET}"
     echo ""

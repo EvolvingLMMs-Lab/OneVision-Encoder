@@ -251,7 +251,7 @@ class LLaVATrainer(Trainer):
         # create accelerator object
         self.accelerator = Accelerator(
             # dispatch_batches=self.args.dispatch_batches,
-            #split_batches=self.args.split_batches, 
+            #split_batches=self.args.split_batches,
             deepspeed_plugin=self.args.deepspeed_plugin, gradient_accumulation_plugin=gradient_accumulation_plugin, kwargs_handlers=[accelerator_kwargs]
         )
         # some Trainer classes need to use `gather` instead of `gather_for_metrics`, thus we store a flag
@@ -459,7 +459,8 @@ class LLaVATrainer(Trainer):
                 self.model.config.save_pretrained(output_dir)
                 torch.save(weight_to_save, os.path.join(output_dir, f"mm_projector.bin"))
         else:
-            super(LLaVATrainer, self)._save_checkpoint(model, trial, metrics)
+            # FIXED: Removed 'metrics' from the arguments passed to super()
+            super(LLaVATrainer, self)._save_checkpoint(model, trial)
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
         if getattr(self.args, "tune_mm_mlp_adapter", False):
