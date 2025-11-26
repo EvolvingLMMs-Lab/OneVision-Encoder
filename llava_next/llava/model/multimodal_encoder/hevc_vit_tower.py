@@ -91,17 +91,18 @@ class HEVCViTVisionTower(nn.Module):
 
     @property
     def num_patches_per_side(self):
-        # 基础的 patch 数量
+        # Base patch count per side
         base_patches_per_side = self.config.image_size // self.config.patch_size
-        # 如果使用 spatial_merge projector，则每边减少 2 倍
+        # If using spatial_merge projector, reduce each side by 2x (merge_size)
         if self.projector_type == "spatial_merge":
             return base_patches_per_side // 2
         return base_patches_per_side
 
     @property
     def num_patches(self):
-        # 如果使用 spatial_merge projector，则总 patch 数减少 4 倍
+        # Base total patch count
         base_patches = (self.config.image_size // self.config.patch_size) ** 2
+        # If using spatial_merge projector, reduce total patches by 4x (merge_size^2 = 2^2)
         if self.projector_type == "spatial_merge":
             return base_patches // 4
         return base_patches
