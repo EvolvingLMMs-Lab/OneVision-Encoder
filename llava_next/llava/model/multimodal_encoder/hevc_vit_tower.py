@@ -57,10 +57,8 @@ class HEVCViTVisionTower(nn.Module):
         if type(images) is list:
             # For list of images, use the first image to determine dimensions
             sample_image = images[0]
-            if sample_image.ndim == 4:  # (C, H, W) - single image
-                height, width = sample_image.shape[-2:]
-            else:  # (T, C, H, W) - video
-                height, width = sample_image.shape[-2:]
+            # Extract height and width (works for both image and video)
+            height, width = sample_image.shape[-2:]
                 
             image_features = []
             for image in images:
