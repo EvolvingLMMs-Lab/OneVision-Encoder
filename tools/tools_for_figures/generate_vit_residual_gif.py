@@ -165,8 +165,11 @@ def compute_masked_residual(
         current_frame: The current frame (P frame)
         reference_frame: The reference frame (I frame, first frame)
         patch_size: Size of each patch
-        threshold: Mean absolute difference threshold to consider a patch as significant
-        
+        threshold: Mean absolute difference threshold to consider a patch as significant.
+                   Default of 10.0 was chosen empirically to filter out noise while
+                   preserving meaningful motion/change detection in typical video content.
+                   Higher values = fewer patches shown, lower values = more patches shown.
+                   
     Returns:
         Masked residual where non-significant patches are blank (white)
     """
