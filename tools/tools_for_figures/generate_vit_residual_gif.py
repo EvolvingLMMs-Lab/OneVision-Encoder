@@ -229,7 +229,11 @@ def create_visualization_frame(
     patch_size: int = 16,
     canvas_size: Tuple[int, int] = (1200, 600)
 ) -> Image.Image:
-    """Create a single visualization frame showing what is input to ViT with position information."""
+    """Create a single visualization frame showing what is input to ViT with position information.
+    
+    For P-frames (frame_idx > 0), the first frame (I-frame) is always displayed on the left
+    side as a reference, while the current frame is displayed on the right.
+    """
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
@@ -250,63 +254,121 @@ def create_visualization_frame(
     num_patches_h = frame_height // patch_size
     num_patches_w = frame_width // patch_size
     
-    # Large display size for the main visualization
-    display_size = 400
-    patch_display_size = display_size // num_patches_h
-    
-    # Calculate center position for the main ViT input visualization
-    main_x = (canvas_size[0] - display_size) // 2
-    main_y = 80
-    
-    # Draw the ViT input with position grid
     if frame_idx == 0:
+        # I-frame: show full frame centered (original behavior)
+        display_size = 400
+        patch_display_size = display_size // num_patches_h
+        main_x = (canvas_size[0] - display_size) // 2
+        main_y = 80
+        
         # I-frame: show full frame with patch grid and position labels
         frame_with_grid = create_patch_grid(frames[0], patch_size)
         frame_img = Image.fromarray(frame_with_grid)
         frame_resized = frame_img.resize((display_size, display_size), Image.Resampling.NEAREST)
         canvas.paste(frame_resized, (main_x, main_y))
+        
+        # Draw position labels on the grid
+        for i in range(num_patches_h):
+            for j in range(num_patches_w):
+                x = main_x + j * patch_display_size
+                y = main_y + i * patch_display_size
+                pos_label = f"{i},{j}"
+                draw.text((x + 2, y + 2), pos_label, fill=(100, 100, 100), font=font_small)
+        
+        # Draw grid lines on top
+        for i in range(num_patches_h + 1):
+            y = main_y + i * patch_display_size
+            draw.line([(main_x, y), (main_x + display_size, y)], fill=(150, 150, 150), width=1)
+        for j in range(num_patches_w + 1):
+            x = main_x + j * patch_display_size
+            draw.line([(x, main_y), (x, main_y + display_size)], fill=(150, 150, 150), width=1)
+        
+        # Draw border
+        draw.rectangle([main_x - 2, main_y - 2, main_x + display_size + 2, main_y + display_size + 2], 
+                       outline=(0, 0, 0), width=2)
+        
+        # Label below the main image
+        label = "All patches are input (I-Frame)"
+        label_color = (0, 100, 0)
+        draw.text((main_x, main_y + display_size + 10), label, fill=label_color, font=font_label)
     else:
-        # P-frame: show masked residual - only changed patches visible, others blank
+        # P-frame: show first frame on left and current frame on right
+        display_size = 300
+        patch_display_size = display_size // num_patches_h
+        gap = 80  # Gap between the two frames
+        total_width = display_size * 2 + gap
+        left_x = (canvas_size[0] - total_width) // 2
+        right_x = left_x + display_size + gap
+        main_y = 80
+        
+        # === Left side: First frame (I-frame) ===
+        frame_with_grid = create_patch_grid(frames[0], patch_size)
+        frame_img = Image.fromarray(frame_with_grid)
+        frame_resized = frame_img.resize((display_size, display_size), Image.Resampling.NEAREST)
+        canvas.paste(frame_resized, (left_x, main_y))
+        
+        # Draw grid lines for left frame
+        for i in range(num_patches_h + 1):
+            y = main_y + i * patch_display_size
+            draw.line([(left_x, y), (left_x + display_size, y)], fill=(150, 150, 150), width=1)
+        for j in range(num_patches_w + 1):
+            x = left_x + j * patch_display_size
+            draw.line([(x, main_y), (x, main_y + display_size)], fill=(150, 150, 150), width=1)
+        
+        # Draw border for left frame
+        draw.rectangle([left_x - 2, main_y - 2, left_x + display_size + 2, main_y + display_size + 2], 
+                       outline=(0, 100, 0), width=2)
+        
+        # Label for left frame
+        draw.text((left_x, main_y + display_size + 10), "Frame 1 (I-Frame Reference)", 
+                  fill=(0, 100, 0), font=font_label)
+        
+        # === Right side: Current frame (P-frame) ===
         masked_residual = compute_masked_residual(frames[frame_idx], frames[0], patch_size)
         residual_grid = create_patch_grid(masked_residual, patch_size)
         residual_img = Image.fromarray(residual_grid)
         residual_resized = residual_img.resize((display_size, display_size), Image.Resampling.NEAREST)
-        canvas.paste(residual_resized, (main_x, main_y))
-    
-    # Draw position labels on the grid
-    for i in range(num_patches_h):
-        for j in range(num_patches_w):
-            x = main_x + j * patch_display_size
+        canvas.paste(residual_resized, (right_x, main_y))
+        
+        # Draw position labels on the right grid
+        for i in range(num_patches_h):
+            for j in range(num_patches_w):
+                x = right_x + j * patch_display_size
+                y = main_y + i * patch_display_size
+                pos_label = f"{i},{j}"
+                draw.text((x + 2, y + 2), pos_label, fill=(100, 100, 100), font=font_small)
+        
+        # Draw grid lines for right frame
+        for i in range(num_patches_h + 1):
             y = main_y + i * patch_display_size
-            # Draw patch position label (row, col)
-            pos_label = f"{i},{j}"
-            # Draw a small label at the corner of each patch
-            draw.text((x + 2, y + 2), pos_label, fill=(100, 100, 100), font=font_small)
-    
-    # Draw grid lines on top
-    for i in range(num_patches_h + 1):
-        y = main_y + i * patch_display_size
-        draw.line([(main_x, y), (main_x + display_size, y)], fill=(150, 150, 150), width=1)
-    for j in range(num_patches_w + 1):
-        x = main_x + j * patch_display_size
-        draw.line([(x, main_y), (x, main_y + display_size)], fill=(150, 150, 150), width=1)
-    
-    # Draw border
-    draw.rectangle([main_x - 2, main_y - 2, main_x + display_size + 2, main_y + display_size + 2], 
-                   outline=(0, 0, 0), width=2)
-    
-    # Label below the main image
-    if frame_idx == 0:
-        label = "All patches are input (I-Frame)"
-        label_color = (0, 100, 0)
-    else:
-        label = "White patches = Not Input | Colored patches = Input to ViT"
-        label_color = (100, 0, 0)
-    draw.text((main_x, main_y + display_size + 10), label, fill=label_color, font=font_label)
+            draw.line([(right_x, y), (right_x + display_size, y)], fill=(150, 150, 150), width=1)
+        for j in range(num_patches_w + 1):
+            x = right_x + j * patch_display_size
+            draw.line([(x, main_y), (x, main_y + display_size)], fill=(150, 150, 150), width=1)
+        
+        # Draw border for right frame
+        draw.rectangle([right_x - 2, main_y - 2, right_x + display_size + 2, main_y + display_size + 2], 
+                       outline=(100, 0, 0), width=2)
+        
+        # Label for right frame
+        draw.text((right_x, main_y + display_size + 10), 
+                  f"Frame {frame_idx + 1} (P-Frame: Changed Patches)", 
+                  fill=(100, 0, 0), font=font_label)
+        
+        # Draw arrow between frames
+        arrow_y = main_y + display_size // 2
+        arrow_start = left_x + display_size + 10
+        arrow_end = right_x - 10
+        draw.line([(arrow_start, arrow_y), (arrow_end, arrow_y)], fill=(100, 100, 100), width=2)
+        draw.polygon([(arrow_end - 8, arrow_y - 5), (arrow_end, arrow_y), (arrow_end - 8, arrow_y + 5)], 
+                     fill=(100, 100, 100))
     
     # === Legend at bottom ===
-    legend_y = main_y + display_size + 50
+    legend_y = main_y + (400 if frame_idx == 0 else 300) + 50
     draw.text((50, legend_y), "Position Format: (row, col)", fill=(0, 0, 0), font=font_label)
+    if frame_idx > 0:
+        draw.text((50, legend_y + 20), "White patches = Not Input | Colored patches = Input to ViT", 
+                  fill=(100, 0, 0), font=font_label)
     
     return canvas
 
