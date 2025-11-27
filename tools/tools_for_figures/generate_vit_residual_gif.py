@@ -244,6 +244,103 @@ def compute_masked_residual(
     return masked_residual, tokens_kept
 
 
+def compute_global_token_selection(
+    frames: np.ndarray,
+    patch_size: int = 16,
+    total_tokens: int = 196 * 7
+) -> dict:
+    """
+    Compute global token selection across all P-frames.
+    
+    Instead of distributing tokens equally per P-frame, this function computes
+    importance scores for ALL tokens across ALL P-frames and selects the top
+    `total_tokens` tokens globally based on importance.
+    
+    Args:
+        frames: All video frames (T, H, W, C)
+        patch_size: Size of each ViT patch
+        total_tokens: Total number of tokens to select across all P-frames (default: 196*7=1372)
+        
+    Returns:
+        Dictionary mapping frame_idx -> set of (patch_i, patch_j) that are selected for that frame
+    """
+    reference_frame = frames[0].astype(np.float32)
+    h, w = frames[0].shape[:2]
+    num_patches_h = h // patch_size
+    num_patches_w = w // patch_size
+    
+    # Collect all patch scores across all P-frames
+    all_patch_scores = []
+    
+    for frame_idx in range(1, len(frames)):
+        current_frame = frames[frame_idx].astype(np.float32)
+        residual = current_frame - reference_frame
+        
+        for i in range(num_patches_h):
+            for j in range(num_patches_w):
+                y_start = i * patch_size
+                y_end = (i + 1) * patch_size
+                x_start = j * patch_size
+                x_end = (j + 1) * patch_size
+                
+                patch_residual = residual[y_start:y_end, x_start:x_end]
+                patch_mad = np.mean(np.abs(patch_residual))
+                all_patch_scores.append((patch_mad, frame_idx, i, j))
+    
+    # Sort by importance (descending) and select top tokens globally
+    all_patch_scores.sort(key=lambda x: x[0], reverse=True)
+    selected_global = all_patch_scores[:total_tokens]
+    
+    # Build a dictionary mapping frame_idx -> set of selected (i, j) patches
+    selected_by_frame = {}
+    for _, frame_idx, i, j in selected_global:
+        if frame_idx not in selected_by_frame:
+            selected_by_frame[frame_idx] = set()
+        selected_by_frame[frame_idx].add((i, j))
+    
+    return selected_by_frame
+
+
+def compute_masked_residual_with_selection(
+    current_frame: np.ndarray, 
+    reference_frame: np.ndarray, 
+    selected_patches_set: set,
+    patch_size: int = 16
+) -> Tuple[np.ndarray, int]:
+    """
+    Compute the residual with masking based on pre-computed global selection.
+    
+    Args:
+        current_frame: The current frame (P frame)
+        reference_frame: The reference frame (I frame, first frame)
+        selected_patches_set: Set of (i, j) tuples indicating which patches are selected
+        patch_size: Size of each patch
+                   
+    Returns:
+        Tuple of (masked residual where non-selected patches are blank, number of tokens kept)
+    """
+    # Compute raw residual
+    residual = current_frame.astype(np.float32) - reference_frame.astype(np.float32)
+    
+    # Create output frame - start with white (blank)
+    h, w = current_frame.shape[:2]
+    masked_residual = np.ones((h, w, 3), dtype=np.uint8) * 255  # White background
+    
+    # Normalize residual for visualization
+    residual_normalized = ((residual + 255) / 2).clip(0, 255).astype(np.uint8)
+    
+    # Apply only the selected patches
+    for i, j in selected_patches_set:
+        y_start = i * patch_size
+        y_end = (i + 1) * patch_size
+        x_start = j * patch_size
+        x_end = (j + 1) * patch_size
+        masked_residual[y_start:y_end, x_start:x_end] = \
+            residual_normalized[y_start:y_end, x_start:x_end]
+    
+    return masked_residual, len(selected_patches_set)
+
+
 def create_patch_grid(frame: np.ndarray, patch_size: int = 16) -> np.ndarray:
     """Add patch grid overlay to show how the image is divided into patches."""
     frame_with_grid = frame.copy()
@@ -264,22 +361,24 @@ def create_visualization_frame(
     patch_size: int = 16,
     canvas_size: Tuple[int, int] = (1600, 720),
     max_tokens_per_frame: Optional[int] = None,
-    total_frames: int = 64
+    total_frames: int = 64,
+    global_selection: Optional[dict] = None
 ) -> Image.Image:
     """Create a single visualization frame showing original frame, I-frame reference, and residual.
     
     For P-frames (frame_idx > 0), displays three panels:
-    - Left: Original current frame
-    - Center: First frame (I-frame reference)
-    - Right: Residual visualization with top tokens
+    - Left: Reference I-Frame
+    - Center: Original current frame
+    - Right: Residual visualization with selected tokens
     
     Args:
         frames: All video frames
         frame_idx: Current frame index
         patch_size: Size of each ViT patch
         canvas_size: Size of the output canvas
-        max_tokens_per_frame: Maximum tokens to keep per P-frame (default: 196*7/63 for 64 frames)
+        max_tokens_per_frame: Maximum tokens to keep per P-frame (used when global_selection is None)
         total_frames: Total number of frames (default 64, used to calculate tokens per frame)
+        global_selection: Pre-computed global token selection (frame_idx -> set of (i, j) patches)
     """
     # Calculate max tokens per frame if not specified
     # For 64 frames: first frame gets 196 tokens, remaining 63 frames share 196*7 = 1372 tokens
@@ -314,7 +413,13 @@ def create_visualization_frame(
     
     # Frame counter with accent color
     frame_info = f"Frame {frame_idx + 1}/{len(frames)}"
-    frame_type = "I-Frame (Full)" if frame_idx == 0 else f"P-Frame (Top {max_tokens_per_frame} tokens)"
+    if frame_idx == 0:
+        frame_type = "I-Frame (Full)"
+    elif global_selection is not None:
+        tokens_this_frame = len(global_selection.get(frame_idx, set()))
+        frame_type = f"P-Frame ({tokens_this_frame} tokens)"
+    else:
+        frame_type = f"P-Frame (Top {max_tokens_per_frame} tokens)"
     draw.text((canvas_size[0] // 2 - 120, 45), f"{frame_info} • {frame_type}", 
               fill=(100, 200, 255), font=font_label)
     
@@ -322,7 +427,8 @@ def create_visualization_frame(
     
     if frame_idx == 0:
         # I-frame: show original frame larger and centered
-        display_size = 450
+        # Use display size that is a multiple of num_patches for perfect grid alignment
+        display_size = num_patches_h * 32  # 14 * 32 = 448
         gap = 100
         total_width = display_size * 2 + gap
         left_x = (canvas_size[0] - total_width) // 2
@@ -351,29 +457,43 @@ def create_visualization_frame(
         
     else:
         # P-frame: show three panels
-        display_size = 320
+        # Use display size that is a multiple of num_patches for perfect grid alignment
+        display_size = num_patches_h * 23  # 14 * 23 = 322
         gap = 60
         total_width = display_size * 3 + gap * 2
         left_x = (canvas_size[0] - total_width) // 2
         center_x = left_x + display_size + gap
         right_x = center_x + display_size + gap
         
-        # === Left: Original Current Frame ===
+        # === Left: Reference I-Frame ===
         _draw_frame_panel(
-            canvas, draw, frames[frame_idx], left_x, main_y, display_size,
-            f"Original Frame {frame_idx + 1}", (100, 200, 255), patch_size, font_label, show_grid=False
-        )
-        
-        # === Center: Reference I-Frame ===
-        _draw_frame_panel(
-            canvas, draw, frames[0], center_x, main_y, display_size,
+            canvas, draw, frames[0], left_x, main_y, display_size,
             "Reference (Frame 1)", (100, 255, 150), patch_size, font_label, show_grid=False
         )
         
-        # === Right: Residual with Top Tokens ===
-        masked_residual, tokens_kept = compute_masked_residual(
-            frames[frame_idx], frames[0], patch_size, max_tokens=max_tokens_per_frame
+        # === Center: Original Current Frame ===
+        _draw_frame_panel(
+            canvas, draw, frames[frame_idx], center_x, main_y, display_size,
+            f"Original Frame {frame_idx + 1}", (100, 200, 255), patch_size, font_label, show_grid=False
         )
+        
+        # === Right: Residual with Selected Tokens ===
+        if global_selection is not None and frame_idx in global_selection:
+            # Use pre-computed global selection
+            selected_patches_set = global_selection[frame_idx]
+            masked_residual, tokens_kept = compute_masked_residual_with_selection(
+                frames[frame_idx], frames[0], selected_patches_set, patch_size
+            )
+        elif global_selection is not None:
+            # This frame has no selected tokens in global selection
+            h, w = frames[frame_idx].shape[:2]
+            masked_residual = np.ones((h, w, 3), dtype=np.uint8) * 255  # All white
+            tokens_kept = 0
+        else:
+            # Fall back to per-frame selection (legacy behavior)
+            masked_residual, tokens_kept = compute_masked_residual(
+                frames[frame_idx], frames[0], patch_size, max_tokens=max_tokens_per_frame
+            )
         _draw_frame_panel(
             canvas, draw, masked_residual, right_x, main_y, display_size,
             f"ViT Input ({tokens_kept} Tokens)", (255, 150, 100), patch_size, font_label, 
@@ -442,16 +562,19 @@ def _draw_frame_panel(
     # Draw grid if requested
     if show_grid:
         num_patches = frame.shape[0] // patch_size
-        patch_display_size = size // num_patches if num_patches > 0 else size
         if num_patches > 0:
+            # Draw grid lines that perfectly align with the resized patches
+            # The last grid line should be exactly at the edge (x + size, y + size)
             for i in range(num_patches + 1):
-                line_y = y + i * patch_display_size
-                line_x = x + i * patch_display_size
+                # Use linear interpolation to ensure perfect alignment
+                # First line at 0, last line at size
+                line_y = y + (i * size) // num_patches
+                line_x = x + (i * size) // num_patches
                 grid_color = (80, 80, 80) if is_residual else (60, 60, 60)
-                if i < num_patches:
-                    draw.line([(x, line_y), (x + size, line_y)], fill=grid_color, width=1)
-                if i < num_patches:
-                    draw.line([(line_x, y), (line_x, y + size)], fill=grid_color, width=1)
+                # Draw horizontal lines
+                draw.line([(x, line_y), (x + size, line_y)], fill=grid_color, width=1)
+                # Draw vertical lines
+                draw.line([(line_x, y), (line_x, y + size)], fill=grid_color, width=1)
     
     # Draw label below
     label_x = x + (size - len(label) * 8) // 2
@@ -725,7 +848,8 @@ def generate_video(
     canvas_size: Tuple[int, int] = (1600, 720),
     include_architecture: bool = True,
     max_tokens_per_frame: Optional[int] = None,
-    total_frames: int = 64
+    total_frames: int = 64,
+    total_p_frame_tokens: int = 196 * 7
 ) -> None:
     """Generate an MP4 video showing the ViT processing pipeline.
     
@@ -736,10 +860,16 @@ def generate_video(
         fps: Frames per second for the output video
         canvas_size: Size of each frame in the video
         include_architecture: Whether to include architecture overview
-        max_tokens_per_frame: Maximum tokens to keep per P-frame
+        max_tokens_per_frame: Maximum tokens to keep per P-frame (legacy, not used with global selection)
         total_frames: Total number of frames (used to calculate tokens per frame)
+        total_p_frame_tokens: Total tokens to select across all P-frames (default: 196*7=1372)
     """
     video_frames: List[np.ndarray] = []
+    
+    # Compute global token selection across all P-frames
+    global_selection = compute_global_token_selection(frames, patch_size, total_p_frame_tokens)
+    total_selected = sum(len(v) for v in global_selection.values())
+    print(f"Global token selection: {total_selected} tokens across {len(global_selection)} P-frames")
     
     # Add architecture overview frame first (shown for 3 seconds)
     if include_architecture:
@@ -754,7 +884,8 @@ def generate_video(
         viz_frame = create_visualization_frame(
             frames, frame_idx, patch_size, canvas_size,
             max_tokens_per_frame=max_tokens_per_frame,
-            total_frames=total_frames
+            total_frames=total_frames,
+            global_selection=global_selection
         )
         video_frames.append(np.array(viz_frame))
     
@@ -769,7 +900,6 @@ def generate_video(
             video_frames,
             fps=fps,
             codec='libx264',
-            quality=9,
             pixelformat='yuv420p'
         )
         print(f"Video saved to: {output_path}")
@@ -786,10 +916,28 @@ def generate_gif(
     canvas_size: Tuple[int, int] = (1600, 720),
     include_architecture: bool = True,
     max_tokens_per_frame: Optional[int] = None,
-    total_frames: int = 64
+    total_frames: int = 64,
+    total_p_frame_tokens: int = 196 * 7
 ) -> None:
-    """Generate the animated GIF showing the ViT processing pipeline (legacy support)."""
+    """Generate the animated GIF showing the ViT processing pipeline (legacy support).
+    
+    Args:
+        frames: Video frames to process
+        output_path: Output GIF path
+        patch_size: ViT patch size
+        duration: Duration of each frame in milliseconds
+        canvas_size: Size of each frame in the GIF
+        include_architecture: Whether to include architecture overview
+        max_tokens_per_frame: Maximum tokens to keep per P-frame (legacy, not used with global selection)
+        total_frames: Total number of frames
+        total_p_frame_tokens: Total tokens to select across all P-frames (default: 196*7=1372)
+    """
     gif_frames: List[Image.Image] = []
+    
+    # Compute global token selection across all P-frames
+    global_selection = compute_global_token_selection(frames, patch_size, total_p_frame_tokens)
+    total_selected = sum(len(v) for v in global_selection.values())
+    print(f"Global token selection: {total_selected} tokens across {len(global_selection)} P-frames")
     
     # Add architecture overview frame first
     if include_architecture:
@@ -803,7 +951,8 @@ def generate_gif(
         viz_frame = create_visualization_frame(
             frames, frame_idx, patch_size, canvas_size,
             max_tokens_per_frame=max_tokens_per_frame,
-            total_frames=total_frames
+            total_frames=total_frames,
+            global_selection=global_selection
         )
         gif_frames.append(viz_frame)
     
@@ -832,8 +981,8 @@ def main():
     parser.add_argument("--width", type=int, default=1600, help="Canvas width")
     parser.add_argument("--height", type=int, default=720, help="Canvas height (should be divisible by 16)")
     parser.add_argument("--no-architecture", action="store_true", help="Skip architecture overview frame")
-    parser.add_argument("--max-tokens", type=int, default=None, 
-                        help="Max tokens per P-frame (default: 196*7/(num_frames-1))")
+    parser.add_argument("--total-tokens", type=int, default=196 * 7, 
+                        help="Total tokens to select across all P-frames (default: 196*7=1372)")
     parser.add_argument("--gif", action="store_true", help="Output as GIF instead of video")
     parser.add_argument("--duration", type=int, default=800, help="Duration of each frame in ms (for GIF)")
     
@@ -855,13 +1004,7 @@ def main():
         frames = generate_synthetic_frames(args.num_frames)
     
     print(f"Loaded {len(frames)} frames with shape: {frames[0].shape}")
-    
-    # Calculate max tokens per frame if not specified
-    max_tokens = args.max_tokens
-    if max_tokens is None and args.num_frames > 1:
-        # 196*7 tokens distributed across (num_frames-1) P-frames
-        max_tokens = (196 * 7) // (args.num_frames - 1)
-        print(f"Using {max_tokens} tokens per P-frame ({196 * 7} tokens / {args.num_frames - 1} P-frames)")
+    print(f"Selecting top {args.total_tokens} tokens globally across {args.num_frames - 1} P-frames")
     
     if args.gif:
         generate_gif(
@@ -871,8 +1014,8 @@ def main():
             duration=args.duration,
             canvas_size=(args.width, args.height),
             include_architecture=not args.no_architecture,
-            max_tokens_per_frame=max_tokens,
-            total_frames=args.num_frames
+            total_frames=args.num_frames,
+            total_p_frame_tokens=args.total_tokens
         )
     else:
         generate_video(
@@ -882,8 +1025,8 @@ def main():
             fps=args.fps,
             canvas_size=(args.width, args.height),
             include_architecture=not args.no_architecture,
-            max_tokens_per_frame=max_tokens,
-            total_frames=args.num_frames
+            total_frames=args.num_frames,
+            total_p_frame_tokens=args.total_tokens
         )
 
 
