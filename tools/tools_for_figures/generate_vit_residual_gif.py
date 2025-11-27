@@ -13,22 +13,74 @@ Usage:
 """
 
 import argparse
+import os
 from pathlib import Path
 from typing import Optional, Tuple, List
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+# Cross-platform font paths - try common locations on different OSes
+FONT_PATHS = [
+    # Linux
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    # macOS
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
+    # Windows
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+]
 
-def load_video_frames(video_path: str, num_frames: int = 8, resize: Tuple[int, int] = (224, 224)) -> np.ndarray:
-    """Load video frames using PIL for basic video support or fallback to synthetic frames."""
+
+def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    """Get a font with cross-platform support, falling back to default if needed."""
+    for font_path in FONT_PATHS:
+        if os.path.exists(font_path):
+            # Prefer bold fonts for bold requests
+            if bold and "Bold" in font_path or "bd" in font_path.lower():
+                try:
+                    return ImageFont.truetype(font_path, size)
+                except OSError:
+                    continue
+            elif not bold and "Bold" not in font_path and "bd" not in font_path.lower():
+                try:
+                    return ImageFont.truetype(font_path, size)
+                except OSError:
+                    continue
+    # Fallback: try any available font
+    for font_path in FONT_PATHS:
+        if os.path.exists(font_path):
+            try:
+                return ImageFont.truetype(font_path, size)
+            except OSError:
+                continue
+    # Ultimate fallback
+    return ImageFont.load_default()
+
+
+def load_video_frames(video_path: str, num_frames: int = 8, resize: Tuple[int, int] = (224, 224)) -> Optional[np.ndarray]:
+    """Load video frames using OpenCV. Returns None if video cannot be loaded."""
+    if not os.path.exists(video_path):
+        print(f"Warning: Video file not found: {video_path}")
+        return None
+    
     try:
         import cv2
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            raise ValueError(f"Cannot open video: {video_path}")
+            print(f"Warning: Cannot open video: {video_path}")
+            return None
         
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames == 0:
+            print(f"Warning: Video has no frames: {video_path}")
+            cap.release()
+            return None
+            
         indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
         
         frames = []
@@ -40,40 +92,51 @@ def load_video_frames(video_path: str, num_frames: int = 8, resize: Tuple[int, i
                 frame = cv2.resize(frame, resize)
                 frames.append(frame)
         cap.release()
+        
+        if len(frames) == 0:
+            print(f"Warning: Could not read any frames from: {video_path}")
+            return None
+            
         return np.array(frames)
     except ImportError:
-        print("OpenCV not available, using synthetic video frames for demo.")
-        return generate_synthetic_frames(num_frames, resize)
+        print("Warning: OpenCV not available.")
+        return None
+    except Exception as e:
+        print(f"Warning: Error loading video: {e}")
+        return None
 
 
 def generate_synthetic_frames(num_frames: int = 8, size: Tuple[int, int] = (224, 224)) -> np.ndarray:
-    """Generate synthetic frames for demo purposes."""
+    """Generate synthetic frames for demo purposes using vectorized operations."""
     frames = []
-    base_color = np.array([100, 150, 200])  # Base color for the scene
+    base_color = np.array([100, 150, 200], dtype=np.float32)
+    
+    # Create coordinate grids for vectorized operations
+    y_coords, x_coords = np.mgrid[0:size[1], 0:size[0]]
     
     for i in range(num_frames):
-        frame = np.zeros((size[1], size[0], 3), dtype=np.uint8)
+        # Create gradient background using vectorized operations
+        sin_component = 30 * np.sin(2 * np.pi * x_coords / size[0])
+        cos_component = 20 * np.cos(2 * np.pi * y_coords / size[1])
         
-        # Create a gradient background
-        for y in range(size[1]):
-            for x in range(size[0]):
-                frame[y, x] = base_color + np.array([
-                    int(30 * np.sin(2 * np.pi * x / size[0])),
-                    int(20 * np.cos(2 * np.pi * y / size[1])),
-                    0
-                ])
+        frame = np.zeros((size[1], size[0], 3), dtype=np.float32)
+        frame[:, :, 0] = base_color[0] + sin_component
+        frame[:, :, 1] = base_color[1] + cos_component
+        frame[:, :, 2] = base_color[2]
         
-        # Add a moving circle (simulating motion)
-        center_x = int(size[0] * 0.3 + size[0] * 0.4 * i / (num_frames - 1))
-        center_y = int(size[1] * 0.5 + size[1] * 0.2 * np.sin(2 * np.pi * i / num_frames))
+        # Add a moving circle using vectorized distance calculation
+        center_x = size[0] * 0.3 + size[0] * 0.4 * i / max(num_frames - 1, 1)
+        center_y = size[1] * 0.5 + size[1] * 0.2 * np.sin(2 * np.pi * i / num_frames)
         
-        for y in range(size[1]):
-            for x in range(size[0]):
-                dist = np.sqrt((x - center_x)**2 + (y - center_y)**2)
-                if dist < 30:
-                    frame[y, x] = np.array([255, 100, 50])  # Orange circle
+        dist = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
+        circle_mask = dist < 30
         
-        frames.append(frame)
+        # Apply orange color to circle
+        frame[circle_mask, 0] = 255
+        frame[circle_mask, 1] = 100
+        frame[circle_mask, 2] = 50
+        
+        frames.append(np.clip(frame, 0, 255).astype(np.uint8))
     
     return np.array(frames)
 
@@ -110,15 +173,10 @@ def create_visualization_frame(
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    # Try to load a nice font, fallback to default
-    try:
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-        font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-    except OSError:
-        font_title = ImageFont.load_default()
-        font_label = font_title
-        font_small = font_title
+    # Load fonts using the cross-platform helper function
+    font_title = get_font(20, bold=True)
+    font_label = get_font(14, bold=False)
+    font_small = get_font(12, bold=False)
     
     # Title
     title = f"LLaVA-ViT Video Processing - Frame {frame_idx + 1}/{len(frames)}"
@@ -248,14 +306,10 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1200, 700)) -> Ima
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    try:
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
-        font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-    except OSError:
-        font_title = ImageFont.load_default()
-        font_label = font_title
-        font_small = font_title
+    # Load fonts using the cross-platform helper function
+    font_title = get_font(24, bold=True)
+    font_label = get_font(14, bold=False)
+    font_small = get_font(12, bold=False)
     
     # Title
     draw.text((canvas_size[0] // 2 - 250, 20), "LLaVA-ViT Architecture: Video Residual Encoding", 
@@ -328,8 +382,13 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1200, 700)) -> Ima
     draw.text((880, 140), "Video\nFeatures", fill=(0, 0, 0), font=font_label)
     
     # Add RoPE notation
+    # 3D RoPE explanation: The 4:6:6 split allocates embedding dimensions for T:H:W
+    # - 4 parts for temporal (T) dimension
+    # - 6 parts for height (H) dimension  
+    # - 6 parts for width (W) dimension
+    # This enables the model to learn separate positional encodings for time and space
     draw.text((670, 250), "3D RoPE (4:6:6 split)", fill=(100, 0, 150), font=font_small)
-    draw.text((670, 270), "for temporal-spatial encoding", fill=(100, 0, 150), font=font_small)
+    draw.text((670, 270), "T:H:W dimension allocation", fill=(100, 0, 150), font=font_small)
     
     # Legend at bottom
     legend_y = 350
@@ -422,12 +481,20 @@ def main():
     
     args = parser.parse_args()
     
-    if args.demo or args.video is None:
+    frames = None
+    
+    if args.demo:
         print("Generating demo with synthetic frames...")
         frames = generate_synthetic_frames(args.num_frames)
-    else:
+    elif args.video is not None:
         print(f"Loading video: {args.video}")
         frames = load_video_frames(args.video, args.num_frames)
+        if frames is None:
+            print("Falling back to demo mode with synthetic frames...")
+            frames = generate_synthetic_frames(args.num_frames)
+    else:
+        print("No video specified, generating demo with synthetic frames...")
+        frames = generate_synthetic_frames(args.num_frames)
     
     print(f"Loaded {len(frames)} frames with shape: {frames[0].shape}")
     
