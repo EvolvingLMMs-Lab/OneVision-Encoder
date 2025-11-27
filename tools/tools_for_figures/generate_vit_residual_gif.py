@@ -149,6 +149,66 @@ def compute_residual(current_frame: np.ndarray, reference_frame: np.ndarray) -> 
     return residual_normalized.clip(0, 255).astype(np.uint8)
 
 
+def compute_masked_residual(
+    current_frame: np.ndarray, 
+    reference_frame: np.ndarray, 
+    patch_size: int = 16,
+    threshold: float = 10.0
+) -> np.ndarray:
+    """
+    Compute the residual with masking - only show patches that have significant changes.
+    
+    Patches with low residual values (below threshold) are set to white (blank),
+    indicating they are not being transmitted/input to the model.
+    
+    Args:
+        current_frame: The current frame (P frame)
+        reference_frame: The reference frame (I frame, first frame)
+        patch_size: Size of each patch
+        threshold: Mean absolute difference threshold to consider a patch as significant.
+                   Default of 10.0 was chosen empirically to filter out noise while
+                   preserving meaningful motion/change detection in typical video content.
+                   Higher values = fewer patches shown, lower values = more patches shown.
+                   
+    Returns:
+        Masked residual where non-significant patches are blank (white)
+    """
+    # Compute raw residual
+    residual = current_frame.astype(np.float32) - reference_frame.astype(np.float32)
+    
+    # Create output frame - start with white (blank)
+    h, w = current_frame.shape[:2]
+    masked_residual = np.ones((h, w, 3), dtype=np.uint8) * 255  # White background
+    
+    # Normalize residual for visualization
+    residual_normalized = ((residual + 255) / 2).clip(0, 255).astype(np.uint8)
+    
+    # Process each patch
+    num_patches_h = h // patch_size
+    num_patches_w = w // patch_size
+    
+    for i in range(num_patches_h):
+        for j in range(num_patches_w):
+            # Extract patch region
+            y_start = i * patch_size
+            y_end = (i + 1) * patch_size
+            x_start = j * patch_size
+            x_end = (j + 1) * patch_size
+            
+            # Get the raw residual for this patch
+            patch_residual = residual[y_start:y_end, x_start:x_end]
+            
+            # Compute mean absolute difference for this patch
+            patch_mad = np.mean(np.abs(patch_residual))
+            
+            # If the patch has significant change, show it
+            if patch_mad > threshold:
+                masked_residual[y_start:y_end, x_start:x_end] = \
+                    residual_normalized[y_start:y_end, x_start:x_end]
+    
+    return masked_residual
+
+
 def create_patch_grid(frame: np.ndarray, patch_size: int = 16) -> np.ndarray:
     """Add patch grid overlay to show how the image is divided into patches."""
     frame_with_grid = frame.copy()
@@ -169,134 +229,84 @@ def create_visualization_frame(
     patch_size: int = 16,
     canvas_size: Tuple[int, int] = (1200, 600)
 ) -> Image.Image:
-    """Create a single visualization frame showing the ViT processing pipeline."""
+    """Create a single visualization frame showing what is input to ViT with position information."""
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
     # Load fonts using the cross-platform helper function
-    font_title = get_font(20, bold=True)
-    font_label = get_font(14, bold=False)
+    font_title = get_font(24, bold=True)
+    font_label = get_font(16, bold=False)
     font_small = get_font(12, bold=False)
     
     # Title
-    title = f"LLaVA-ViT Video Processing - Frame {frame_idx + 1}/{len(frames)}"
-    draw.text((canvas_size[0] // 2 - 200, 20), title, fill=(0, 0, 0), font=font_title)
+    title = f"ViT Input - Frame {frame_idx + 1}/{len(frames)}"
+    if frame_idx == 0:
+        title += " (I-Frame: Full Input)"
+    else:
+        title += " (P-Frame: Only Changed Patches)"
+    draw.text((canvas_size[0] // 2 - 250, 20), title, fill=(0, 0, 0), font=font_title)
     
     frame_height, frame_width = frames[0].shape[:2]
-    display_size = 160
+    num_patches_h = frame_height // patch_size
+    num_patches_w = frame_width // patch_size
     
-    # === Section 1: Input Frames ===
-    draw.text((50, 60), "Input Frames", fill=(0, 0, 0), font=font_label)
+    # Large display size for the main visualization
+    display_size = 400
+    patch_display_size = display_size // num_patches_h
     
-    # Show first frame (reference)
-    first_frame = Image.fromarray(frames[0])
-    first_frame_resized = first_frame.resize((display_size, display_size))
-    canvas.paste(first_frame_resized, (50, 90))
-    draw.text((50, 90 + display_size + 5), "Frame 1 (Reference)", fill=(0, 100, 0), font=font_small)
+    # Calculate center position for the main ViT input visualization
+    main_x = (canvas_size[0] - display_size) // 2
+    main_y = 80
     
-    # Show current frame
-    if frame_idx > 0:
-        current_frame = Image.fromarray(frames[frame_idx])
-        current_frame_resized = current_frame.resize((display_size, display_size))
-        canvas.paste(current_frame_resized, (50 + display_size + 30, 90))
-        draw.text((50 + display_size + 30, 90 + display_size + 5), f"Frame {frame_idx + 1}", fill=(100, 0, 0), font=font_small)
-    
-    # === Section 2: Processing ===
-    draw.text((420, 60), "ViT Input", fill=(0, 0, 0), font=font_label)
-    
+    # Draw the ViT input with position grid
     if frame_idx == 0:
-        # First frame - show full frame with patch grid
-        first_frame_grid = create_patch_grid(frames[0], patch_size)
-        first_frame_grid_img = Image.fromarray(first_frame_grid)
-        first_frame_grid_resized = first_frame_grid_img.resize((display_size, display_size))
-        canvas.paste(first_frame_grid_resized, (420, 90))
-        draw.text((420, 90 + display_size + 5), "Full Frame → Patch Embedding", fill=(0, 100, 0), font=font_small)
+        # I-frame: show full frame with patch grid and position labels
+        frame_with_grid = create_patch_grid(frames[0], patch_size)
+        frame_img = Image.fromarray(frame_with_grid)
+        frame_resized = frame_img.resize((display_size, display_size), Image.Resampling.NEAREST)
+        canvas.paste(frame_resized, (main_x, main_y))
     else:
-        # Other frames - show residual
-        residual = compute_residual(frames[frame_idx], frames[0])
-        residual_grid = create_patch_grid(residual, patch_size)
+        # P-frame: show masked residual - only changed patches visible, others blank
+        masked_residual = compute_masked_residual(frames[frame_idx], frames[0], patch_size)
+        residual_grid = create_patch_grid(masked_residual, patch_size)
         residual_img = Image.fromarray(residual_grid)
-        residual_resized = residual_img.resize((display_size, display_size))
-        canvas.paste(residual_resized, (420, 90))
-        draw.text((420, 90 + display_size + 5), "Residual → Patch Embedding", fill=(100, 0, 0), font=font_small)
+        residual_resized = residual_img.resize((display_size, display_size), Image.Resampling.NEAREST)
+        canvas.paste(residual_resized, (main_x, main_y))
     
-    # === Section 3: ViT Encoder ===
-    draw.text((620, 60), "ViT Encoder", fill=(0, 0, 0), font=font_label)
+    # Draw position labels on the grid
+    for i in range(num_patches_h):
+        for j in range(num_patches_w):
+            x = main_x + j * patch_display_size
+            y = main_y + i * patch_display_size
+            # Draw patch position label (row, col)
+            pos_label = f"{i},{j}"
+            # Draw a small label at the corner of each patch
+            draw.text((x + 2, y + 2), pos_label, fill=(100, 100, 100), font=font_small)
     
-    # Draw encoder blocks
-    encoder_x = 620
-    encoder_y = 90
-    block_width = 80
-    block_height = 30
-    num_blocks = 6  # Simplified representation
+    # Draw grid lines on top
+    for i in range(num_patches_h + 1):
+        y = main_y + i * patch_display_size
+        draw.line([(main_x, y), (main_x + display_size, y)], fill=(150, 150, 150), width=1)
+    for j in range(num_patches_w + 1):
+        x = main_x + j * patch_display_size
+        draw.line([(x, main_y), (x, main_y + display_size)], fill=(150, 150, 150), width=1)
     
-    for i in range(num_blocks):
-        # Highlight current processing block with animation
-        progress = (frame_idx % num_blocks) == i
-        fill_color = (100, 200, 100) if progress else (200, 220, 240)
-        outline_color = (0, 100, 0) if progress else (100, 100, 100)
-        
-        block_y = encoder_y + i * (block_height + 10)
-        draw.rectangle([encoder_x, block_y, encoder_x + block_width, block_y + block_height],
-                       fill=fill_color, outline=outline_color, width=2)
-        draw.text((encoder_x + 5, block_y + 8), f"Layer {i + 1}", fill=(0, 0, 0), font=font_small)
+    # Draw border
+    draw.rectangle([main_x - 2, main_y - 2, main_x + display_size + 2, main_y + display_size + 2], 
+                   outline=(0, 0, 0), width=2)
     
-    # === Section 4: Output Features ===
-    draw.text((750, 60), "Output Features", fill=(0, 0, 0), font=font_label)
+    # Label below the main image
+    if frame_idx == 0:
+        label = "All patches are input (I-Frame)"
+        label_color = (0, 100, 0)
+    else:
+        label = "White patches = Not Input | Colored patches = Input to ViT"
+        label_color = (100, 0, 0)
+    draw.text((main_x, main_y + display_size + 10), label, fill=label_color, font=font_label)
     
-    # Draw feature map representation
-    feature_x = 750
-    feature_y = 90
-    feature_size = 140
-    
-    # Create a colorful representation of feature maps
-    feature_map = np.zeros((feature_size, feature_size, 3), dtype=np.uint8)
-    num_patches = frame_height // patch_size
-    patch_display_size = feature_size // num_patches
-    
-    for i in range(num_patches):
-        for j in range(num_patches):
-            # Create colorful patches to represent features
-            color_val = int(128 + 127 * np.sin((i + j + frame_idx) * 0.5))
-            color = (color_val, 255 - color_val, 128)
-            feature_map[i * patch_display_size:(i + 1) * patch_display_size,
-                        j * patch_display_size:(j + 1) * patch_display_size] = color
-    
-    feature_img = Image.fromarray(feature_map)
-    canvas.paste(feature_img, (feature_x, feature_y))
-    draw.text((feature_x, feature_y + feature_size + 5), "Encoded Features", fill=(0, 0, 100), font=font_small)
-    
-    # === Section 5: Legend ===
-    legend_y = 350
-    draw.text((50, legend_y), "Legend:", fill=(0, 0, 0), font=font_label)
-    
-    # Draw legend items
-    legend_items = [
-        ("Frame 1: Full frame is kept as reference", (0, 100, 0)),
-        ("Frame 2+: Residual (difference from Frame 1) is encoded", (100, 0, 0)),
-        ("Patch size: 16x16 pixels", (0, 0, 100)),
-    ]
-    
-    for i, (text, color) in enumerate(legend_items):
-        draw.ellipse([50, legend_y + 25 + i * 20, 60, legend_y + 35 + i * 20], fill=color)
-        draw.text((70, legend_y + 22 + i * 20), text, fill=(0, 0, 0), font=font_small)
-    
-    # === Section 6: Mathematical Formula ===
-    formula_y = 450
-    draw.text((50, formula_y), "Processing Formula:", fill=(0, 0, 0), font=font_label)
-    draw.text((50, formula_y + 25), "Frame 1: x₁ → PatchEmbed(x₁) → ViT Encoder → Features", fill=(0, 0, 0), font=font_small)
-    draw.text((50, formula_y + 45), "Frame t: xₜ - x₁ → PatchEmbed(residual) → ViT Encoder → Features", fill=(0, 0, 0), font=font_small)
-    
-    # Draw arrows between sections
-    arrow_y = 170
-    draw.line([(230, arrow_y), (400, arrow_y)], fill=(100, 100, 100), width=2)
-    draw.polygon([(395, arrow_y - 5), (400, arrow_y), (395, arrow_y + 5)], fill=(100, 100, 100))
-    
-    draw.line([(580, arrow_y), (600, arrow_y)], fill=(100, 100, 100), width=2)
-    draw.polygon([(595, arrow_y - 5), (600, arrow_y), (595, arrow_y + 5)], fill=(100, 100, 100))
-    
-    draw.line([(710, arrow_y), (730, arrow_y)], fill=(100, 100, 100), width=2)
-    draw.polygon([(725, arrow_y - 5), (730, arrow_y), (725, arrow_y + 5)], fill=(100, 100, 100))
+    # === Legend at bottom ===
+    legend_y = main_y + display_size + 50
+    draw.text((50, legend_y), "Position Format: (row, col)", fill=(0, 0, 0), font=font_label)
     
     return canvas
 
