@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple, List
 
+import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
@@ -66,6 +67,23 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
                 continue
     # Ultimate fallback
     return ImageFont.load_default()
+
+
+def draw_rounded_rectangle(
+    draw: ImageDraw.Draw,
+    xy: List[int],
+    radius: int = 10,
+    fill: Optional[Tuple[int, int, int]] = None,
+    outline: Optional[Tuple[int, int, int]] = None,
+    width: int = 1
+) -> None:
+    """Draw a rounded rectangle with fallback for older Pillow versions."""
+    try:
+        # Try using the built-in rounded_rectangle (Pillow >= 8.2.0)
+        draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
+    except AttributeError:
+        # Fallback: draw regular rectangle for older versions
+        draw.rectangle(xy, fill=fill, outline=outline, width=width)
 
 
 def load_video_frames(video_path: str, num_frames: int = 8, resize: Tuple[int, int] = (224, 224)) -> Optional[np.ndarray]:
@@ -423,7 +441,7 @@ def _draw_frame_panel(
     
     # Draw grid if requested
     if show_grid:
-        num_patches = size // (patch_size * size // frame.shape[0])
+        num_patches = frame.shape[0] // patch_size
         patch_display_size = size // num_patches if num_patches > 0 else size
         if num_patches > 0:
             for i in range(num_patches + 1):
@@ -471,7 +489,8 @@ def _draw_stats_bar(
     bar_height = 30
     bar_x = center_x - bar_width // 2
     
-    draw.rounded_rectangle(
+    draw_rounded_rectangle(
+        draw,
         [bar_x, y, bar_x + bar_width, y + bar_height],
         radius=15,
         fill=(45, 50, 60)
@@ -541,8 +560,8 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     
     # === Video Input Box ===
     x = base_x
-    draw.rounded_rectangle(
-        [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
+    draw_rounded_rectangle(
+        draw, [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
         radius=10, fill=(45, 60, 80), outline=(100, 150, 200), width=2
     )
     draw.text((x + 30, y_center - 30), "Video Input", fill=(200, 220, 255), font=font_label)
@@ -554,21 +573,21 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     
     # === Frame Decomposition Box ===
     x = base_x + box_width + gap
-    draw.rounded_rectangle(
-        [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
+    draw_rounded_rectangle(
+        draw, [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
         radius=10, fill=(45, 70, 55), outline=(100, 200, 150), width=2
     )
     draw.text((x + 20, y_center - 60), "Frame Split", fill=(150, 255, 180), font=font_label)
     
     # I-Frame
-    draw.rounded_rectangle([x + 15, y_center - 35, x + 75, y_center - 5], radius=5, 
+    draw_rounded_rectangle(draw, [x + 15, y_center - 35, x + 75, y_center - 5], radius=5, 
                            fill=(80, 180, 120), outline=(100, 255, 150), width=1)
     draw.text((x + 25, y_center - 28), "F₁", fill=(255, 255, 255), font=font_small)
     
     # P-Frames
     for i in range(3):
         py = y_center + 5 + i * 22
-        draw.rounded_rectangle([x + 15, py, x + 75, py + 18], radius=3,
+        draw_rounded_rectangle(draw, [x + 15, py, x + 75, py + 18], radius=3,
                               fill=(180, 100, 80), outline=(255, 150, 100), width=1)
         draw.text((x + 22, py + 2), f"ΔF{i+2}", fill=(255, 255, 255), font=font_small)
     
@@ -580,8 +599,8 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     
     # === Token Selection Box ===
     x = base_x + (box_width + gap) * 2
-    draw.rounded_rectangle(
-        [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
+    draw_rounded_rectangle(
+        draw, [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
         radius=10, fill=(70, 55, 45), outline=(255, 180, 100), width=2
     )
     draw.text((x + 15, y_center - 60), "Token Selection", fill=(255, 200, 150), font=font_label)
@@ -605,8 +624,8 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     
     # === Patch Embedding Box ===
     x = base_x + (box_width + gap) * 3
-    draw.rounded_rectangle(
-        [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
+    draw_rounded_rectangle(
+        draw, [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
         radius=10, fill=(60, 55, 70), outline=(180, 150, 220), width=2
     )
     draw.text((x + 15, y_center - 60), "Patch Embed", fill=(200, 180, 255), font=font_label)
@@ -627,8 +646,8 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     # === ViT Encoder Box ===
     x = base_x + (box_width + gap) * 4
     encoder_height = box_height + 40
-    draw.rounded_rectangle(
-        [x, y_center - encoder_height//2, x + box_width + 40, y_center + encoder_height//2],
+    draw_rounded_rectangle(
+        draw, [x, y_center - encoder_height//2, x + box_width + 40, y_center + encoder_height//2],
         radius=10, fill=(55, 50, 70), outline=(150, 100, 200), width=2
     )
     draw.text((x + 30, y_center - 75), "ViT Encoder", fill=(200, 170, 255), font=font_subtitle)
@@ -637,7 +656,7 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     layer_colors = [(120, 100, 160), (130, 110, 170), (140, 120, 180), (150, 130, 190)]
     for i in range(4):
         ly = y_center - 45 + i * 28
-        draw.rounded_rectangle([x + 15, ly, x + box_width + 25, ly + 22], radius=5,
+        draw_rounded_rectangle(draw, [x + 15, ly, x + box_width + 25, ly + 22], radius=5,
                               fill=layer_colors[i], outline=(180, 150, 220), width=1)
         draw.text((x + 25, ly + 3), f"Transformer Layer {i+1}", fill=(255, 255, 255), font=font_small)
     
@@ -648,8 +667,8 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     
     # === Output Features Box ===
     x = base_x + (box_width + gap) * 5 + 40
-    draw.rounded_rectangle(
-        [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
+    draw_rounded_rectangle(
+        draw, [x, y_center - box_height//2, x + box_width, y_center + box_height//2],
         radius=10, fill=(45, 65, 70), outline=(100, 200, 200), width=2
     )
     draw.text((x + 30, y_center - 30), "Video", fill=(150, 230, 230), font=font_label)
@@ -660,7 +679,7 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
     info_y = 430
     
     # Key points box
-    draw.rounded_rectangle([50, info_y, canvas_size[0] // 2 - 30, info_y + 220], 
+    draw_rounded_rectangle(draw, [50, info_y, canvas_size[0] // 2 - 30, info_y + 220], 
                            radius=10, fill=(35, 38, 48), outline=(80, 85, 100), width=1)
     draw.text((70, info_y + 15), "Key Features", fill=(255, 255, 255), font=font_subtitle)
     
@@ -678,7 +697,7 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
         draw.text((85, fy), text, fill=(200, 200, 210), font=font_label)
     
     # Formulas box
-    draw.rounded_rectangle([canvas_size[0] // 2 + 30, info_y, canvas_size[0] - 50, info_y + 220], 
+    draw_rounded_rectangle(draw, [canvas_size[0] // 2 + 30, info_y, canvas_size[0] - 50, info_y + 220], 
                            radius=10, fill=(35, 38, 48), outline=(80, 85, 100), width=1)
     draw.text((canvas_size[0] // 2 + 50, info_y + 15), "Processing Pipeline", fill=(255, 255, 255), font=font_subtitle)
     
@@ -720,8 +739,6 @@ def generate_video(
         max_tokens_per_frame: Maximum tokens to keep per P-frame
         total_frames: Total number of frames (used to calculate tokens per frame)
     """
-    import imageio
-    
     video_frames: List[np.ndarray] = []
     
     # Add architecture overview frame first (shown for 3 seconds)
