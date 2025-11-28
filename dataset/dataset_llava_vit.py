@@ -230,6 +230,52 @@ def howto100m_kinetics_104948429_400000_split_128():
         dali_type="decord",
     )
 
+@DATASET_REGISTRY.register()
+def howto100m_panda70m_kinetics_126409811_400000_split_128():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
+    assert world_size <= 128
+
+    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_1_add_pandas70M/train_how_to_100m_panda70m_k710_split_128/part_{rank:03d}"
+    # with open(list_mp4_label, "r", encoding="utf-8") as f:
+        # lines = f.readlines()
+
+    # lines = [x.strip().split(",")[0] for x in lines]
+    return Property(
+        name="howto100m_panda70m_kinetics_126409811_400000_split_128",
+        prefixes=[list_mp4_label_path],
+        num_classes=400000,
+        num_examples=104948429 // world_size,
+        num_shards=1,
+        shard_id=0,
+        dali_type="decord",
+    )
+
+
+@DATASET_REGISTRY.register()
+def configs_for_llava_vit_versions_0_0_2_add_pandas70M():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
+    assert world_size <= 128
+
+    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_split_128/part_{rank:03d}"
+    # with open(list_mp4_label, "r", encoding="utf-8") as f:
+        # lines = f.readlines()
+
+    # lines = [x.strip().split(",")[0] for x in lines]
+    return Property(
+        name="configs_for_llava_vit_versions_0_0_2_add_pandas70M",
+        prefixes=[list_mp4_label_path],
+        num_classes=400000,
+        num_examples=116693632 // world_size,
+        num_shards=1,
+        shard_id=0,
+        dali_type="decord",
+    )
 
 @DATASET_REGISTRY.register()
 def fake_data():
