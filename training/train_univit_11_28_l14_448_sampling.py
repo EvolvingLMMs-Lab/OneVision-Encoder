@@ -190,6 +190,13 @@ def main():
         frame_index = rank % num_frame_options
         args.actual_num_frames = args.multi_frame_list[frame_index]
         # 计算 batch size 缩放因子：帧数越少，batch size 越大
+        # 验证 base_num_frames 必须能被 actual_num_frames 整除
+        if args.base_num_frames % args.actual_num_frames != 0:
+            raise ValueError(
+                f"base_num_frames ({args.base_num_frames}) must be divisible by "
+                f"actual_num_frames ({args.actual_num_frames}). "
+                f"Please adjust multi_frame_list or base_num_frames."
+            )
         frame_scale_factor = args.base_num_frames // args.actual_num_frames
         logger.info(f"[Multi-frame] rank={rank}, frame_index={frame_index}, "
                     f"actual_num_frames={args.actual_num_frames}, "
@@ -344,7 +351,7 @@ def main():
                     partial_fc.load_state_dict(_weight, strict=True)
                     logger.info(f"Loaded partial FC state from {init_partial_fc}")
             else:
-                raise
+                raise FileNotFoundError(f"Partial FC init file not found: {init_partial_fc}")
 
     if args.opt == "adamw":
         optimizer_cls = torch.optim.AdamW
@@ -576,12 +583,11 @@ def main():
             scaled_loss.backward()
 
             # 只在累积完成时执行梯度裁剪和优化器更新
-            if global_step % args.backward_passes_per_step == 0:
-                clip_grad_norm_(backbone_ddp_compiled.parameters(), max_norm=5, norm_type=2)
-                for pfc in list_module_pfc:
-                    clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
-                opt.step()
-                opt.zero_grad()
+            clip_grad_norm_(backbone_ddp_compiled.parameters(), max_norm=5, norm_type=2)
+            for pfc in list_module_pfc:
+                clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
+            opt.step()
+            opt.zero_grad()
 
         # 学习率更新
         lr_scheduler.step()
@@ -622,8 +628,8 @@ def main():
                 list_head_names=args.list_head_names,
                 keep_num=20,
             )
-            exit()
             logger.info(f"Training completed at step {global_step}")
+            exit()
 
 
 def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
