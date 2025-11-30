@@ -64,8 +64,13 @@ def remap_state_dict_packing(src_state_dict):
     for k, v in src_state_dict.items():
         new_k = k
         if k.startswith("conv1."):
-            # conv1 -> embeddings.proj (3D conv)
+            # conv1 -> embeddings.proj (2D conv -> 3D conv)
+            # Source: (out_channels, in_channels, H, W)
+            # Target: (out_channels, in_channels, T, H, W) where T=1
             new_k = k.replace("conv1.", "embeddings.proj.")
+            if k == "conv1.weight":
+                # Unsqueeze to add temporal dimension: (C_out, C_in, H, W) -> (C_out, C_in, 1, H, W)
+                v = v.unsqueeze(2)
         elif k.startswith("ln_pre."):
             new_k = k.replace("ln_pre.", "layernorm_pre.")
         elif k.startswith("ln_post."):
@@ -83,8 +88,8 @@ def remap_state_dict_packing(src_state_dict):
             if ".attn.in_proj" in new_k:
                 # Combined QKV projection - keep it as is for packing model
                 new_k = new_k.replace(".attn.in_proj", ".self_attn.qkv")
-            elif ".attn.proj." in new_k:
-                new_k = new_k.replace(".attn.proj.", ".self_attn.proj.")
+            elif ".attn.out_proj." in new_k:
+                new_k = new_k.replace(".attn.out_proj.", ".self_attn.proj.")
         new_dict[new_k] = v
 
     return new_dict
