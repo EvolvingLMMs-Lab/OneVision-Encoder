@@ -65,11 +65,11 @@ def remap_state_dict_packing(src_state_dict):
         new_k = k
         if k.startswith("conv1."):
             # conv1 -> embeddings.proj (2D conv -> 3D conv)
-            # Source: (out_channels, in_channels, H, W)
-            # Target: (out_channels, in_channels, T, H, W) where T=1
             new_k = k.replace("conv1.", "embeddings.proj.")
             if k == "conv1.weight":
-                # Unsqueeze to add temporal dimension: (C_out, C_in, H, W) -> (C_out, C_in, 1, H, W)
+                # Source 2D conv: (out_channels, in_channels, H, W)
+                # Target 3D conv: (out_channels, in_channels, T, H, W) where T=1
+                # Use unsqueeze(2) to add temporal dimension at position 2
                 v = v.unsqueeze(2)
         elif k.startswith("ln_pre."):
             new_k = k.replace("ln_pre.", "layernorm_pre.")
