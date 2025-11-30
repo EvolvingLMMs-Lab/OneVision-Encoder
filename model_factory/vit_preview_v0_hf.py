@@ -28,7 +28,10 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.models.siglip.modeling_siglip import SiglipMLP
 from transformers.utils import (add_start_docstrings,
                                 add_start_docstrings_to_model_forward, logging,
-                                replace_return_docstrings)
+                                replace_return_docstrings, is_flash_attn_2_available)
+
+if is_flash_attn_2_available():
+    from flash_attn import flash_attn_func
 
 logger = logging.get_logger(__name__)
 
@@ -406,11 +409,120 @@ class LlavaViTAttention(nn.Module):
         return attn_output, attn_weights if output_attentions else None
 
 
+class LlavaViTFlashAttention2(nn.Module):
+    """
+    Multi-headed attention with RoPE support using Flash Attention 2.
+    This module implements the same attention mechanism as LlavaViTAttention but uses
+    Flash Attention for improved performance and memory efficiency.
+    """
+    def __init__(self, config: LlavaViTConfig):
+        super().__init__()
+        self.config = config
+        self.embed_dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = self.embed_dim // self.num_heads
+        if self.head_dim * self.num_heads != self.embed_dim:
+            raise ValueError(
+                f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
+            )
+
+        self.scale = self.head_dim**-0.5
+        self.dropout = config.attention_dropout
+
+        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.v_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        rotary_pos_emb: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Forward pass using Flash Attention 2.
+
+        Note: Flash Attention does not support output_attentions=True.
+        If output_attentions is True, this will return None for attention weights.
+        """
+        batch_size, q_len, _ = hidden_states.size()
+
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
+
+        # Flash Attention requires (B, L, H, D) format
+        query_states = query_states.view(batch_size, q_len, self.num_heads, self.head_dim)
+        key_states = key_states.view(batch_size, q_len, self.num_heads, self.head_dim)
+        value_states = value_states.view(batch_size, q_len, self.num_heads, self.head_dim)
+
+        # Apply RoPE if provided
+        if rotary_pos_emb is not None:
+            # Transpose for RoPE application: (B, L, H, D) -> (B, H, L, D)
+            query_states = query_states.transpose(1, 2)
+            key_states = key_states.transpose(1, 2)
+            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
+            # Transpose back: (B, H, L, D) -> (B, L, H, D)
+            query_states = query_states.transpose(1, 2)
+            key_states = key_states.transpose(1, 2)
+
+        # Flash Attention requires float16 or bfloat16
+        input_dtype = query_states.dtype
+        if input_dtype == torch.float32:
+            if torch.is_autocast_enabled():
+                target_dtype = torch.get_autocast_gpu_dtype()
+            elif hasattr(self.config, "_pre_quantization_dtype"):
+                target_dtype = self.config._pre_quantization_dtype
+            else:
+                target_dtype = torch.float16
+
+            query_states = query_states.to(target_dtype)
+            key_states = key_states.to(target_dtype)
+            value_states = value_states.to(target_dtype)
+
+        # Flash Attention forward pass
+        # flash_attn_func expects (batch, seqlen, nheads, headdim)
+        attn_output = flash_attn_func(
+            query_states,
+            key_states,
+            value_states,
+            dropout_p=self.dropout if self.training else 0.0,
+            softmax_scale=self.scale,
+            causal=False,
+        )
+
+        # Convert back to original dtype if needed
+        attn_output = attn_output.to(input_dtype)
+
+        # Reshape to (B, L, embed_dim)
+        attn_output = attn_output.reshape(batch_size, q_len, self.embed_dim)
+
+        attn_output = self.out_proj(attn_output)
+
+        # Flash Attention does not return attention weights
+        return attn_output, None
+
+
+LLAVA_VIT_ATTENTION_CLASSES = {
+    "eager": LlavaViTAttention,
+    "flash_attention_2": LlavaViTFlashAttention2,
+}
+
+
 class LlavaViTEncoderLayer(nn.Module):
     def __init__(self, config: LlavaViTConfig):
         super().__init__()
         self.embed_dim = config.hidden_size
-        self.self_attn = LlavaViTAttention(config)
+        # Get attention implementation from config, default to "eager"
+        attn_implementation = getattr(config, "_attn_implementation", "eager")
+        if attn_implementation not in LLAVA_VIT_ATTENTION_CLASSES:
+            raise ValueError(
+                f"Unknown attention implementation: {attn_implementation}. "
+                f"Available implementations: {list(LLAVA_VIT_ATTENTION_CLASSES.keys())}"
+            )
+        self.self_attn = LLAVA_VIT_ATTENTION_CLASSES[attn_implementation](config)
         self.layer_norm1 = get_norm_layer(config)
         self.mlp = SiglipMLP(config)
         self.layer_norm2 = get_norm_layer(config)
@@ -504,6 +616,7 @@ class LlavaViTPreTrainedModel(PreTrainedModel):
     base_model_prefix = "llava_vit"
     supports_gradient_checkpointing = True
     _no_split_modules = ["LlavaViTEncoderLayer"]
+    _supports_flash_attn_2 = True
 
     def _init_weights(self, module):
         """Initialize the weights"""
