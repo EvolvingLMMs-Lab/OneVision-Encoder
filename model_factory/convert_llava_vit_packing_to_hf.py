@@ -161,15 +161,18 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             pixel_values_5d = input_tensor.unsqueeze(2)  # (B, C, 1, H, W)
 
             # Reshape to (B, C, T, H_patches, patch_size, W_patches, patch_size)
+            # Dimensions: 0=B, 1=C, 2=T, 3=H_patches, 4=patch_size, 5=W_patches, 6=patch_size
             pixel_values_patches = pixel_values_5d.view(
                 bs, 3, t_frames, h_patches, patch_size, w_patches, patch_size
             )
-            # Permute to (B, T, H_patches, W_patches, C, T_patch, H_patch_size, W_patch_size)
-            pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 2, 4, 6).contiguous()
-            # Reshape to (B * T * H * W, C, 1, patch_size, patch_size)
+            # Permute to (B, T, H_patches, W_patches, C, patch_size, patch_size)
+            # From indices: 0, 2, 3, 5, 1, 4, 6
+            pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
+            # Reshape to (B * T * H_patches * W_patches, C, 1, patch_size, patch_size)
+            # Insert temporal_patch_size=1 dimension at position 2
             pixel_values_packed = pixel_values_patches.view(
-                total_patches, 3, 1, patch_size, patch_size
-            )
+                total_patches, 3, patch_size, patch_size
+            ).unsqueeze(2)  # Add temporal dimension
 
             packing_out = packing_model(pixel_values=pixel_values_packed, grid_thw=grid_thw)
             packing_feat = packing_out.last_hidden_state
@@ -274,13 +277,19 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
 
     # Prepare pixel values for packing model
     pixel_values_5d = input_tensor.unsqueeze(2)  # (B, C, 1, H, W)
+    # Reshape to (B, C, T, H_patches, patch_size, W_patches, patch_size)
+    # Dimensions: 0=B, 1=C, 2=T, 3=H_patches, 4=patch_size, 5=W_patches, 6=patch_size
     pixel_values_patches = pixel_values_5d.view(
         bs, 3, t_frames, h_patches, patch_size, w_patches, patch_size
     )
-    pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 2, 4, 6).contiguous()
+    # Permute to (B, T, H_patches, W_patches, C, patch_size, patch_size)
+    # From indices: 0, 2, 3, 5, 1, 4, 6
+    pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
+    # Reshape to (B * T * H_patches * W_patches, C, 1, patch_size, patch_size)
+    # Insert temporal_patch_size=1 dimension at position 2
     pixel_values_packed = pixel_values_patches.view(
-        total_patches, 3, 1, patch_size, patch_size
-    )
+        total_patches, 3, patch_size, patch_size
+    ).unsqueeze(2)  # Add temporal dimension
 
     with torch.no_grad():
         src_out = src_model(input_tensor)['visible_embeddings']
