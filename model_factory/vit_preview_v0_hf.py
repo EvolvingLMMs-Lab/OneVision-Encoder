@@ -103,7 +103,7 @@ class LlavaViTConfig(PretrainedConfig):
         num_hidden_layers=12,
         num_attention_heads=12,
         num_channels=3,
-        image_size=224,
+        image_size=448,
         patch_size=16,
         hidden_act="gelu",
         layer_norm_eps=1e-6,
@@ -740,6 +740,7 @@ def hf_llava_vit_small_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
@@ -755,6 +756,7 @@ def hf_llava_vit_base_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
@@ -786,6 +788,7 @@ def hf_llava_vit_huge_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
@@ -801,6 +804,7 @@ def hf_llava_vit_giant_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
