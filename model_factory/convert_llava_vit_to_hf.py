@@ -16,6 +16,11 @@ try:
     from model_factory import vit_preview_v0_hf  # 你的 HF 模型定义
     # 为了模拟你的 MLCDVisionModel，我们将刚刚定义的 HF 类赋值给它
     from model_factory.vit_preview_v0_hf import LlavaViTModel as MLCDVisionModel
+    from model_factory.vit_preview_v0_hf import (
+        LlavaViTAttention,
+        LlavaViTFlashAttention2,
+        LLAVA_VIT_ATTENTION_CLASSES,
+    )
     from model_factory import vit_preview_v0     # 你的 Source 模型定义
 except ImportError:
     print("[Warning] Could not import model definitions directly. Ensure they are in PYTHONPATH.")
