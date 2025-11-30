@@ -718,7 +718,6 @@ def hf_llava_vit_packing_giant_ln(pretrained: bool = False, ckpt_path=None, **kw
         config._attn_implementation = "eager"
     model = LlavaViTPackingModel(config)
     return model
-    return model
 
 
 if __name__ == "__main__":
