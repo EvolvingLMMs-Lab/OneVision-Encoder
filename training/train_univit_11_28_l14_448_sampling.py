@@ -15,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 import model_factory
 from dataset import DATASET_REGISTRY, Property
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
-from training.fused_partial_fc_v2 import CombinedMarginLoss, PartialFC_V2
+from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
 
 torch._dynamo.config.optimize_ddp = True
@@ -325,7 +325,8 @@ def main():
             )
 
         partial_fc.train().cuda()
-        list_module_pfc.append(torch.compile(partial_fc))
+        # list_module_pfc.append(torch.compile(partial_fc))
+        list_module_pfc.append(partial_fc)
         dict_pfc_modules[head_name] = partial_fc
 
         lr_pfc = args.lr * args.list_lr_pfc_weights[head_id]
@@ -388,6 +389,7 @@ def main():
             static_graph=True)
 
     backbone_ddp = wrap_ddp(backbone)
+    # backbone_ddp_compiled = backbone_ddp
     backbone_ddp_compiled = torch.compile(backbone_ddp)
 
     list_dali_dataloader = []

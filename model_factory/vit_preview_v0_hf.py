@@ -200,8 +200,12 @@ def apply_rotary_pos_emb(q, k, freqs):
 
     # We need to broadcast freqs to match heads
     # (B, L, D) -> (B, 1, L, D)
-    cos = freqs.cos().unsqueeze(1)
-    sin = freqs.sin().unsqueeze(1)
+
+    # !!! CRITICAL FIX: Cast cos/sin to q.dtype (bf16/fp16) immediately
+    # freqs are typically float32, so cos() returns float32.
+    # Without this cast, (q * cos) upcasts q to float32, causing FlashAttention to fail.
+    cos = freqs.cos().unsqueeze(1).to(q.dtype)
+    sin = freqs.sin().unsqueeze(1).to(q.dtype)
 
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
@@ -354,11 +358,6 @@ class LlavaViTAttention(nn.Module):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        # 确保所有状态张量类型一致
-        target_dtype = query_states.dtype
-        key_states = key_states.to(target_dtype)
-        value_states = value_states.to(target_dtype)
-
         # (B, L, H, D) -> Transpose to (B, H, L, D)
         query_states = query_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -366,40 +365,21 @@ class LlavaViTAttention(nn.Module):
 
         if rotary_pos_emb is not None:
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
-            # 确保rotary embedding后类型仍然一致
-            key_states = key_states.to(target_dtype)
 
-        # 在计算前再次确保类型完全一致
-        query_states = query_states.to(target_dtype)
-        key_states = key_states.to(target_dtype)
-
-        # 计算注意力权重，确保类型一致性
-        attn_weights = (query_states @ key_states.transpose(-2, -1))
-
-        # 将scale转换为正确的张量类型并应用
-        scale_tensor = torch.tensor(self.scale, dtype=target_dtype, device=query_states.device)
-        attn_weights = attn_weights * scale_tensor
+        # Calculate attention scores
+        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scale
 
         if attention_mask is not None:
             if attention_mask.size() != (batch_size, 1, q_len, q_len):
                 if attention_mask.dim() == 3:
                      attention_mask = attention_mask.unsqueeze(1)
+            attn_weights = attn_weights + attention_mask
 
-            # 确保attention_mask类型与attn_weights兼容
-            if attention_mask.dtype == torch.bool:
-                attn_weights = attn_weights.masked_fill(attention_mask, torch.finfo(attn_weights.dtype).min)
-            else:
-                # 确保attention_mask与attn_weights类型一致
-                attention_mask = attention_mask.to(attn_weights.dtype)
-                attn_weights = attn_weights + attention_mask
-
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        # dropout保持与attn_weights相同的数据类型
+        # FIX: Remove dtype=torch.float32 to stay in original dtype (bf16/fp16)
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
         attn_weights = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
 
-        # 确保value_states与attn_weights类型一致
-        value_states = value_states.to(attn_weights.dtype)
-        attn_output = (attn_weights @ value_states)
+        attn_output = torch.matmul(attn_weights, value_states)
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(batch_size, q_len, self.embed_dim)
@@ -443,9 +423,6 @@ class LlavaViTFlashAttention2(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass using Flash Attention 2.
-
-        Note: Flash Attention does not support output_attentions=True.
-        If output_attentions is True, this will return None for attention weights.
         """
         batch_size, q_len, _ = hidden_states.size()
 
@@ -463,27 +440,16 @@ class LlavaViTFlashAttention2(nn.Module):
             # Transpose for RoPE application: (B, L, H, D) -> (B, H, L, D)
             query_states = query_states.transpose(1, 2)
             key_states = key_states.transpose(1, 2)
+            # NOTE: apply_rotary_pos_emb now ensures NO float32 cast happens
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
             # Transpose back: (B, H, L, D) -> (B, L, H, D)
             query_states = query_states.transpose(1, 2)
             key_states = key_states.transpose(1, 2)
 
-        # Flash Attention requires float16 or bfloat16
-        input_dtype = query_states.dtype
-        if input_dtype == torch.float32:
-            if torch.is_autocast_enabled():
-                target_dtype = torch.get_autocast_gpu_dtype()
-            elif hasattr(self.config, "_pre_quantization_dtype"):
-                target_dtype = self.config._pre_quantization_dtype
-            else:
-                target_dtype = torch.float16
-
-            query_states = query_states.to(target_dtype)
-            key_states = key_states.to(target_dtype)
-            value_states = value_states.to(target_dtype)
+        # FIX: Removed the explicit float32 check and downcast.
+        # We assume input is already correct (bf16/fp16) thanks to RoPE fix.
 
         # Flash Attention forward pass
-        # flash_attn_func expects (batch, seqlen, nheads, headdim)
         attn_output = flash_attn_func(
             query_states,
             key_states,
@@ -493,15 +459,12 @@ class LlavaViTFlashAttention2(nn.Module):
             causal=False,
         )
 
-        # Convert back to original dtype if needed
-        attn_output = attn_output.to(input_dtype)
-
         # Reshape to (B, L, embed_dim)
         attn_output = attn_output.reshape(batch_size, q_len, self.embed_dim)
 
+        # No extra casting here.
         attn_output = self.out_proj(attn_output)
 
-        # Flash Attention does not return attention weights
         return attn_output, None
 
 
@@ -740,7 +703,7 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
 
         # === 修改开始 ===
         # Source Logic: out = self.ln_post(out); head_output = self.head(out)
-        # 为了对齐，我们在 encoder 输出后立即应用 Post-Norm
+        # 为了对齐，我们在 encoder 输出后立即应用 Post-  Norm
         if self.layernorm_post is not None:
             sequence_output = self.layernorm_post(sequence_output)
 
@@ -807,6 +770,7 @@ def hf_llava_vit_large_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 

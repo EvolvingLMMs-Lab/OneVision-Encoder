@@ -80,14 +80,14 @@ torchrun --master_addr $master_addr --master_port $master_port \
   training.train_univit_11_18_sampling_how_to_100M \
   --model_name llava_vit_base_ln \
   --num_frames 8 \
-  --backward_passes_per_step 8 \
+  --backward_passes_per_step 2 \
   --num_tokens_per_frame 196 \
   --embedding_size 768 \
   --list_batch_sizes 64 64 \
   --lr 1e-4 \
   --warmup_ratio 0.001 \
-  --list_datasets llava_vit_si_ssd howto100m_kinetics_104948429_400000_split_128 \
+  --list_datasets llava_vit_si_ssd howto100m_panda70m_kinetics_126409811_400000_split_128 \
   --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
   --init_backbone /video_vit/xiangan/checkpoint_llava_vit/2025_11_23_new_b16_continue_80gpus_how_to_100m_num_frames_16/00076000/backbone.pt \
-  --list_init_partial_fc_paths /video_vit/xiangan/checkpoint_llava_vit/2025_11_23_new_b16_continue_80gpus_how_to_100m_num_frames_16/00076000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt /video_vit/xiangan/checkpoint_llava_vit/2025_11_23_new_b16_continue_80gpus_how_to_100m_num_frames_16/00076000/howto100m_kinetics_104948429_400000_split_128/howto100m_kinetics_104948429_400000_split_128_%03d.pt  \
-  --num_sampled_data 640000000
+  --list_init_partial_fc_paths /video_vit/xiangan/checkpoint_llava_vit/2025_11_23_new_b16_continue_80gpus_how_to_100m_num_frames_16/00076000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt NULL  \
+  --num_sampled_data 1_280_000_000

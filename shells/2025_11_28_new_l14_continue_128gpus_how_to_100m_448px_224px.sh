@@ -68,26 +68,25 @@ echo "nnode=$nnode"
 echo "node_rank=$node_rank"
 
 
-# --list_datasets k710_ssv2_univit_pfs_fix_ip_fix_size llava_vit_si_ssd \
-# --init_backbone /video_vit/xiangan/checkpoint_llava_vit/b16_base/00238000/backbone.pt \
-# --list_init_partial_fc_paths NULL /video_vit/xiangan/checkpoint_llava_vit/b16_base/00238000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt \
-
 
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 torchrun --master_addr $master_addr --master_port $master_port \
   --nnode $nnode --node_rank $node_rank --nproc_per_node 8 \
   -m \
-  training.train_univit_11_18_sampling_how_to_100M \
-  --model_name llava_vit_base_ln \
-  --num_frames 8 \
-  --backward_passes_per_step 8 \
-  --num_tokens_per_frame 196 \
-  --embedding_size 768 \
-  --list_batch_sizes 64 64 \
-  --lr 1e-4 \
+  training.train_univit_11_28_l14_448_sampling \
+  --model_name llava_vit_large_ln \
+  --image_size 448 \
+  --image_size_video 224 \
+  --embedding_size 1024 \
+  --list_batch_sizes 16 4 \
+  --lr 0.0001 \
   --warmup_ratio 0.001 \
-  --list_datasets llava_vit_si_ssd howto100m_kinetics_104948429_400000_split_128 \
+  --list_datasets llava_vit_si_ssd configs_for_llava_vit_versions_0_0_2_add_pandas70M  \
   --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
-  --init_backbone /video_vit/xiangan/checkpoint_llava_vit/2025_11_23_new_b16_continue_80gpus_how_to_100m_num_frames_16/00076000/backbone.pt \
-  --list_init_partial_fc_paths /video_vit/xiangan/checkpoint_llava_vit/2025_11_23_new_b16_continue_80gpus_how_to_100m_num_frames_16/00076000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt /video_vit/xiangan/checkpoint_llava_vit/2025_11_23_new_b16_continue_80gpus_how_to_100m_num_frames_16/00076000/howto100m_kinetics_104948429_400000_split_128/howto100m_kinetics_104948429_400000_split_128_%03d.pt  \
-  --num_sampled_data 640000000
+  --init_backbone /video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone.pt \
+  --list_init_partial_fc_paths /video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt NULL  \
+  --list_sample_rates 0.1 0.1 \
+  --num_sampled_data 1280000000 \
+  --finetune_backbone 1 \
+  --backward_passes_per_step 4 \
+  --num_tokens_per_frame 256
