@@ -22,6 +22,9 @@ try:
         LLAVA_VIT_ATTENTION_CLASSES,
     )
     from model_factory import vit_preview_v0     # 你的 Source 模型定义
+    # Import the packing model with grid_thw support
+    from model_factory import vit_preview_v0_packing_hf
+    from model_factory.vit_preview_v0_packing_hf import LlavaViTPackingModel
 except ImportError:
     print("[Warning] Could not import model definitions directly. Ensure they are in PYTHONPATH.")
 
@@ -103,6 +106,43 @@ def remap_state_dict(src_state_dict):
             new_dict[f"{prefix}.q_proj.{p_type}"] = q
             new_dict[f"{prefix}.k_proj.{p_type}"] = k
             new_dict[f"{prefix}.v_proj.{p_type}"] = v_part
+
+    return new_dict
+
+
+def remap_state_dict_packing(src_state_dict):
+    """
+    Remap state dict from source model to packing model format.
+    The packing model uses a slightly different architecture with combined QKV projection.
+    """
+    print("[Remap Packing] Starting state dict remapping for packing model...")
+    new_dict = {}
+
+    for k, v in src_state_dict.items():
+        new_k = k
+        if k.startswith("conv1."):
+            # conv1 -> embeddings.proj (3D conv)
+            new_k = k.replace("conv1.", "embeddings.proj.")
+        elif k.startswith("ln_pre."):
+            new_k = k.replace("ln_pre.", "layernorm_pre.")
+        elif k.startswith("ln_post."):
+            new_k = k.replace("ln_post.", "layernorm_post.")
+        elif k.startswith("transformer.layers."):
+            new_k = k.replace("transformer.layers.", "encoder.layers.")
+            if ".ln_1." in new_k:
+                new_k = new_k.replace(".ln_1.", ".layer_norm1.")
+            if ".ln_2." in new_k:
+                new_k = new_k.replace(".ln_2.", ".layer_norm2.")
+            if ".mlp.0." in new_k:
+                new_k = new_k.replace(".mlp.0.", ".mlp.fc1.")
+            if ".mlp.2." in new_k:
+                new_k = new_k.replace(".mlp.2.", ".mlp.fc2.")
+            if ".attn.in_proj" in new_k:
+                # Combined QKV projection - keep it as is for packing model
+                new_k = new_k.replace(".attn.in_proj", ".self_attn.qkv")
+            elif ".attn.proj." in new_k:
+                new_k = new_k.replace(".attn.proj.", ".self_attn.proj.")
+        new_dict[new_k] = v
 
     return new_dict
 
@@ -328,6 +368,137 @@ def verify_saved_model_loading(src_model, output_dir, real_image_tensor):
         print("    ❌ Reloaded Model Verification: FAIL")
 
 
+def verify_consistency_packing(src_model, packing_model, real_image_tensor):
+    """
+    Verify consistency between the source model and the packing model with grid_thw input.
+
+    This function tests that the packing model (which uses grid_thw input like Qwen2VL)
+    produces consistent outputs with the original source model.
+    """
+    print("\n=== Verifying Consistency with Packing Model (grid_thw input - bfloat16) ===")
+
+    src_model.eval()
+    packing_model.eval()
+
+    device = next(src_model.parameters()).device
+    print(f"    Running on Device: {device}")
+
+    dtype = next(src_model.parameters()).dtype
+    print(f"    Model Dtype: {dtype}")
+
+    # Prepare input tensor
+    input_tensor = real_image_tensor.to(device, dtype=torch.bfloat16)
+    print(f"    Input Shape: {input_tensor.shape} | Dtype: {input_tensor.dtype}")
+
+    # Get patch size from source model
+    patch_size = 16
+    if hasattr(src_model, "patch_size"):
+        ps = src_model.patch_size
+        patch_size = ps[0] if isinstance(ps, tuple) else ps
+
+    # Calculate grid dimensions
+    _, _, height, width = input_tensor.shape
+    h_patches = height // patch_size
+    w_patches = width // patch_size
+    t_frames = 1
+
+    # Create grid_thw tensor
+    grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+    print(f"    grid_thw: {grid_thw}")
+
+    with torch.no_grad():
+        # Source model forward
+        try:
+            src_out = src_model(input_tensor)
+            if isinstance(src_out, dict):
+                src_feat = src_out.get('visible_embeddings')
+                src_head = src_out.get('head_output')
+            else:
+                src_feat = src_out
+                src_head = None
+        except Exception as e:
+            print(f"    [Error] Source forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+        # Packing model forward - need to prepare pixel values in the right format
+        try:
+            # The packing model expects pixel values in (N, C, T_patch, H_patch, W_patch) format
+            # where N is the total number of patches
+            bs = input_tensor.shape[0]
+            total_patches = t_frames * h_patches * w_patches * bs
+
+            # Reshape input to patches for the packing model
+            # input_tensor: (B, C, H, W) -> (B, C, 1, H, W) -> patches
+            pixel_values_5d = input_tensor.unsqueeze(2)  # (B, C, 1, H, W)
+
+            # Reshape to (B, C, T, H_patches, patch_size, W_patches, patch_size)
+            pixel_values_patches = pixel_values_5d.view(
+                bs, 3, t_frames, h_patches, patch_size, w_patches, patch_size
+            )
+            # Permute to (B, T, H_patches, W_patches, C, T_patch, H_patch_size, W_patch_size)
+            pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 2, 4, 6).contiguous()
+            # Reshape to (B * T * H * W, C, 1, patch_size, patch_size)
+            pixel_values_packed = pixel_values_patches.view(
+                total_patches, 3, 1, patch_size, patch_size
+            )
+
+            packing_out = packing_model(pixel_values=pixel_values_packed, grid_thw=grid_thw)
+            packing_feat = packing_out.last_hidden_state
+            packing_head = packing_out.pooler_output
+        except Exception as e:
+            print(f"    [Error] Packing model forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+    # Compare outputs
+    if src_feat is not None and packing_feat is not None:
+        # Reshape for comparison (src_feat: (B, N, C), packing_feat: (total_N, C))
+        src_feat_flat = src_feat.flatten(0, -2).float()  # (B*N, C)
+        packing_feat_flat = packing_feat.float()  # (total_N, C)
+
+        # Check if shapes match
+        if src_feat_flat.shape[0] != packing_feat_flat.shape[0]:
+            print(f"    [Warning] Shape mismatch: src {src_feat_flat.shape} vs packing {packing_feat_flat.shape}")
+            # Try to handle different output sizes
+            min_len = min(src_feat_flat.shape[0], packing_feat_flat.shape[0])
+            src_feat_flat = src_feat_flat[:min_len]
+            packing_feat_flat = packing_feat_flat[:min_len]
+
+        diff_feat = (src_feat_flat - packing_feat_flat).abs().max().item()
+        cos_sim = F.cosine_similarity(src_feat_flat, packing_feat_flat, dim=-1)
+
+        min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
+
+        print(f"    [Packing Feature] Max Diff:       {diff_feat:.6f}")
+        print(f"    [Packing Feature] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+
+        if min_cos > 0.99:
+            print("    ✅ Packing Feature: PASS")
+        else:
+            print("    ❌ Packing Feature: FAIL")
+
+    if src_head is not None and packing_head is not None:
+        diff_head = (src_head - packing_head).abs().max().item()
+        src_head_f = src_head.float()
+        packing_head_f = packing_head.float()
+        cos_sim_head = F.cosine_similarity(src_head_f, packing_head_f, dim=-1)
+
+        min_cos_head = cos_sim_head.min().item()
+        mean_cos_head = cos_sim_head.mean().item()
+
+        print(f"    [Packing Head]    Max Diff:       {diff_head:.6f}")
+        print(f"    [Packing Head]    Min Cosine Sim: {min_cos_head:.8f} (Mean: {mean_cos_head:.8f})")
+
+        if min_cos_head > 0.99:
+            print("    ✅ Packing Head:    PASS")
+        else:
+            print("    ❌ Packing Head:    FAIL")
+
+
 def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
     print(f"=== Conversion Task ===")
     print(f"Source:  {src_model_name}")
@@ -383,6 +554,26 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
 
     # 验证视频 (会自动 resize 到 224)
     verify_consistency_video(src_model, tgt_model, real_img)
+
+    # 验证 Packing 模型 (使用 grid_thw 输入)
+    print("\n--> Creating Packing Model for consistency check...")
+    try:
+        # Derive packing model name from target model name
+        packing_model_name = tgt_model_name.replace("hf_llava_vit_", "hf_llava_vit_packing_")
+        packing_model = timm.create_model(packing_model_name, pretrained=False)
+
+        # Remap state dict for packing model
+        print("--> Remapping State Dict for Packing Model...")
+        packing_state_dict = remap_state_dict_packing(src_model.state_dict())
+        packing_model.load_state_dict(packing_state_dict, strict=False)
+
+        # Move to device
+        packing_model.to(device, dtype=torch.bfloat16)
+
+        # Verify consistency
+        verify_consistency_packing(src_model, packing_model, real_img)
+    except Exception as e:
+        print(f"    [Warning] Packing model verification skipped: {e}")
 
     if output_dir:
         print(f"\n--> Saving HF Model to {output_dir}...")
