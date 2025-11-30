@@ -26,28 +26,36 @@ except ImportError:
     print("[Warning] Could not import model definitions directly. Ensure they are in PYTHONPATH.")
 
 
-def get_real_coco_image():
+# CLIP Specific Constants
+CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
+CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
+
+
+def get_real_coco_image(size=448):
     """
-    下载一张真实的 COCO 图片并预处理为 Tensor
+    下载一张真实的 COCO 图片并预处理为 Tensor (使用 CLIP 均值/方差, Float32)
     """
     url = "http://images.cocodataset.org/val2017/000000039769.jpg" # COCO cat image
-    print(f"--> Downloading real image from {url}...")
+    print(f"--> Downloading real image from {url} (Target Size: {size})...")
     try:
-        response = requests.get(url, timeout=10)
+        # 增加 header 伪装浏览器，防止某些情况下下载失败
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
         img = Image.open(BytesIO(response.content)).convert("RGB")
     except Exception as e:
         print(f"[Error] Failed to download image: {e}. Generating random noise as fallback.")
-        img = Image.fromarray(np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8))
+        img = Image.fromarray(np.random.randint(0, 255, (size, size, 3), dtype=np.uint8))
 
-    # 预处理：Resize -> CenterCrop -> ToTensor -> Normalize (Standard ImageNet)
+    # 预处理：Resize -> ToTensor -> Normalize (CLIP Specific)
+    # 注意：这里保持 Float32，具体的精度转换在模型输入前进行
     transform = transforms.Compose([
-        transforms.Resize(224),
-        transforms.CenterCrop(224),
+        transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.Normalize(mean=CLIP_MEAN, std=CLIP_STD),
     ])
 
-    return transform(img).unsqueeze(0) # [1, 3, 224, 224]
+    return transform(img).unsqueeze(0) # [1, 3, size, size]
 
 
 def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
@@ -100,13 +108,23 @@ def remap_state_dict(src_state_dict):
 
 
 def verify_consistency(src_model, tgt_model, real_image_tensor):
-    print("\n=== Verifying Consistency (Real Image Input) ===")
+    print(f"\n=== Verifying Consistency (Real Image Input - bfloat16) ===")
+
+    # 确保模型处于 eval 模式
     src_model.eval()
     tgt_model.eval()
 
+    # 获取当前设备 (src_model 应该已经被移动到了 CUDA)
     device = next(src_model.parameters()).device
-    input_tensor = real_image_tensor.to(device)
-    print(f"    Input Shape: {input_tensor.shape}")
+    print(f"    Running on Device: {device}")
+
+    # 检查模型精度
+    dtype = next(src_model.parameters()).dtype
+    print(f"    Model Dtype: {dtype}")
+
+    # 将输入移动到 GPU 并转换为 bfloat16
+    input_tensor = real_image_tensor.to(device, dtype=torch.bfloat16)
+    print(f"    Input Shape: {input_tensor.shape} | Dtype: {input_tensor.dtype}")
 
     with torch.no_grad():
         try:
@@ -119,6 +137,8 @@ def verify_consistency(src_model, tgt_model, real_image_tensor):
                 src_head = None
         except Exception as e:
             print(f"    [Error] Source forward failed: {e}")
+            import traceback
+            traceback.print_exc()
             return
 
         try:
@@ -127,46 +147,68 @@ def verify_consistency(src_model, tgt_model, real_image_tensor):
             tgt_head = tgt_out.pooler_output
         except Exception as e:
             print(f"    [Error] Target forward failed: {e}")
+            import traceback
+            traceback.print_exc()
             return
 
+    # 注意：比较时建议转回 float32，避免 bf16 精度问题导致数值差异看起来过大
     if src_feat is not None and tgt_feat is not None:
         diff_feat = (src_feat - tgt_feat).abs().max().item()
         src_feat_flat = src_feat.flatten(0, -2).float()
         tgt_feat_flat = tgt_feat.flatten(0, -2).float()
         cos_sim = F.cosine_similarity(src_feat_flat, tgt_feat_flat, dim=-1)
+
         min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()  # Added Mean
 
         print(f"    [Image Feature] Max Diff:       {diff_feat:.6f}")
-        print(f"    [Image Feature] Min Cosine Sim: {min_cos:.8f}")
+        print(f"    [Image Feature] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
 
-        if min_cos > 0.999: print("    ✅ Image Feature: PASS")
-        else: print("    ❌ Image Feature: FAIL")
+        if min_cos > 0.99:
+            print("    ✅ Image Feature: PASS")
+        else:
+            print("    ❌ Image Feature: FAIL")
 
     if src_head is not None and tgt_head is not None:
         diff_head = (src_head - tgt_head).abs().max().item()
         src_head_f = src_head.float()
         tgt_head_f = tgt_head.float()
         cos_sim_head = F.cosine_similarity(src_head_f, tgt_head_f, dim=-1)
+
         min_cos_head = cos_sim_head.min().item()
+        mean_cos_head = cos_sim_head.mean().item() # Added Mean
 
         print(f"    [Image Head]    Max Diff:       {diff_head:.6f}")
-        print(f"    [Image Head]    Min Cosine Sim: {min_cos_head:.8f}")
+        print(f"    [Image Head]    Min Cosine Sim: {min_cos_head:.8f} (Mean: {mean_cos_head:.8f})")
 
-        if min_cos_head > 0.999: print("    ✅ Image Head:    PASS")
-        else: print("    ❌ Image Head:    FAIL")
+        if min_cos_head > 0.99:
+            print("    ✅ Image Head:    PASS")
+        else:
+            print("    ❌ Image Head:    FAIL")
 
 
-def verify_consistency_video(src_model, tgt_model, real_image_tensor):
-    print("\n=== Verifying Consistency (Real Video Sampling Input) ===")
+def verify_consistency_video(src_model, tgt_model, real_image_tensor_high_res):
+    print("\n=== Verifying Consistency (Real Video Sampling Input - bfloat16) ===")
     src_model.eval()
     tgt_model.eval()
 
     device = next(src_model.parameters()).device
+    print(f"    Running on Device: {device}")
+
+    # Downsample image to 224 for video verification (Operation on Float32 usually safer for interpolation)
+    print("    [Video Mode] Resizing input from 448 to 224 for video consistency check...")
+
+    # Keep on Float32 for interpolation to avoid artifacts, then cast
+    real_image_tensor_high_res = real_image_tensor_high_res.to(device, dtype=torch.float32)
+    real_image_tensor = F.interpolate(real_image_tensor_high_res, size=(224, 224), mode='bicubic', align_corners=False)
+
     bs = 1
     original_frames = 8
     C, H, W = 3, 224, 224
 
-    videos = real_image_tensor.unsqueeze(2).repeat(bs, 1, original_frames, 1, 1).to(device)
+    # CRITICAL: Convert video input to bfloat16
+    videos = real_image_tensor.unsqueeze(2).repeat(bs, 1, original_frames, 1, 1).to(device, dtype=torch.bfloat16)
+
     frame_indices = torch.arange(original_frames).unsqueeze(0).repeat(bs, 1).to(device)
     total_frames_tensor = torch.tensor([original_frames]*bs).to(device)
 
@@ -179,20 +221,19 @@ def verify_consistency_video(src_model, tgt_model, real_image_tensor):
     frame_tokens = grid_h * grid_w
     target_frames = 64
 
-    print(f"    Video Shape: {videos.shape}, Target Frames: {target_frames}")
+    print(f"    Video Shape: {videos.shape}, Dtype: {videos.dtype}")
 
     with torch.no_grad():
         interpolated_indices = interpolate_frame_indices(frame_indices, total_frames_tensor.view(-1), target_frames)
+        # padded_videos inherits dtype from videos (bf16)
         padded_videos = torch.zeros(bs, C, target_frames, H, W, device=device, dtype=videos.dtype)
+
         seq_len = frame_indices.shape[1]
         frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
         padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
         per = torch.arange(frame_tokens, device=device)
         visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
         visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
-
-        print(f"    Padded Video Shape: {padded_videos.shape}")
-        print(f"    Visible Index Shape: {visible_index.shape}")
 
         try:
             src_out_dict = src_model(padded_videos, visible_indices=visible_index, mask_ratio=None)
@@ -215,12 +256,13 @@ def verify_consistency_video(src_model, tgt_model, real_image_tensor):
         src_feat_flat = src_feat.flatten(0, -2).float()
         tgt_feat_flat = tgt_feat.flatten(0, -2).float()
         cos_sim = F.cosine_similarity(src_feat_flat, tgt_feat_flat, dim=-1)
+
         min_cos = cos_sim.min().item()
         mean_cos = cos_sim.mean().item()
 
         print(f"    [Video Feature] Max Diff:       {diff_feat:.6f}")
         print(f"    [Video Feature] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
-        if min_cos > 0.999: print("    ✅ Video Feature: PASS")
+        if min_cos > 0.99: print("    ✅ Video Feature: PASS")
         else: print("    ❌ Video Feature: FAIL")
 
     if src_head is not None and tgt_head is not None:
@@ -228,31 +270,35 @@ def verify_consistency_video(src_model, tgt_model, real_image_tensor):
         src_head_f = src_head.float()
         tgt_head_f = tgt_head.float()
         cos_sim_head = F.cosine_similarity(src_head_f, tgt_head_f, dim=-1)
+
         min_cos_head = cos_sim_head.min().item()
+        mean_cos_head = cos_sim_head.mean().item() # Already present here, just making sure
+
         print(f"    [Video Head]    Max Diff:       {diff_head:.6f}")
-        print(f"    [Video Head]    Min Cosine Sim: {min_cos_head:.8f}")
-        if min_cos_head > 0.999: print("    ✅ Video Head:    PASS")
+        print(f"    [Video Head]    Min Cosine Sim: {min_cos_head:.8f} (Mean: {mean_cos_head:.8f})")
+        if min_cos_head > 0.99: print("    ✅ Video Head:    PASS")
         else: print("    ❌ Video Head:    FAIL")
 
 
 def verify_saved_model_loading(src_model, output_dir, real_image_tensor):
-    print("\n=== Verifying Loaded Saved Model (Simulating User Usage) ===")
+    print("\n=== Verifying Loaded Saved Model (Simulating User Usage - bfloat16) ===")
     print(f"--> Loading from: {output_dir}")
 
     device = next(src_model.parameters()).device
+    print(f"    Using device from src_model: {device}")
 
     try:
         print("    Loading Image Processor (CLIP)...")
-        # 这里的 from_pretrained 会读取我们刚刚保存的 preprocessor_config.json
         image_processor = CLIPImageProcessor.from_pretrained(output_dir)
-        print(f"    Processor size: {image_processor.size}, Crop size: {image_processor.crop_size}")
+        print(f"    Processor config: {image_processor}")
 
-        print("    Loading Vision Tower (MLCDVisionModel)...")
-        vision_tower = MLCDVisionModel.from_pretrained(output_dir)
+        print("    Loading Vision Tower (MLCDVisionModel) with torch_dtype=bfloat16...")
+        # CRITICAL: 显式指定加载为 bfloat16
+        vision_tower = MLCDVisionModel.from_pretrained(output_dir, torch_dtype=torch.bfloat16)
         vision_tower.to(device)
         vision_tower.eval()
 
-        print("    ✅ Successfully loaded.")
+        print("    ✅ Successfully loaded and moved to device.")
 
     except Exception as e:
         print(f"    ❌ Failed to load model: {e}")
@@ -261,7 +307,9 @@ def verify_saved_model_loading(src_model, output_dir, real_image_tensor):
         return
 
     # Cosine Sim Check
-    input_tensor = real_image_tensor.to(device)
+    # CRITICAL: Input must be bfloat16
+    input_tensor = real_image_tensor.to(device, dtype=torch.bfloat16)
+
     with torch.no_grad():
         src_out = src_model(input_tensor)['visible_embeddings']
         tgt_out = vision_tower(pixel_values=input_tensor).last_hidden_state
@@ -269,10 +317,12 @@ def verify_saved_model_loading(src_model, output_dir, real_image_tensor):
     src_feat_flat = src_out.flatten(0, -2).float()
     tgt_feat_flat = tgt_out.flatten(0, -2).float()
     cos_sim = F.cosine_similarity(src_feat_flat, tgt_feat_flat, dim=-1)
-    min_cos = cos_sim.min().item()
 
-    print(f"    [Reloaded Model] Min Cosine Sim: {min_cos:.8f}")
-    if min_cos > 0.999:
+    min_cos = cos_sim.min().item()
+    mean_cos = cos_sim.mean().item() # Added Mean
+
+    print(f"    [Reloaded Model] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+    if min_cos > 0.99:
         print("    ✅ Reloaded Model Verification: PASS")
     else:
         print("    ❌ Reloaded Model Verification: FAIL")
@@ -285,6 +335,7 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
     print(f"Weights: {weight_path}")
     print(f"Output:  {output_dir}")
 
+    # 1. 创建 Source Model (默认 CPU)
     print("\n--> Creating Source Model...")
     src_model = timm.create_model(src_model_name, pretrained=False)
 
@@ -293,6 +344,7 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
     state_dict = checkpoint.get("model", checkpoint.get("state_dict", checkpoint))
     src_model.load_state_dict(state_dict, strict=False)
 
+    # 2. 创建 Target Model (默认 CPU)
     print("\n--> Creating Target Model...")
     tgt_model = timm.create_model(tgt_model_name, pretrained=False)
 
@@ -309,53 +361,54 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
     else:
         print("    Load OK (No critical missing keys).")
 
-    print("\n--> Fetching real image for verification...")
-    real_img = get_real_coco_image()
+    # 3. CRITICAL: 检测 CUDA 并移动模型，并转换为 bfloat16
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print(f"\n--> [CUDA DETECTED] Moving models to {device} and casting to bfloat16...")
+        # Convert both models to bfloat16
+        src_model.to(device, dtype=torch.bfloat16)
+        tgt_model.to(device, dtype=torch.bfloat16)
+    else:
+        device = torch.device("cpu")
+        print(f"\n--> [WARNING] CUDA not available. Flash Attention will FAIL. bfloat16 on CPU is slow.")
+        src_model.to(device, dtype=torch.bfloat16)
+        tgt_model.to(device, dtype=torch.bfloat16)
 
+
+    print("\n--> Fetching real image for verification (448x448)...")
+    real_img = get_real_coco_image(size=448)
+
+    # 验证内存中的模型
     verify_consistency(src_model, tgt_model, real_img)
+
+    # 验证视频 (会自动 resize 到 224)
     verify_consistency_video(src_model, tgt_model, real_img)
 
     if output_dir:
         print(f"\n--> Saving HF Model to {output_dir}...")
         if hasattr(tgt_model, "save_pretrained"):
+            # 模型本身已经是 bf16，save_pretrained 会保存为 bf16 (safetensors 默认支持)
             tgt_model.save_pretrained(output_dir)
 
-            # {
-            # "crop_size": 336,
-            # "do_center_crop": true,
-            # "do_normalize": true,
-            # "do_resize": true,
-            # "feature_extractor_type": "CLIPFeatureExtractor",
-            # "image_mean": [
-            #     0.48145466,
-            #     0.4578275,
-            #     0.40821073
-            # ],
-            # "image_std": [
-            #     0.26862954,
-            #     0.26130258,
-            #     0.27577711
-            # ],
-            # "resample": 3,
-            # "size": 336
-            # }
-
             # --- 保存 CLIPImageProcessor ---
-            print("    Saving CLIPImageProcessor config...")
+            print("    Saving CLIPImageProcessor config (CLIP Defaults + 448)...")
+
             processor = CLIPImageProcessor(
-                size={"height": 224, "width": 224}, # 显式指定分辨率
-                crop_size={"height": 224, "width": 224},
-                image_mean=[0.485, 0.456, 0.406],
-                image_std=[0.229, 0.224, 0.225],
-                rescale_factor=1/255,
-                do_rescale=True,
+                size=448,
+                crop_size=448,
+                image_mean=CLIP_MEAN,
+                image_std=CLIP_STD,
+                resample=3,
+                do_center_crop=True,
                 do_normalize=True,
                 do_resize=True,
-                do_center_crop=True
+                feature_extractor_type="CLIPFeatureExtractor"
             )
             processor.save_pretrained(output_dir)
 
-            print("✅ Model and CLIP Processor saved.")
+            print("✅ Model (bf16) and CLIP Processor saved.")
+
+            # 验证 Reload 后的模型
             verify_saved_model_loading(src_model, output_dir, real_img)
 
         else:
