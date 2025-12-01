@@ -352,6 +352,189 @@ with torch.no_grad():
 
 ---
 
+## Using `patch_positions` with Interpolated Temporal Positions
+
+When processing videos with the packing model, you may need to match the RoPE positions used by the source model. The source model uses a 64-frame temporal context and applies visible_index for uniform frame sampling. To achieve output consistency with the source model, you must use `compute_patch_positions_with_interpolated_temporal` to compute patch positions with interpolated temporal values.
+
+### Why Interpolated Temporal Positions?
+
+The source model (`vit_preview_v0`) expects a 64-frame video input and uses `visible_index` to select frames uniformly. When processing only 8 frames, the source model places these frames at interpolated positions within the 64-frame context:
+
+- **8 frames** → interpolated to positions `[0, 9, 18, 27, 36, 45, 54, 63]` in 64-frame context
+- This ensures temporal RoPE frequencies match between source and packing models
+
+### The `compute_patch_positions_with_interpolated_temporal` Function
+
+This function computes patch positions where the temporal positions are based on interpolated frame indices:
+
+```python
+def compute_patch_positions_with_interpolated_temporal(
+    interpolated_indices: torch.Tensor,
+    h_patches: int,
+    w_patches: int,
+    device: torch.device
+) -> torch.Tensor:
+    """
+    Compute patch positions with interpolated temporal positions for RoPE.
+    
+    Args:
+        interpolated_indices: [B, num_frames] Interpolated frame indices in 64-frame context
+        h_patches: Number of patches in height dimension
+        w_patches: Number of patches in width dimension
+        device: Target device
+    
+    Returns:
+        patch_positions: Tensor of shape (total_patches, 3) with [t, h, w] positions
+    """
+```
+
+### Complete 8-Frame Video Example with Interpolated Positions
+
+This is the recommended approach when you need output consistency with the source model:
+
+```python
+import torch
+from PIL import Image
+import torchvision.transforms as T
+from model_factory.vit_preview_v0_packing_hf import LlavaViTPackingModel
+from model_factory.convert_llava_vit_packing_to_hf import (
+    interpolate_frame_indices,
+    compute_patch_positions_with_interpolated_temporal,
+)
+
+# ============================================================
+# Configuration (8 frames, 224x224, patch_size=16)
+# ============================================================
+device = torch.device('cuda')
+num_frames = 8
+frame_size = 224
+patch_size = 16
+target_frames = 64  # Source model's temporal context
+h_patches = frame_size // patch_size  # 14
+w_patches = frame_size // patch_size  # 14
+
+# ============================================================
+# Step 1: Compute Interpolated Frame Indices
+# ============================================================
+# For 8 frames uniformly sampled, we compute their positions in 64-frame context
+frame_indices = torch.arange(num_frames).unsqueeze(0).to(device)  # [[0, 1, 2, 3, 4, 5, 6, 7]]
+total_frames_tensor = torch.tensor([num_frames]).to(device)  # [8]
+
+interpolated_indices = interpolate_frame_indices(
+    frame_indices, total_frames_tensor, target_frames
+)
+# Result: [[0, 9, 18, 27, 36, 45, 54, 63]]
+# These are the positions of 8 frames uniformly distributed in 64-frame context
+
+print(f"Original frame indices: {frame_indices[0].tolist()}")
+# [0, 1, 2, 3, 4, 5, 6, 7]
+
+print(f"Interpolated indices (in 64-frame context): {interpolated_indices[0].tolist()}")
+# [0, 9, 18, 27, 36, 45, 54, 63]
+
+# ============================================================
+# Step 2: Compute patch_positions with Interpolated Temporal Values
+# ============================================================
+patch_positions = compute_patch_positions_with_interpolated_temporal(
+    interpolated_indices, h_patches, w_patches, device=device
+)
+# Shape: (num_frames * h_patches * w_patches, 3) = (8 * 14 * 14, 3) = (1568, 3)
+# Each row: [t_interpolated, h, w]
+
+print(f"patch_positions shape: {patch_positions.shape}")
+# torch.Size([1568, 3])
+
+# Visualize first few positions (first frame at t=0)
+print(f"First 5 positions: {patch_positions[:5].tolist()}")
+# [[0, 0, 0], [0, 0, 1], [0, 0, 2], [0, 0, 3], [0, 0, 4]]
+
+# Visualize positions at frame boundary (t=0 -> t=9)
+print(f"Last position of frame 0: {patch_positions[195].tolist()}")  # [0, 13, 13]
+print(f"First position of frame 1: {patch_positions[196].tolist()}")  # [9, 0, 0]  <- t=9
+
+# ============================================================
+# Step 3: Prepare Video Frames and Hidden States
+# ============================================================
+# Load or create video frames
+transform = T.Compose([
+    T.Resize((frame_size, frame_size)),
+    T.ToTensor(),
+    T.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711]),
+])
+
+# Example: Create synthetic video frames
+video_frames = [Image.new('RGB', (frame_size, frame_size), color=(i*30, i*20, i*10)) 
+                for i in range(num_frames)]
+
+# Convert frames to patches
+all_patches = []
+for frame in video_frames:
+    pixel_tensor = transform(frame)  # (3, 224, 224)
+    channels = pixel_tensor.shape[0]
+    patches = pixel_tensor.view(channels, h_patches, patch_size, w_patches, patch_size)
+    patches = patches.permute(1, 3, 0, 2, 4).contiguous()  # (h, w, C, pH, pW)
+    frame_patches = patches.view(h_patches * w_patches, patch_size * patch_size * channels)
+    all_patches.append(frame_patches)
+
+hidden_states = torch.cat(all_patches, dim=0).to(device=device, dtype=torch.bfloat16)  # (1568, 768)
+
+# ============================================================
+# Step 4: Create grid_thw and Forward Pass
+# ============================================================
+# grid_thw uses actual frame count (8), not the interpolated context (64)
+grid_thw = torch.tensor([[num_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+# [[8, 14, 14]]
+
+print(f"hidden_states shape: {hidden_states.shape}")  # torch.Size([1568, 768])
+print(f"grid_thw: {grid_thw.tolist()}")  # [[8, 14, 14]]
+print(f"patch_positions shape: {patch_positions.shape}")  # torch.Size([1568, 3])
+
+# Load model and run forward pass
+# Replace with your converted model path (see "Weight Conversion" section below)
+model = LlavaViTPackingModel.from_pretrained("/path/to/your_model_hf_packing", torch_dtype=torch.bfloat16)
+model = model.to(device).eval()
+
+with torch.no_grad():
+    outputs = model(
+        hidden_states=hidden_states,
+        grid_thw=grid_thw,
+        patch_positions=patch_positions,  # <-- Critical: use interpolated positions
+    )
+
+print(f"Output shape: {outputs.last_hidden_state.shape}")  # torch.Size([1568, hidden_size])
+print(f"Pooler output shape: {outputs.pooler_output.shape}")  # torch.Size([1, hidden_size])
+```
+
+### Understanding the Interpolation Formula
+
+The `interpolate_frame_indices` function computes interpolated positions using:
+
+```python
+# Interpolation formula:
+# new_idx = (old_idx / (total_frames - 1)) * (target_frames - 1)
+
+# For 8 frames -> 64-frame context:
+# Frame 0: (0 / 7) * 63 = 0
+# Frame 1: (1 / 7) * 63 = 9
+# Frame 2: (2 / 7) * 63 = 18
+# Frame 3: (3 / 7) * 63 = 27
+# Frame 4: (4 / 7) * 63 = 36
+# Frame 5: (5 / 7) * 63 = 45
+# Frame 6: (6 / 7) * 63 = 54
+# Frame 7: (7 / 7) * 63 = 63
+```
+
+### Summary: When to Use Each Approach
+
+| Use Case | Function | Example |
+|----------|----------|---------|
+| Images (single frame) | `compute_patch_positions_from_grid_thw` | Standard image processing |
+| Videos (no source model matching needed) | `compute_patch_positions_from_grid_thw` | Simple video processing |
+| Videos (source model consistency) | `compute_patch_positions_with_interpolated_temporal` | When output must match source model |
+
+---
+
 ## Quick Start (Basic Usage)
 
 ```python
