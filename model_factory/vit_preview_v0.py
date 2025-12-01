@@ -261,6 +261,11 @@ class LlavaViTEncoder(nn.Module):
 
         # RoPE (full -> select)
         if patch_positions is not None:
+            # Validate patch_positions shape
+            if patch_positions.ndim != 2 or patch_positions.shape[1] != 3:
+                raise ValueError(
+                    f"patch_positions must have shape (num_patches, 3), got {patch_positions.shape}"
+                )
             # Use provided patch positions for RoPE calculation
             freqs_visible = self._compute_rope_from_positions(
                 patch_positions, visible_indices, device, tokens.dtype
