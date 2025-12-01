@@ -242,9 +242,7 @@ class VisionRotaryEmbedding(nn.Module):
             # the original ViT's temporal RoPE behavior where temporal interval
             # should not be 1 but rather t (e.g., for [8,14,14], interval is 8)
             # This means temporal positions are: 0, t, 2t, 3t, ... for each frame
-            t_ids = torch.arange(t, device=device).repeat_interleave(patches_per_frame)
-            # Scale temporal positions by the number of frames (t)
-            t_ids_scaled = t_ids * t
+            t_ids_scaled = torch.arange(t, device=device).repeat_interleave(patches_per_frame) * t
             h_base = torch.arange(h, device=device).repeat_interleave(w)
             h_ids = h_base.repeat(t)
             w_base = torch.arange(w, device=device).repeat(h)
