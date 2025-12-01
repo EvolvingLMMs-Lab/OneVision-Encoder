@@ -45,7 +45,27 @@ class HEVCViTVisionTower(nn.Module):
         self.is_loaded = True
 
     def feature_select(self, image_forward_outs):
-        return image_forward_outs.last_hidden_state
+        select_feature_type = self.select_feature
+
+        if self.select_feature in ["slicefour_patch", "slicefour_cls_patch"]:
+            select_every_k_layer = len(image_forward_outs.hidden_states) // 4
+            image_features = torch.cat([image_forward_outs.hidden_states[i] for i in range(select_every_k_layer + self.select_layer, len(image_forward_outs.hidden_states), select_every_k_layer)], dim=-1)
+            select_feature_type = select_feature_type.replace("slicefour_", "")
+        elif self.select_feature in ["slice_m25811_f6_patch", "slice_m25811_f6_cls_patch"]:
+            select_layers = [-2, -5, -8, -11, 6]
+            image_features = torch.cat([image_forward_outs.hidden_states[i] for i in select_layers], dim=-1)
+            select_feature_type = select_feature_type.replace("slice_m25811_f6_", "")
+        else:
+            # Use select_layer to pick a specific hidden state
+            # hidden_states is a tuple where the last element is the final layer output
+            # For select_layer=-1, we get last_hidden_state; for -2, we get second-to-last, etc.
+            image_features = image_forward_outs.hidden_states[self.select_layer]
+
+        # Note: HEVC ViT does not have a cls token, so we just return all patch features
+        # Both "patch" and "cls_patch" return the same features for HEVC ViT
+        if select_feature_type not in ["patch", "cls_patch"]:
+            raise ValueError(f"Unexpected select feature: {select_feature_type}")
+        return image_features
 
     def forward(self, images, return_spatial_dims=False):
         """
@@ -110,7 +130,12 @@ class HEVCViTVisionTower(nn.Module):
 
     @property
     def hidden_size(self):
-        return self.config.hidden_size
+        _hidden_size = self.config.hidden_size
+        if "slicefour" in self.select_feature:
+            _hidden_size *= 4
+        if "slice_m25811_f6" in self.select_feature:
+            _hidden_size *= 5
+        return _hidden_size
 
     @property
     def num_patches_per_side(self):
