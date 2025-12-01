@@ -78,7 +78,7 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --image_size 448 \
   --image_size_video 224 \
   --embedding_size 1024 \
-  --list_batch_sizes 16 4 \
+  --list_batch_sizes 16 16 \
   --lr 0.0001 \
   --warmup_ratio 0.001 \
   --list_datasets llava_vit_si_ssd configs_for_llava_vit_versions_0_0_2_add_pandas70M  \

@@ -125,9 +125,9 @@ parser.add_argument("--num_tokens_per_frame", type=int, default=196, help="Numbe
 # ---------------------------
 parser.add_argument("--enable_multi_frame", type=int, default=1,
                     help="Enable multi-frame training (0/1). When enabled, different ranks use different frame counts / 是否启用多帧混合训练")
-parser.add_argument("--multi_frame_list", nargs='+', type=int, default=[4, 8, 16, 32],
+parser.add_argument("--multi_frame_list", nargs='+', type=int, default=[8],
                     help="List of frame counts to use in multi-frame training / 多帧训练时使用的帧数列表")
-parser.add_argument("--base_num_frames", type=int, default=32,
+parser.add_argument("--base_num_frames", type=int, default=8,
                     help="Base frame count for batch size calculation. Batch size is inversely proportional: bs = base_bs * (base_num_frames / actual_num_frames) / 用于计算batch size的基准帧数")
 
 args = parser.parse_args()
@@ -422,7 +422,8 @@ def main():
                 data_csv_path=dataset_config.prefixes[0],
                 mode="train",
                 dali_num_threads=2,
-                dali_py_num_workers=8,
+                dali_py_num_workers=4 // frame_scale_factor,
+                decord_num_threads=frame_scale_factor,
                 batch_size=args.list_batch_sizes_adjusted[head_id],
                 input_size=args.image_size_video[0],
                 sequence_length=args.actual_num_frames,

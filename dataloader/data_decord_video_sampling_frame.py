@@ -228,7 +228,7 @@ def get_dali_dataloader(
     pipe = dali_video_pipeline(
         batch_size=batch_size, num_threads=dali_num_threads, device_id=local_rank,
         seed=seed + rank, py_num_workers=dali_py_num_workers, py_start_method="forkserver",
-        prefetch_queue_depth=2, mode=mode, source_params=source_params,
+        prefetch_queue_depth=8, mode=mode, source_params=source_params,
     )
     pipe.build()
 
