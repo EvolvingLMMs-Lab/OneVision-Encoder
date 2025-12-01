@@ -233,16 +233,119 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             print("    ❌ Packing Head:    FAIL")
 
 
-def verify_video_consistency_packing(src_model, packing_model, num_frames=8, image_size=224):
+def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
+    """
+    Interpolate frame indices from original video frame count to target frame count.
+
+    Args:
+        frame_indices: [B, seq_len] Original frame indices
+        total_frames: [B] Total frames for each video
+        target_frames: Target frame count (default 64)
+
+    Returns:
+        interpolated_indices: [B, seq_len] Interpolated frame indices in range [0, target_frames-1]
+    """
+    bs, seq_len = frame_indices.shape
+    device = frame_indices.device
+
+    total_frames_float = total_frames.float().view(bs, 1)
+    frame_indices_float = frame_indices.float()
+
+    # Interpolation formula: new_idx = (old_idx / (total_frames - 1)) * (target_frames - 1)
+    # Handle total_frames = 1 case
+    total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
+    interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
+
+    # Round and convert to integer
+    interpolated_indices = torch.round(interpolated_indices).long()
+
+    # Ensure indices are in valid range
+    interpolated_indices = torch.clamp(interpolated_indices, 0, target_frames - 1)
+
+    return interpolated_indices
+
+
+def get_synthesized_video(real_image_tensor, num_frames=8, size=224):
+    """
+    Create a synthesized video by stacking the real image multiple times.
+    
+    Args:
+        real_image_tensor: Real image tensor of shape (1, C, H, W)
+        num_frames: Number of frames to create
+        size: Target size for each frame
+    
+    Returns:
+        video_tensor: Synthesized video tensor of shape (1, C, T, H, W)
+    """
+    # Resize the image to target size if needed
+    if real_image_tensor.shape[-1] != size or real_image_tensor.shape[-2] != size:
+        real_image_tensor = F.interpolate(
+            real_image_tensor.float(), 
+            size=(size, size), 
+            mode='bicubic', 
+            align_corners=False
+        )
+    
+    # Stack the image to create video frames: (1, C, H, W) -> (1, C, T, H, W)
+    video_tensor = real_image_tensor.unsqueeze(2).repeat(1, 1, num_frames, 1, 1)
+    
+    return video_tensor
+
+
+def compute_patch_positions_with_interpolated_temporal(
+    interpolated_indices: torch.Tensor,
+    h_patches: int,
+    w_patches: int,
+    device: torch.device
+) -> torch.Tensor:
+    """
+    Compute patch positions with interpolated temporal positions for RoPE.
+    
+    This function computes patch positions where the temporal positions are
+    based on the interpolated frame indices, matching the src_model's RoPE
+    positions when using visible_index.
+    
+    Args:
+        interpolated_indices: [B, num_frames] Interpolated frame indices in 64-frame context
+        h_patches: Number of patches in height dimension
+        w_patches: Number of patches in width dimension
+        device: Target device
+    
+    Returns:
+        patch_positions: Tensor of shape (total_patches, 3) with [t, h, w] positions
+    """
+    bs, num_frames = interpolated_indices.shape
+    patches_per_frame = h_patches * w_patches
+    
+    positions = []
+    for b in range(bs):
+        for frame_idx in range(num_frames):
+            # Get the interpolated temporal position (in 64-frame context)
+            t_pos = interpolated_indices[b, frame_idx].item()
+            
+            # Generate spatial positions for this frame
+            for h in range(h_patches):
+                for w in range(w_patches):
+                    positions.append([t_pos, h, w])
+    
+    return torch.tensor(positions, dtype=torch.long, device=device)
+
+
+def verify_video_consistency_packing(src_model, packing_model, real_image_tensor, num_frames=8, image_size=224):
     """
     Verify consistency between the source model and the packing model with video input.
 
     This function tests that the packing model produces consistent outputs with the
     original source model when processing video input (multiple frames).
     
+    The src_model requires 64 frames input with visible_index for uniform frame sampling.
+    The packing model receives the actual frames but with RoPE positions matching the
+    src_model's interpolated positions in the 64-frame context.
+    
     Args:
         src_model: The source ViT model
         packing_model: The packing HF model
+        real_image_tensor: Real image tensor for creating synthesized video
         num_frames: Number of video frames to test (default: 8)
         image_size: Size of each frame (default: 224)
     """
@@ -267,20 +370,50 @@ def verify_video_consistency_packing(src_model, packing_model, num_frames=8, ima
     channels = 3
     h_patches = image_size // patch_size
     w_patches = image_size // patch_size
-    t_frames = num_frames
+    frame_tokens = h_patches * w_patches
+    target_frames = 64  # src_model expects 64-frame context
+    
+    bs = 1
 
-    # Create random video input tensor (B=1, C, T, H, W)
-    video_tensor = torch.randn(1, channels, t_frames, image_size, image_size, device=device, dtype=torch.bfloat16)
+    # Create synthesized video from real image instead of random tensor
+    video_tensor = get_synthesized_video(real_image_tensor, num_frames=num_frames, size=image_size)
+    video_tensor = video_tensor.to(device, dtype=torch.bfloat16)
     print(f"    Video Input Shape: {video_tensor.shape} (B, C, T, H, W)")
-    print(f"    grid_thw: [{t_frames}, {h_patches}, {w_patches}]")
 
-    # Create grid_thw tensor
-    grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+    # Compute interpolated frame indices for 64-frame context
+    frame_indices = torch.arange(num_frames).unsqueeze(0).to(device)  # [1, 8]
+    total_frames_tensor = torch.tensor([num_frames]).to(device)  # [1]
+    interpolated_indices = interpolate_frame_indices(
+        frame_indices, total_frames_tensor, target_frames
+    )  # [1, 8] - indices in 64-frame context
+    
+    print(f"    Original frame indices: {frame_indices[0].tolist()}")
+    print(f"    Interpolated indices (in 64-frame context): {interpolated_indices[0].tolist()}")
 
     with torch.no_grad():
-        # Source model forward - expects (B, C, T, H, W) input
+        # === Source model forward ===
+        # Create 64-frame padded video and use visible_index
         try:
-            src_out = src_model(video_tensor)
+            # Create padded video with 64 frames
+            padded_videos = torch.zeros(bs, channels, target_frames, image_size, image_size, 
+                                        device=device, dtype=video_tensor.dtype)
+            
+            # Scatter original frames into interpolated positions
+            seq_len = frame_indices.shape[1]
+            frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(
+                bs, channels, seq_len, image_size, image_size
+            )
+            padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=video_tensor)
+            
+            # Compute visible_index for the uniformly sampled frames
+            per = torch.arange(frame_tokens, device=device)
+            visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
+            visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
+            
+            print(f"    Padded video shape: {padded_videos.shape}")
+            print(f"    visible_index shape: {visible_index.shape}")
+            
+            src_out = src_model(padded_videos, visible_indices=visible_index, mask_ratio=None)
             if isinstance(src_out, dict):
                 src_feat = src_out.get('visible_embeddings')
                 src_head = src_out.get('head_output')
@@ -293,27 +426,32 @@ def verify_video_consistency_packing(src_model, packing_model, num_frames=8, ima
             traceback.print_exc()
             return
 
-        # Packing model forward - expects input in [seq_len, patch_dim] format
+        # === Packing model forward ===
+        # Use actual frames but with RoPE positions matching the interpolated indices
         try:
             # Reshape video to patches: (B, C, T, H, W) -> (seq_len, patch_dim)
-            bs = video_tensor.shape[0]
-            
-            # Reshape to (B, C, T, h_patches, patch_size, w_patches, patch_size)
             patches = video_tensor.view(
-                bs, channels, t_frames, h_patches, patch_size, w_patches, patch_size
+                bs, channels, num_frames, h_patches, patch_size, w_patches, patch_size
             )
             # Permute to (B, T, h_patches, w_patches, C, patch_size, patch_size)
             patches = patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
             # Reshape to (B * T * h_patches * w_patches, C * patch_size * patch_size)
-            seq_len = bs * t_frames * h_patches * w_patches
+            total_seq_len = bs * num_frames * h_patches * w_patches
             patch_dim = patch_size * patch_size * channels
-            hidden_states = patches.view(seq_len, patch_dim)
+            hidden_states = patches.view(total_seq_len, patch_dim)
             
-            # Compute patch_positions from grid_thw for RoPE calculation
-            patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
+            # Compute patch_positions with interpolated temporal positions
+            # This ensures RoPE positions match the src_model
+            patch_positions = compute_patch_positions_with_interpolated_temporal(
+                interpolated_indices, h_patches, w_patches, device
+            )
             
-            print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
+            # Create grid_thw for the actual frames
+            grid_thw = torch.tensor([[num_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+            
+            print(f"    Packing input shape: {hidden_states.shape} (seq_len={total_seq_len}, patch_dim={patch_dim})")
             print(f"    patch_positions shape: {patch_positions.shape}")
+            print(f"    grid_thw: {grid_thw.tolist()}")
             
             packing_out = packing_model(
                 hidden_states=hidden_states,
@@ -515,7 +653,7 @@ def convert_and_save_packing(src_model_name, tgt_model_name, weight_path, output
     verify_consistency_packing(src_model, tgt_model, real_img)
 
     # 验证 Packing 模型一致性 (多帧视频)
-    verify_video_consistency_packing(src_model, tgt_model, num_frames=8, image_size=224)
+    verify_video_consistency_packing(src_model, tgt_model, real_img, num_frames=8, image_size=224)
 
     if output_dir:
         print(f"\n--> Saving HF Packing Model to {output_dir}...")
