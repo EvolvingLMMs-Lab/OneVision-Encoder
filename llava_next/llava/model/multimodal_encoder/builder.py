@@ -14,7 +14,7 @@ def build_vision_tower(vision_tower_cfg, **kwargs):
     use_s2 = getattr(vision_tower_cfg, "s2", False)
 
     # 1. HEVC-ViT (Your New Model) - 优先匹配
-    if "hevc_vit_hf" in vision_tower.lower():
+    if "hevc_vit" in vision_tower.lower():
         return HEVCViTVisionTower(vision_tower, args=vision_tower_cfg, **kwargs)
 
     # 2. MLCD Vision Towers
