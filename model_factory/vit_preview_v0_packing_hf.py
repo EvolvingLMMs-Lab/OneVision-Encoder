@@ -15,7 +15,7 @@
 """PyTorch Llava ViT Packing model with grid_thw support (similar to Qwen2VL).
 
 This model requires FlashAttention 2 and accepts input in [seq_len, patch_dim] format
-where patch_dim = temporal_patch_size * patch_size * patch_size * in_channels,
+where patch_dim = patch_size * patch_size * in_channels,
 like Qwen2VL for efficient variable-length sequence processing.
 """
 
@@ -289,23 +289,24 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
 class LlavaViTPackingPatchEmbed(nn.Module):
     """Patch embedding layer for packing model (Qwen2VL style).
     
-    Input: (seq_len, temporal_patch_size * patch_size * patch_size * in_channels)
+    Input: (seq_len, patch_size * patch_size * in_channels)
     Output: (seq_len, hidden_size)
+    
+    Note: Uses Conv2d for compatibility with vit_preview_v0_hf weights.
     """
 
     def __init__(self, config: LlavaViTPackingConfig):
         super().__init__()
         self.patch_size = config.patch_size
-        self.temporal_patch_size = config.temporal_patch_size
         self.in_channels = config.num_channels
         self.embed_dim = config.hidden_size
 
-        kernel_size = [config.temporal_patch_size, config.patch_size, config.patch_size]
-        self.proj = nn.Conv3d(
+        # Use Conv2d for compatibility with vit_preview_v0_hf weights
+        self.proj = nn.Conv2d(
             config.num_channels,
             config.hidden_size,
-            kernel_size=kernel_size,
-            stride=kernel_size,
+            kernel_size=config.patch_size,
+            stride=config.patch_size,
             bias=False,
         )
 
@@ -314,15 +315,15 @@ class LlavaViTPackingPatchEmbed(nn.Module):
 
         Args:
             hidden_states: Flattened pixel values of shape 
-                (seq_len, temporal_patch_size * patch_size * patch_size * in_channels)
+                (seq_len, patch_size * patch_size * in_channels)
 
         Returns:
             Patch embeddings of shape (seq_len, hidden_size)
         """
         target_dtype = self.proj.weight.dtype
-        # Reshape to (seq_len, in_channels, temporal_patch_size, patch_size, patch_size)
+        # Reshape to (seq_len, in_channels, patch_size, patch_size)
         hidden_states = hidden_states.view(
-            -1, self.in_channels, self.temporal_patch_size, self.patch_size, self.patch_size
+            -1, self.in_channels, self.patch_size, self.patch_size
         )
         hidden_states = self.proj(hidden_states.to(dtype=target_dtype)).view(-1, self.embed_dim)
         return hidden_states
@@ -497,7 +498,7 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
     """Llava ViT Model with packing support using grid_thw (Qwen2VL style).
 
     This model requires FlashAttention and accepts input in 
-    [seq_len, patch_dim] format where patch_dim = temporal_patch_size * patch_size * patch_size * in_channels,
+    [seq_len, patch_dim] format where patch_dim = patch_size * patch_size * in_channels,
     similar to Qwen2VL approach.
     """
 
@@ -533,7 +534,7 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
         Args:
             hidden_states: Flattened pixel values of shape (seq_len, patch_dim)
                 where seq_len = sum(t*h*w for all images in batch)
-                and patch_dim = temporal_patch_size * patch_size * patch_size * in_channels.
+                and patch_dim = patch_size * patch_size * in_channels.
             grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image,
                 where h and w are the number of patches (not pixels).
 
@@ -713,19 +714,18 @@ if __name__ == "__main__":
 
     # Create test input in [seq_len, patch_dim] format (Qwen2VL style)
     # Simulating 1 image with 14x14 = 196 patches
-    # patch_dim = temporal_patch_size * patch_size * patch_size * in_channels
-    # For base model: patch_size=16, temporal_patch_size=1, in_channels=3
+    # patch_dim = patch_size * patch_size * in_channels
+    # For base model: patch_size=16, in_channels=3
     patch_size = 16
-    temporal_patch_size = 1
     in_channels = 3
-    patch_dim = temporal_patch_size * patch_size * patch_size * in_channels  # 1*16*16*3 = 768
+    patch_dim = patch_size * patch_size * in_channels  # 16*16*3 = 768
     seq_len = 14 * 14  # 196 patches for a single image
     
     grid_thw = torch.tensor([[1, 14, 14]], dtype=torch.long)
     hidden_states = torch.randn(seq_len, patch_dim)  # (seq_len, patch_dim)
 
     print(f"Input shape: {hidden_states.shape}")
-    print(f"patch_dim = {temporal_patch_size}*{patch_size}*{patch_size}*{in_channels} = {patch_dim}")
+    print(f"patch_dim = {patch_size}*{patch_size}*{in_channels} = {patch_dim}")
     print(f"grid_thw: {grid_thw}")
 
     # Forward pass (requires CUDA for FlashAttention)
