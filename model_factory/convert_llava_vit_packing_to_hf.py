@@ -58,9 +58,8 @@ def remap_state_dict_packing(src_state_dict):
     Remap state dict from source model to packing model format.
     The packing model uses a slightly different architecture with combined QKV projection.
     
-    Note: The packing model has a patch_embed layer with Conv3d that maps to the source
-    model's conv1 (Conv2d). The weights need to be reshaped: 
-    Conv2d (out, in, H, W) -> Conv3d (out, in, T, H, W) where T=1.
+    Note: The packing model has a patch_embed layer with Conv2d that maps directly to the 
+    source model's conv1 (Conv2d). No weight reshaping is needed.
     """
     print("[Remap Packing] Starting state dict remapping for packing model...")
     new_dict = {}
@@ -68,12 +67,8 @@ def remap_state_dict_packing(src_state_dict):
     for k, v in src_state_dict.items():
         new_k = k
         if k.startswith("conv1."):
-            # conv1 -> patch_embed.proj (Conv2d -> Conv3d)
+            # conv1 -> patch_embed.proj (both are Conv2d, no reshaping needed)
             new_k = k.replace("conv1.", "patch_embed.proj.")
-            if k == "conv1.weight":
-                # Reshape Conv2d weight to Conv3d: (out, in, H, W) -> (out, in, 1, H, W)
-                v = v.unsqueeze(2)
-                print(f"    [Reshape] {k} -> {new_k}: {v.shape}")
         elif k.startswith("ln_pre."):
             new_k = k.replace("ln_pre.", "layernorm_pre.")
         elif k.startswith("ln_post."):
@@ -134,7 +129,6 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
     h_patches = height // patch_size
     w_patches = width // patch_size
     t_frames = 1
-    temporal_patch_size = 1
 
     # Create grid_thw tensor
     grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
@@ -157,7 +151,7 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             return
 
         # Packing model forward - expects input in [seq_len, patch_dim] format
-        # where patch_dim = temporal_patch_size * patch_size * patch_size * in_channels
+        # where patch_dim = patch_size * patch_size * in_channels
         try:
             # Reshape image to patches: (B, C, H, W) -> (seq_len, patch_dim)
             # First reshape to (B, C, h_patches, patch_size, w_patches, patch_size)
@@ -168,7 +162,7 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             patches = patches.permute(0, 2, 4, 1, 3, 5).contiguous()
             # Reshape to (B * h_patches * w_patches, C * patch_size * patch_size)
             seq_len = bs * t_frames * h_patches * w_patches
-            patch_dim = temporal_patch_size * patch_size * patch_size * channels
+            patch_dim = patch_size * patch_size * channels
             hidden_states = patches.view(seq_len, patch_dim)
             
             print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
@@ -268,7 +262,6 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
     h_patches = height // patch_size
     w_patches = width // patch_size
     t_frames = 1
-    temporal_patch_size = 1
 
     # Create grid_thw tensor
     grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
@@ -283,7 +276,7 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
         )
         patches = patches.permute(0, 2, 4, 1, 3, 5).contiguous()
         seq_len = bs * t_frames * h_patches * w_patches
-        patch_dim = temporal_patch_size * patch_size * patch_size * channels
+        patch_dim = patch_size * patch_size * channels
         hidden_states = patches.view(seq_len, patch_dim)
         
         tgt_out = vision_tower(hidden_states=hidden_states, grid_thw=grid_thw).last_hidden_state
