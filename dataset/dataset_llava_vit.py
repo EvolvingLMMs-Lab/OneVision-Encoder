@@ -277,6 +277,30 @@ def configs_for_llava_vit_versions_0_0_2_add_pandas70M():
         dali_type="decord",
     )
 
+
+@DATASET_REGISTRY.register()
+def configs_for_llava_vit_versions_0_0_2_add_pandas70M_split_80():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
+    assert world_size <= 80
+
+    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_split_80/part_{rank:03d}"
+    # with open(list_mp4_label, "r", encoding="utf-8") as f:
+        # lines = f.readlines()
+
+    # lines = [x.strip().split(",")[0] for x in lines]
+    return Property(
+        name="configs_for_llava_vit_versions_0_0_2_add_pandas70M",
+        prefixes=[list_mp4_label_path],
+        num_classes=400000,
+        num_examples=116693632 // world_size,
+        num_shards=1,
+        shard_id=0,
+        dali_type="decord",
+    )
+
 @DATASET_REGISTRY.register()
 def fake_data():
     rank = int(os.getenv("RANK", "0"))

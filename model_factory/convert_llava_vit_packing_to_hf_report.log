@@ -1,0 +1,139 @@
+=== Packing Model Conversion Task ===
+Source:  llava_vit_large_ln
+Target:  hf_llava_vit_packing_large_ln
+Weights: /video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone.pt
+Output:  test
+
+--> Creating Source Model...
+--> Loading weights into Source...
+
+--> Creating Packing Target Model...
+--> Remapping State Dict for Packing Model...
+[Remap Packing] Starting state dict remapping for packing model...
+--> Loading weights into Packing Target...
+    Load OK (No critical missing keys).
+
+--> [CUDA DETECTED] Moving models to cuda and casting to bfloat16...
+
+--> Fetching real image for verification (448x448)...
+--> Downloading real image from http://images.cocodataset.org/val2017/000000039769.jpg (Target Size: 448)...
+[Error] Failed to download image: 503 Server Error: Service Unavailable for url: http://images.cocodataset.org/val2017/000000039769.jpg. Generating random noise as fallback.
+
+=== Verifying Consistency with Packing Model (grid_thw input - bfloat16) ===
+    Running on Device: cuda:0
+    Model Dtype: torch.bfloat16
+    Input Shape: torch.Size([1, 3, 448, 448]) | Dtype: torch.bfloat16
+    grid_thw: tensor([[ 1, 32, 32]], device='cuda:0')
+    Packing input shape: torch.Size([1024, 588]) (seq_len=1024, patch_dim=588)
+    patch_positions shape: torch.Size([1024, 3])
+    [Packing Feature] Max Diff:       1.476562
+    [Packing Feature] Min Cosine Sim: 0.48367622 (Mean: 0.99895400)
+    ❌ Packing Feature: FAIL
+    [Packing Head]    Max Diff:       0.015625
+    [Packing Head]    Min Cosine Sim: 0.99998009 (Mean: 0.99998009)
+    ✅ Packing Head:    PASS
+
+=== Verifying Video Consistency with Packing Model (8 frames - bfloat16) ===
+    Running on Device: cuda:0
+    Model Dtype: torch.bfloat16
+    Video Input Shape: torch.Size([1, 3, 8, 224, 224]) (B, C, T, H, W)
+    Original frame indices: [0, 1, 2, 3, 4, 5, 6, 7]
+    Interpolated indices (in 64-frame context): [0, 9, 18, 27, 36, 45, 54, 63]
+    Padded video shape: torch.Size([1, 3, 64, 224, 224])
+    visible_index shape: torch.Size([1, 2048])
+    Packing input shape: torch.Size([2048, 588]) (seq_len=2048, patch_dim=588)
+    patch_positions shape: torch.Size([2048, 3])
+    grid_thw: [[8, 16, 16]]
+    [Video Packing Feature] Max Diff:       2.908203
+    [Video Packing Feature] Min Cosine Sim: 0.50159657 (Mean: 0.99689561)
+    ❌ Video Packing Feature: FAIL
+    [Video Packing Head]    Max Diff:       0.015625
+    [Video Packing Head]    Min Cosine Sim: 0.99998474 (Mean: 0.99998474)
+    ✅ Video Packing Head:    PASS
+
+=== Verifying Mixed Video+Image Consistency with Packing Model (8 frames + image - bfloat16) ===
+    Running on Device: cuda:0
+    Model Dtype: torch.bfloat16
+    Video Input Shape: torch.Size([1, 3, 8, 224, 224]) (B, C, T, H, W)
+    Video original frame indices: [0, 1, 2, 3, 4, 5, 6, 7]
+    Video interpolated indices (in 64-frame context): [0, 9, 18, 27, 36, 45, 54, 63]
+    Image Input Shape: torch.Size([1, 3, 448, 448]) (B, C, H, W)
+    Video padded shape: torch.Size([1, 3, 64, 224, 224])
+    Video visible_index shape: torch.Size([1, 2048])
+    Source image output shape: torch.Size([1, 1024, 1024])
+    Combined input shape: torch.Size([3072, 588])
+    Combined patch_positions shape: torch.Size([3072, 3])
+    Combined grid_thw: [[8, 16, 16], [1, 32, 32]]
+    Packing video output shape: torch.Size([2048, 1024])
+    Packing image output shape: torch.Size([1024, 1024])
+
+    --- Video Comparison ---
+    [Mixed Video Feature] Max Diff:       2.908203
+    [Mixed Video Feature] Min Cosine Sim: 0.50159657 (Mean: 0.99689561)
+    ❌ Mixed Video Feature: FAIL
+
+    --- Image Comparison ---
+    [Mixed Image Feature] Max Diff:       1.464844
+    [Mixed Image Feature] Min Cosine Sim: 0.48569450 (Mean: 0.99890298)
+    ❌ Mixed Image Feature: FAIL
+
+    --- Mixed Video+Image Overall Summary ---
+    ❌ Mixed Video+Image Consistency: SOME FAILED
+
+--> Saving HF Packing Model to test...
+    Saving CLIPImageProcessor config (CLIP Defaults + 448)...
+✅ Packing Model (bf16) and CLIP Processor saved.
+
+=== Verifying Loaded Saved Packing Model (Simulating User Usage - bfloat16) ===
+--> Loading from: test
+    Using device from src_model: cuda:0
+    Loading Image Processor (CLIP)...
+    Processor config: CLIPImageProcessor {
+  "crop_size": {
+    "height": 448,
+    "width": 448
+  },
+  "do_center_crop": true,
+  "do_convert_rgb": true,
+  "do_normalize": true,
+  "do_rescale": true,
+  "do_resize": true,
+  "image_mean": [
+    0.48145466,
+    0.4578275,
+    0.40821073
+  ],
+  "image_processor_type": "CLIPImageProcessor",
+  "image_std": [
+    0.26862954,
+    0.26130258,
+    0.27577711
+  ],
+  "resample": 3,
+  "rescale_factor": 0.00392156862745098,
+  "size": {
+    "shortest_edge": 448
+  }
+}
+
+    Loading Vision Tower (LlavaViTPackingModel) with torch_dtype=bfloat16...
+    ✅ Successfully loaded and moved to device.
+
+    --- Image Test (Single Frame) ---
+    Image grid_thw: [[1, 32, 32]]
+    patch_positions shape: torch.Size([1024, 3])
+    [Reloaded Image] Min Cosine Sim: 0.42824179 (Mean: 0.99825776)
+    ❌ Reloaded Image Verification: FAIL
+
+    --- Video Test (8 Frames) ---
+    Video shape: torch.Size([1, 3, 8, 224, 224]) (B, C, T, H, W)
+    Original frame indices: [0, 1, 2, 3, 4, 5, 6, 7]
+    Interpolated indices (in 64-frame context): [0, 9, 18, 27, 36, 45, 54, 63]
+    Packing input shape: torch.Size([2048, 588])
+    patch_positions shape: torch.Size([2048, 3])
+    grid_thw: [[8, 16, 16]]
+    [Reloaded Video] Min Cosine Sim: 0.46710312 (Mean: 0.99750632)
+    ❌ Reloaded Video Verification: FAIL
+
+    --- Overall Summary ---
+    ❌ Reloaded Packing Model (Image + Video): SOME FAILED
