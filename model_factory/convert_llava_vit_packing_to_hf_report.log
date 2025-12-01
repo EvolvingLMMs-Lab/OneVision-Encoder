@@ -17,7 +17,6 @@ Output:  test
 
 --> Fetching real image for verification (448x448)...
 --> Downloading real image from http://images.cocodataset.org/val2017/000000039769.jpg (Target Size: 448)...
-[Error] Failed to download image: 503 Server Error: Service Unavailable for url: http://images.cocodataset.org/val2017/000000039769.jpg. Generating random noise as fallback.
 
 === Verifying Consistency with Packing Model (grid_thw input - bfloat16) ===
     Running on Device: cuda:0
@@ -26,11 +25,11 @@ Output:  test
     grid_thw: tensor([[ 1, 32, 32]], device='cuda:0')
     Packing input shape: torch.Size([1024, 588]) (seq_len=1024, patch_dim=588)
     patch_positions shape: torch.Size([1024, 3])
-    [Packing Feature] Max Diff:       1.476562
-    [Packing Feature] Min Cosine Sim: 0.48367622 (Mean: 0.99895400)
+    [Packing Feature] Max Diff:       1.332031
+    [Packing Feature] Min Cosine Sim: 0.84566748 (Mean: 0.99936903)
     ❌ Packing Feature: FAIL
-    [Packing Head]    Max Diff:       0.015625
-    [Packing Head]    Min Cosine Sim: 0.99998009 (Mean: 0.99998009)
+    [Packing Head]    Max Diff:       0.007812
+    [Packing Head]    Min Cosine Sim: 0.99997479 (Mean: 0.99997479)
     ✅ Packing Head:    PASS
 
 === Verifying Video Consistency with Packing Model (8 frames - bfloat16) ===
@@ -44,11 +43,11 @@ Output:  test
     Packing input shape: torch.Size([2048, 588]) (seq_len=2048, patch_dim=588)
     patch_positions shape: torch.Size([2048, 3])
     grid_thw: [[8, 16, 16]]
-    [Video Packing Feature] Max Diff:       2.908203
-    [Video Packing Feature] Min Cosine Sim: 0.50159657 (Mean: 0.99689561)
+    [Video Packing Feature] Max Diff:       3.664062
+    [Video Packing Feature] Min Cosine Sim: -0.14894648 (Mean: 0.99261725)
     ❌ Video Packing Feature: FAIL
-    [Video Packing Head]    Max Diff:       0.015625
-    [Video Packing Head]    Min Cosine Sim: 0.99998474 (Mean: 0.99998474)
+    [Video Packing Head]    Max Diff:       0.011719
+    [Video Packing Head]    Min Cosine Sim: 0.99996501 (Mean: 0.99996501)
     ✅ Video Packing Head:    PASS
 
 === Verifying Mixed Video+Image Consistency with Packing Model (8 frames + image - bfloat16) ===
@@ -68,17 +67,73 @@ Output:  test
     Packing image output shape: torch.Size([1024, 1024])
 
     --- Video Comparison ---
-    [Mixed Video Feature] Max Diff:       2.908203
-    [Mixed Video Feature] Min Cosine Sim: 0.50159657 (Mean: 0.99689561)
+    [Mixed Video Feature] Max Diff:       3.664062
+    [Mixed Video Feature] Min Cosine Sim: -0.14894648 (Mean: 0.99261725)
     ❌ Mixed Video Feature: FAIL
 
     --- Image Comparison ---
-    [Mixed Image Feature] Max Diff:       1.464844
-    [Mixed Image Feature] Min Cosine Sim: 0.48569450 (Mean: 0.99890298)
+    [Mixed Image Feature] Max Diff:       0.351562
+    [Mixed Image Feature] Min Cosine Sim: 0.95027447 (Mean: 0.99950600)
     ❌ Mixed Image Feature: FAIL
 
     --- Mixed Video+Image Overall Summary ---
     ❌ Mixed Video+Image Consistency: SOME FAILED
+
+=== Verifying Multi-Sample Consistency (3 images + 2 videos - bfloat16) ===
+    Image resolutions: 224, 336, 1080
+    Video resolutions: 378 (8 frames), 518 (8 frames)
+    Running on Device: cuda:0
+    Model Dtype: torch.bfloat16
+    Original image sizes: [224, 336, 1008]
+    Original video sizes: [378, 518]
+    Adjusted image sizes (divisible by 14): [224, 336, 1008]
+    Adjusted video sizes (divisible by 14): [378, 518]
+    Image 1 Shape: torch.Size([1, 3, 224, 224]) (res=224, adjusted=224)
+    Image 2 Shape: torch.Size([1, 3, 336, 336]) (res=336, adjusted=336)
+    Image 3 Shape: torch.Size([1, 3, 1008, 1008]) (res=1008, adjusted=1008)
+    Video 1 Shape: torch.Size([1, 3, 8, 378, 378]) (res=378, adjusted=378)
+    Video 2 Shape: torch.Size([1, 3, 8, 518, 518]) (res=518, adjusted=518)
+    Source image 1 output shape: torch.Size([1, 256, 1024])
+    Source image 2 output shape: torch.Size([1, 576, 1024])
+    Source image 3 output shape: torch.Size([1, 5184, 1024])
+    Source video 1 output shape: torch.Size([1, 5832, 1024])
+    Source video 2 output shape: torch.Size([1, 10952, 1024])
+    Combined input shape: torch.Size([22800, 588])
+    Combined patch_positions shape: torch.Size([22800, 3])
+    Combined grid_thw: [[1, 16, 16], [1, 24, 24], [1, 72, 72], [8, 27, 27], [8, 37, 37]]
+    Packing image 1 output shape: torch.Size([256, 1024])
+    Packing image 2 output shape: torch.Size([576, 1024])
+    Packing image 3 output shape: torch.Size([5184, 1024])
+    Packing video 1 output shape: torch.Size([5832, 1024])
+    Packing video 2 output shape: torch.Size([10952, 1024])
+
+    --- Image 1 Comparison (res=224) ---
+    [Image 1] Max Diff:       2.222656
+    [Image 1] Min Cosine Sim: 0.56475443 (Mean: 0.99659854)
+    ❌ Image 1: FAIL
+
+    --- Image 2 Comparison (res=336) ---
+    [Image 2] Max Diff:       0.210938
+    [Image 2] Min Cosine Sim: 0.98896676 (Mean: 0.99956787)
+    ❌ Image 2: FAIL
+
+    --- Image 3 Comparison (res=1008) ---
+    [Image 3] Max Diff:       4.140625
+    [Image 3] Min Cosine Sim: -0.14622325 (Mean: 0.99286079)
+    ❌ Image 3: FAIL
+
+    --- Video 1 Comparison (res=378) ---
+    [Video 1] Max Diff:       2.566406
+    [Video 1] Min Cosine Sim: -0.05048360 (Mean: 0.99751592)
+    ❌ Video 1: FAIL
+
+    --- Video 2 Comparison (res=518) ---
+    [Video 2] Max Diff:       2.791016
+    [Video 2] Min Cosine Sim: -0.06705524 (Mean: 0.99796063)
+    ❌ Video 2: FAIL
+
+    --- Multi-Sample Overall Summary ---
+    ❌ Multi-Sample Consistency (3 images + 2 videos): SOME FAILED
 
 --> Saving HF Packing Model to test...
     Saving CLIPImageProcessor config (CLIP Defaults + 448)...
@@ -122,7 +177,7 @@ Output:  test
     --- Image Test (Single Frame) ---
     Image grid_thw: [[1, 32, 32]]
     patch_positions shape: torch.Size([1024, 3])
-    [Reloaded Image] Min Cosine Sim: 0.42824179 (Mean: 0.99825776)
+    [Reloaded Image] Min Cosine Sim: 0.91173929 (Mean: 0.99934292)
     ❌ Reloaded Image Verification: FAIL
 
     --- Video Test (8 Frames) ---
@@ -132,7 +187,7 @@ Output:  test
     Packing input shape: torch.Size([2048, 588])
     patch_positions shape: torch.Size([2048, 3])
     grid_thw: [[8, 16, 16]]
-    [Reloaded Video] Min Cosine Sim: 0.46710312 (Mean: 0.99750632)
+    [Reloaded Video] Min Cosine Sim: -0.03206185 (Mean: 0.99299443)
     ❌ Reloaded Video Verification: FAIL
 
     --- Overall Summary ---
