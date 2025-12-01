@@ -57,7 +57,10 @@ def remap_state_dict_packing(src_state_dict):
     """
     Remap state dict from source model to packing model format.
     The packing model uses a slightly different architecture with combined QKV projection.
-    Now uses Conv2d like vit_preview_v0_hf, so conv1 -> embeddings.patch_embedding directly.
+    
+    Note: The packing model does NOT have an embeddings layer (no conv1) since it
+    expects pre-embedded input in [seq_len, hidden_dim] format like Qwen2VL.
+    The conv1 weights are skipped during remapping.
     """
     print("[Remap Packing] Starting state dict remapping for packing model...")
     new_dict = {}
@@ -65,8 +68,10 @@ def remap_state_dict_packing(src_state_dict):
     for k, v in src_state_dict.items():
         new_k = k
         if k.startswith("conv1."):
-            # conv1 -> embeddings.patch_embedding (both are Conv2d now)
-            new_k = k.replace("conv1.", "embeddings.patch_embedding.")
+            # Skip conv1 - packing model has no embeddings layer
+            # Input is expected to be pre-embedded
+            print(f"    [Skip] {k} (packing model has no embeddings layer)")
+            continue
         elif k.startswith("ln_pre."):
             new_k = k.replace("ln_pre.", "layernorm_pre.")
         elif k.startswith("ln_post."):
@@ -97,6 +102,9 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
 
     This function tests that the packing model (which uses grid_thw input like Qwen2VL)
     produces consistent outputs with the original source model.
+    
+    Note: The packing model expects pre-embedded input in [seq_len, hidden_dim] format.
+    We get the embeddings from the source model's conv1 layer.
     """
     print("\n=== Verifying Consistency with Packing Model (grid_thw input - bfloat16) ===")
 
@@ -145,11 +153,17 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             traceback.print_exc()
             return
 
-        # Packing model forward - now uses (B, C, H, W) format with Conv2d
+        # Packing model forward - expects pre-embedded input [seq_len, hidden_dim]
         try:
-            # The packing model now expects pixel values in (B, C, H, W) format
-            # Same as vit_preview_v0_hf
-            packing_out = packing_model(pixel_values=input_tensor, grid_thw=grid_thw)
+            # Get patch embeddings from source model's conv1 layer
+            with torch.no_grad():
+                embeddings = src_model.conv1(input_tensor)  # (B, C, H_patches, W_patches)
+                embeddings = embeddings.flatten(2).transpose(1, 2)  # (B, num_patches, C)
+                hidden_states = embeddings.reshape(-1, embeddings.shape[-1])  # (seq_len, hidden_dim)
+            
+            print(f"    Pre-embedded input shape: {hidden_states.shape}")
+            
+            packing_out = packing_model(hidden_states=hidden_states, grid_thw=grid_thw)
             packing_feat = packing_out.last_hidden_state
             packing_head = packing_out.pooler_output
         except Exception as e:
@@ -248,10 +262,17 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
     # Create grid_thw tensor
     grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
 
-    # Packing model now uses (B, C, H, W) format with Conv2d - same as input_tensor
+    # Packing model expects pre-embedded input [seq_len, hidden_dim]
+    # Get embeddings from source model's conv1 layer
     with torch.no_grad():
         src_out = src_model(input_tensor)['visible_embeddings']
-        tgt_out = vision_tower(pixel_values=input_tensor, grid_thw=grid_thw).last_hidden_state
+        
+        # Get patch embeddings from source model's conv1 layer
+        embeddings = src_model.conv1(input_tensor)  # (B, C, H_patches, W_patches)
+        embeddings = embeddings.flatten(2).transpose(1, 2)  # (B, num_patches, C)
+        hidden_states = embeddings.reshape(-1, embeddings.shape[-1])  # (seq_len, hidden_dim)
+        
+        tgt_out = vision_tower(hidden_states=hidden_states, grid_thw=grid_thw).last_hidden_state
 
     src_feat_flat = src_out.flatten(0, -2).float()
     tgt_feat_flat = tgt_out.float()
