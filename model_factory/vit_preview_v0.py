@@ -169,7 +169,7 @@ class LlavaViTEncoder(nn.Module):
     def _compute_rope_from_positions(self, patch_positions, visible_indices, device, dtype):
         """
         Compute RoPE frequencies from explicit patch positions.
-        
+
         Args:
             patch_positions: Tensor of shape (num_patches, 3) containing [t, h, w] positions
                 for each patch in the sequence. This allows computing RoPE for patches
@@ -177,31 +177,31 @@ class LlavaViTEncoder(nn.Module):
             visible_indices: Tensor of shape (B, N) containing the indices of visible patches.
             device: Target device.
             dtype: Target dtype.
-        
+
         Returns:
             Tensor of shape (B, N_vis, D/2) containing the RoPE frequencies for visible patches.
         """
         t_pos = patch_positions[:, 0].float()
         h_pos = patch_positions[:, 1].float()
         w_pos = patch_positions[:, 2].float()
-        
+
         inv_t = self.video_rope.inv_freq_t.to(device=device, dtype=dtype)
         inv_h = self.video_rope.inv_freq_h.to(device=device, dtype=dtype)
         inv_w = self.video_rope.inv_freq_w.to(device=device, dtype=dtype)
-        
+
         ft = torch.outer(t_pos.to(device), inv_t)
         fh = torch.outer(h_pos.to(device), inv_h)
         fw = torch.outer(w_pos.to(device), inv_w)
-        
+
         freqs_full = torch.cat([ft, fh, fw], dim=-1)
         freqs_visible = freqs_full[visible_indices]
-        
+
         return freqs_visible
 
     def forward(self, x: torch.Tensor, visible_indices = None, mask_ratio=0.5, patch_positions=None):
         """
         Forward pass for LlavaViTEncoder.
-        
+
         Args:
             x: Input tensor of shape (B, C, H, W) for images or (B, C, T, H, W) for videos.
             visible_indices: Optional indices for visible patches. Can be:
@@ -209,11 +209,11 @@ class LlavaViTEncoder(nn.Module):
                 - 2D tensor (B, N): Specific visible patch indices
                 - 5D tensor (B, 1, T, H, W): Residual tensor for top-k masking
             mask_ratio: Ratio of patches to mask (used for MAE-style training).
-            patch_positions: Optional tensor of shape (num_patches, 3) containing [t, h, w] 
+            patch_positions: Optional tensor of shape (num_patches, 3) containing [t, h, w]
                 positions for each patch, used for RoPE calculation when patches come from
                 different images/videos with varying spatial-temporal positions.
                 If provided, this overrides the default position calculation based on grid.
-        
+
         Returns:
             Dictionary with 'visible_embeddings' and optionally 'head_output'.
         """
