@@ -18,6 +18,7 @@
 - [Setup](#-setup)
 - [Training](#-training)
 - [Evaluation](#-evaluation)
+- [Packing ViT Model](#-packing-vit-model)
 - [Contributors](#-contributors)
 - [License](#-license)
 
@@ -142,6 +143,273 @@ torchrun --nproc_per_node 8 --master_port 15555 \
 - SSv2 (Something-Something v2)
 - UCF101
 - And more...
+
+---
+
+## 📦 Packing ViT Model
+
+LLaVA-ViT provides a packing model (`LlavaViTPackingModel`) for efficient variable-length sequence processing with FlashAttention support, similar to Qwen2VL's vision encoder.
+
+> **Detailed documentation**: See [`model_factory/README_PACKING.md`](model_factory/README_PACKING.md) for complete usage guide.
+
+### Requirements
+
+```bash
+# FlashAttention 2 is required
+pip install flash-attn --no-build-isolation
+```
+
+### Understanding `patch_positions`
+
+The `patch_positions` parameter allows you to explicitly specify the RoPE (Rotary Position Embedding) positions for each patch. This is essential for:
+- Achieving consistent outputs between the source model and the packing model
+- Processing videos with non-uniform frame sampling (e.g., uniform sampling from long videos)
+- Enabling flexible spatial-temporal position encoding
+
+#### `patch_positions` Format
+
+`patch_positions` is a tensor of shape `(seq_len, 3)` where each row contains `[t, h, w]`:
+- `t`: Temporal position (frame index)
+- `h`: Height position (patch row index)
+- `w`: Width position (patch column index)
+
+### How to Prepare `patch_positions`
+
+#### Method 1: Using `compute_patch_positions_from_grid_thw` (Recommended for Images)
+
+For simple image processing where patches are arranged sequentially:
+
+```python
+from model_factory.vit_preview_v0_packing_hf import (
+    LlavaViTPackingModel,
+    compute_patch_positions_from_grid_thw,
+)
+import torch
+
+# For a 224x224 image with patch_size=16
+# h_patches = w_patches = 224 // 16 = 14
+grid_thw = torch.tensor([[1, 14, 14]], dtype=torch.long, device='cuda')  # [t=1, h=14, w=14]
+
+# Compute patch positions automatically
+patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
+# Shape: (196, 3) for 14*14=196 patches
+# Values: [[0, 0, 0], [0, 0, 1], ..., [0, 13, 13]]
+#         [t, h, w] for each patch
+
+# Forward pass
+outputs = model(
+    hidden_states=hidden_states,
+    grid_thw=grid_thw,
+    patch_positions=patch_positions,
+)
+```
+
+#### Method 2: Using Interpolated Temporal Positions (For Video)
+
+For video with uniform frame sampling (e.g., 8 frames from a 64-frame context):
+
+```python
+from model_factory.convert_llava_vit_packing_to_hf import (
+    interpolate_frame_indices,
+    compute_patch_positions_with_interpolated_temporal,
+)
+import torch
+
+# Example: 8 frames uniformly sampled from 64-frame context
+num_frames = 8
+target_frames = 64  # The source model's expected temporal context
+h_patches, w_patches = 14, 14  # For 224x224 image with patch_size=16
+
+# Step 1: Compute interpolated frame indices
+frame_indices = torch.arange(num_frames).unsqueeze(0).cuda()  # [1, 8] = [[0,1,2,3,4,5,6,7]]
+total_frames = torch.tensor([num_frames]).cuda()  # [8]
+
+interpolated_indices = interpolate_frame_indices(frame_indices, total_frames, target_frames)
+# Result: [[0, 9, 18, 27, 36, 45, 54, 63]] - evenly spaced in 64-frame context
+
+# Step 2: Compute patch positions with interpolated temporal positions
+patch_positions = compute_patch_positions_with_interpolated_temporal(
+    interpolated_indices, h_patches, w_patches, device='cuda'
+)
+# Shape: (num_frames * h_patches * w_patches, 3) = (8*14*14, 3) = (1568, 3)
+# Each row: [t_interpolated, h, w]
+# The temporal values are 0, 9, 18, 27, 36, 45, 54, 63 (interpolated to 64-frame context)
+
+# Create grid_thw for actual frames
+grid_thw = torch.tensor([[num_frames, h_patches, w_patches]], dtype=torch.long, device='cuda')
+
+# Forward pass
+outputs = model(
+    hidden_states=hidden_states,
+    grid_thw=grid_thw,
+    patch_positions=patch_positions,
+)
+```
+
+#### Method 3: Manual Construction (Advanced)
+
+For custom spatial-temporal positions:
+
+```python
+import torch
+
+def manual_patch_positions(t_frames, h_patches, w_patches, device='cuda'):
+    """
+    Manually construct patch_positions tensor.
+    
+    Patch ordering: [frame_0_patches, frame_1_patches, ..., frame_t_patches]
+    Within each frame: row-major order (h varies slower than w)
+    """
+    positions = []
+    for t in range(t_frames):
+        for h in range(h_patches):
+            for w in range(w_patches):
+                positions.append([t, h, w])
+    return torch.tensor(positions, dtype=torch.long, device=device)
+
+# Example: 8 frames at 14x14 patches
+patch_positions = manual_patch_positions(8, 14, 14)
+# Shape: (1568, 3)
+# Values: [[0,0,0], [0,0,1], ..., [0,13,13], [1,0,0], ..., [7,13,13]]
+```
+
+### Complete Example: Image Processing
+
+```python
+import torch
+from PIL import Image
+import torchvision.transforms as T
+from model_factory.vit_preview_v0_packing_hf import (
+    LlavaViTPackingModel,
+    compute_patch_positions_from_grid_thw,
+)
+
+# Load model
+model = LlavaViTPackingModel.from_pretrained("path/to/model", torch_dtype=torch.bfloat16)
+model = model.cuda().eval()
+
+# Prepare image
+patch_size = 16
+image = Image.open("image.jpg").resize((448, 448))
+transform = T.Compose([
+    T.ToTensor(),
+    T.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711]),
+])
+pixel_tensor = transform(image)  # (3, 448, 448)
+
+# Calculate patch dimensions
+channels, height, width = pixel_tensor.shape
+h_patches = height // patch_size  # 28
+w_patches = width // patch_size   # 28
+
+# Reshape to patches: (C, H, W) -> (seq_len, patch_dim)
+patches = pixel_tensor.view(channels, h_patches, patch_size, w_patches, patch_size)
+patches = patches.permute(1, 3, 0, 2, 4).contiguous()  # (h, w, C, pH, pW)
+hidden_states = patches.view(h_patches * w_patches, patch_size * patch_size * channels)
+hidden_states = hidden_states.cuda().bfloat16()
+
+# Prepare grid_thw and patch_positions
+grid_thw = torch.tensor([[1, h_patches, w_patches]], dtype=torch.long, device='cuda')
+patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
+
+# Forward pass
+with torch.no_grad():
+    outputs = model(
+        hidden_states=hidden_states,
+        grid_thw=grid_thw,
+        patch_positions=patch_positions,
+    )
+
+print(f"Output shape: {outputs.last_hidden_state.shape}")  # (784, hidden_size)
+print(f"Pooler shape: {outputs.pooler_output.shape}")      # (1, hidden_size)
+```
+
+### Complete Example: Video Processing
+
+```python
+import torch
+from PIL import Image
+import torchvision.transforms as T
+from model_factory.vit_preview_v0_packing_hf import LlavaViTPackingModel
+from model_factory.convert_llava_vit_packing_to_hf import (
+    interpolate_frame_indices,
+    compute_patch_positions_with_interpolated_temporal,
+)
+
+# Load model
+model = LlavaViTPackingModel.from_pretrained("path/to/model", torch_dtype=torch.bfloat16)
+model = model.cuda().eval()
+
+# Video parameters
+patch_size = 16
+num_frames = 8
+frame_size = 224
+target_frames = 64  # Source model's temporal context
+
+# Load video frames (example: list of PIL Images)
+frames = [Image.open(f"frame_{i}.jpg").resize((frame_size, frame_size)) for i in range(num_frames)]
+
+transform = T.Compose([
+    T.ToTensor(),
+    T.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711]),
+])
+
+# Calculate patch dimensions
+h_patches = frame_size // patch_size  # 14
+w_patches = frame_size // patch_size  # 14
+
+# Process frames and reshape to patches
+all_patches = []
+for frame in frames:
+    pixel_tensor = transform(frame)  # (3, 224, 224)
+    channels = pixel_tensor.shape[0]
+    patches = pixel_tensor.view(channels, h_patches, patch_size, w_patches, patch_size)
+    patches = patches.permute(1, 3, 0, 2, 4).contiguous()  # (h, w, C, pH, pW)
+    frame_patches = patches.view(h_patches * w_patches, patch_size * patch_size * channels)
+    all_patches.append(frame_patches)
+
+hidden_states = torch.cat(all_patches, dim=0)  # (num_frames * h * w, patch_dim)
+hidden_states = hidden_states.cuda().bfloat16()
+
+# Compute interpolated temporal positions for video
+frame_indices = torch.arange(num_frames).unsqueeze(0).cuda()
+total_frames_tensor = torch.tensor([num_frames]).cuda()
+interpolated_indices = interpolate_frame_indices(frame_indices, total_frames_tensor, target_frames)
+
+# Compute patch_positions with interpolated temporal values
+patch_positions = compute_patch_positions_with_interpolated_temporal(
+    interpolated_indices, h_patches, w_patches, device='cuda'
+)
+
+# grid_thw uses actual frame count
+grid_thw = torch.tensor([[num_frames, h_patches, w_patches]], dtype=torch.long, device='cuda')
+
+# Forward pass
+with torch.no_grad():
+    outputs = model(
+        hidden_states=hidden_states,
+        grid_thw=grid_thw,
+        patch_positions=patch_positions,
+    )
+
+print(f"Output shape: {outputs.last_hidden_state.shape}")  # (1568, hidden_size)
+print(f"Pooler shape: {outputs.pooler_output.shape}")      # (1, hidden_size)
+```
+
+### Model Conversion
+
+Convert weights from source model to packing model format:
+
+```bash
+python model_factory/convert_llava_vit_packing_to_hf.py \
+    llava_vit_large_ln \
+    /path/to/backbone.pt \
+    --output_dir /path/to/output
+```
+
+The conversion script automatically verifies both image and video consistency between the source and packing models.
 
 ---
 
