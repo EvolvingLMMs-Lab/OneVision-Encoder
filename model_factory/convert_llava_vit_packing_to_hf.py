@@ -538,14 +538,19 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
         traceback.print_exc()
         return
 
-    # Prepare input for packing model verification
-    input_tensor = real_image_tensor.to(device, dtype=torch.bfloat16)
-
     # Get patch size from source model
     patch_size = 16
     if hasattr(src_model, "patch_size"):
         ps = src_model.patch_size
         patch_size = ps[0] if isinstance(ps, tuple) else ps
+
+    # ============================================================
+    # Part 1: Image Test (Single Frame)
+    # ============================================================
+    print("\n    --- Image Test (Single Frame) ---")
+    
+    # Prepare input for packing model verification
+    input_tensor = real_image_tensor.to(device, dtype=torch.bfloat16)
 
     # Calculate grid dimensions
     bs, channels, height, width = input_tensor.shape
@@ -555,6 +560,7 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
 
     # Create grid_thw tensor
     grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+    print(f"    Image grid_thw: {grid_thw.tolist()}")
 
     # Packing model expects input in [seq_len, patch_dim] format
     with torch.no_grad():
@@ -571,6 +577,7 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
         
         # Compute patch_positions from grid_thw for RoPE calculation
         patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
+        print(f"    patch_positions shape: {patch_positions.shape}")
         
         tgt_out = vision_tower(
             hidden_states=hidden_states,
@@ -592,11 +599,142 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
     min_cos = cos_sim.min().item()
     mean_cos = cos_sim.mean().item()
 
-    print(f"    [Reloaded Packing Model] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+    print(f"    [Reloaded Image] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
     if min_cos > 0.99:
-        print("    ✅ Reloaded Packing Model Verification: PASS")
+        print("    ✅ Reloaded Image Verification: PASS")
     else:
-        print("    ❌ Reloaded Packing Model Verification: FAIL")
+        print("    ❌ Reloaded Image Verification: FAIL")
+
+    # ============================================================
+    # Part 2: Video Test (Multiple Frames)
+    # ============================================================
+    print("\n    --- Video Test (8 Frames) ---")
+    
+    num_frames = 8
+    image_size = 224
+    target_frames = 64  # src_model expects 64-frame context
+    
+    # Create synthesized video from real image
+    video_tensor = get_synthesized_video(real_image_tensor, num_frames=num_frames, size=image_size)
+    video_tensor = video_tensor.to(device, dtype=torch.bfloat16)
+    
+    bs = 1
+    channels = 3
+    h_patches = image_size // patch_size
+    w_patches = image_size // patch_size
+    frame_tokens = h_patches * w_patches
+    
+    print(f"    Video shape: {video_tensor.shape} (B, C, T, H, W)")
+    
+    # Compute interpolated frame indices for 64-frame context
+    frame_indices = torch.arange(num_frames).unsqueeze(0).to(device)  # [1, 8]
+    total_frames_tensor = torch.tensor([num_frames]).to(device)  # [1]
+    interpolated_indices = interpolate_frame_indices(
+        frame_indices, total_frames_tensor, target_frames
+    )  # [1, 8] - indices in 64-frame context
+    
+    print(f"    Original frame indices: {frame_indices[0].tolist()}")
+    print(f"    Interpolated indices (in 64-frame context): {interpolated_indices[0].tolist()}")
+    
+    with torch.no_grad():
+        # === Source model forward ===
+        # Create 64-frame padded video and use visible_index
+        try:
+            # Create padded video with 64 frames
+            padded_videos = torch.zeros(bs, channels, target_frames, image_size, image_size, 
+                                        device=device, dtype=video_tensor.dtype)
+            
+            # Scatter original frames into interpolated positions
+            frame_seq_len = frame_indices.shape[1]
+            frame_idx_expanded = interpolated_indices.view(bs, 1, frame_seq_len, 1, 1).expand(
+                bs, channels, frame_seq_len, image_size, image_size
+            )
+            padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=video_tensor)
+            
+            # Compute visible_index for the uniformly sampled frames
+            per = torch.arange(frame_tokens, device=device)
+            visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
+            visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
+            
+            src_video_out = src_model(padded_videos, visible_indices=visible_index, mask_ratio=None)
+            if isinstance(src_video_out, dict):
+                src_video_feat = src_video_out.get('visible_embeddings')
+            else:
+                src_video_feat = src_video_out
+        except Exception as e:
+            print(f"    [Error] Source video forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+        
+        # === Packing model forward ===
+        try:
+            # Reshape video to patches: (B, C, T, H, W) -> (seq_len, patch_dim)
+            patches = video_tensor.view(
+                bs, channels, num_frames, h_patches, patch_size, w_patches, patch_size
+            )
+            # Permute to (B, T, h_patches, w_patches, C, patch_size, patch_size)
+            patches = patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
+            # Reshape to (B * T * h_patches * w_patches, C * patch_size * patch_size)
+            total_seq_len = bs * num_frames * h_patches * w_patches
+            patch_dim = patch_size * patch_size * channels
+            hidden_states = patches.view(total_seq_len, patch_dim)
+            
+            # Compute patch_positions with interpolated temporal positions
+            # This ensures RoPE positions match the src_model
+            patch_positions = compute_patch_positions_with_interpolated_temporal(
+                interpolated_indices, h_patches, w_patches, device
+            )
+            
+            # Create grid_thw for the actual frames
+            grid_thw = torch.tensor([[num_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+            
+            print(f"    Packing input shape: {hidden_states.shape}")
+            print(f"    patch_positions shape: {patch_positions.shape}")
+            print(f"    grid_thw: {grid_thw.tolist()}")
+            
+            tgt_video_out = vision_tower(
+                hidden_states=hidden_states,
+                grid_thw=grid_thw,
+                patch_positions=patch_positions,
+            ).last_hidden_state
+        except Exception as e:
+            print(f"    [Error] Packing video forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+    
+    # Compare outputs
+    if src_video_feat is not None and tgt_video_out is not None:
+        src_video_flat = src_video_feat.flatten(0, -2).float()
+        tgt_video_flat = tgt_video_out.float()
+        
+        # Handle shape mismatch
+        if src_video_flat.shape[0] != tgt_video_flat.shape[0]:
+            min_len = min(src_video_flat.shape[0], tgt_video_flat.shape[0])
+            src_video_flat = src_video_flat[:min_len]
+            tgt_video_flat = tgt_video_flat[:min_len]
+        
+        cos_sim_video = F.cosine_similarity(src_video_flat, tgt_video_flat, dim=-1)
+        
+        min_cos_video = cos_sim_video.min().item()
+        mean_cos_video = cos_sim_video.mean().item()
+        
+        print(f"    [Reloaded Video] Min Cosine Sim: {min_cos_video:.8f} (Mean: {mean_cos_video:.8f})")
+        if min_cos_video > 0.99:
+            print("    ✅ Reloaded Video Verification: PASS")
+        else:
+            print("    ❌ Reloaded Video Verification: FAIL")
+    
+    # ============================================================
+    # Overall Summary
+    # ============================================================
+    print("\n    --- Overall Summary ---")
+    all_pass = min_cos > 0.99 and (min_cos_video if 'min_cos_video' in dir() else 0) > 0.99
+    if all_pass:
+        print("    ✅ Reloaded Packing Model (Image + Video): ALL PASS")
+    else:
+        print("    ❌ Reloaded Packing Model (Image + Video): SOME FAILED")
 
 
 def convert_and_save_packing(src_model_name, tgt_model_name, weight_path, output_dir):
