@@ -166,7 +166,68 @@ class LlavaViTEncoder(nn.Module):
 
         return visible_indices, visible_mask, ids_restore
 
-    def forward(self, x: torch.Tensor, visible_indices = None, mask_ratio=0.5):
+    def _compute_rope_from_positions(self, patch_positions, visible_indices, device, dtype):
+        """
+        Compute RoPE frequencies from explicit patch positions.
+        
+        Args:
+            patch_positions: Tensor of shape (num_patches, 3) containing [t, h, w] positions
+                for each patch in the sequence. This allows computing RoPE for patches
+                from different spatial-temporal locations.
+            visible_indices: Tensor of shape (B, N) containing the indices of visible patches.
+            device: Target device.
+            dtype: Target dtype.
+        
+        Returns:
+            Tensor of shape (B, N_vis, D/2) containing the RoPE frequencies for visible patches.
+        """
+        # patch_positions: (num_patches, 3) -> [t, h, w] for each patch
+        # visible_indices: (B, N_vis)
+        
+        # Get the positions for visible patches
+        # patch_positions is already in (num_patches, 3) format with [t, h, w]
+        t_pos = patch_positions[:, 0].float()  # (num_patches,)
+        h_pos = patch_positions[:, 1].float()  # (num_patches,)
+        w_pos = patch_positions[:, 2].float()  # (num_patches,)
+        
+        # Get inverse frequencies from the video_rope module
+        inv_t = self.video_rope.inv_freq_t.to(device=device, dtype=dtype)
+        inv_h = self.video_rope.inv_freq_h.to(device=device, dtype=dtype)
+        inv_w = self.video_rope.inv_freq_w.to(device=device, dtype=dtype)
+        
+        # Compute frequencies for all patches
+        ft = torch.outer(t_pos.to(device), inv_t)  # (num_patches, t_size)
+        fh = torch.outer(h_pos.to(device), inv_h)  # (num_patches, h_size)
+        fw = torch.outer(w_pos.to(device), inv_w)  # (num_patches, w_size)
+        
+        # Concatenate to get full frequencies
+        freqs_full = torch.cat([ft, fh, fw], dim=-1)  # (num_patches, half)
+        
+        # Select frequencies for visible patches
+        # visible_indices: (B, N_vis)
+        freqs_visible = freqs_full[visible_indices]  # (B, N_vis, half)
+        
+        return freqs_visible
+
+    def forward(self, x: torch.Tensor, visible_indices = None, mask_ratio=0.5, patch_positions=None):
+        """
+        Forward pass for LlavaViTEncoder.
+        
+        Args:
+            x: Input tensor of shape (B, C, H, W) for images or (B, C, T, H, W) for videos.
+            visible_indices: Optional indices for visible patches. Can be:
+                - None: All patches are visible (no masking)
+                - 2D tensor (B, N): Specific visible patch indices
+                - 5D tensor (B, 1, T, H, W): Residual tensor for top-k masking
+            mask_ratio: Ratio of patches to mask (used for MAE-style training).
+            patch_positions: Optional tensor of shape (num_patches, 3) containing [t, h, w] 
+                positions for each patch, used for RoPE calculation when patches come from
+                different images/videos with varying spatial-temporal positions.
+                If provided, this overrides the default position calculation based on grid.
+        
+        Returns:
+            Dictionary with 'visible_embeddings' and optionally 'head_output'.
+        """
         if x.dim() == 4:
             x = x.unsqueeze(2)
 
@@ -192,7 +253,11 @@ class LlavaViTEncoder(nn.Module):
             visible_indices = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)  # (B, L)
             visible_mask_bool = torch.ones(batch, total_patches, dtype=torch.bool, device=device)        # (B, L)
             ids_restore = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)      # (B, L)
-
+        elif visible_indices is None:
+            # When visible_indices is None for video input (t_frames > 1), use all patches as visible
+            visible_indices = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)  # (B, L)
+            visible_mask_bool = torch.ones(batch, total_patches, dtype=torch.bool, device=device)        # (B, L)
+            ids_restore = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)      # (B, L)
         elif visible_indices.ndim == 5:
             # 来自 residual top-k 的掩码
             visible_indices, visible_mask_bool, ids_restore = self.mask_by_residual_topk(
@@ -210,14 +275,22 @@ class LlavaViTEncoder(nn.Module):
         visible_tokens = torch.gather(tokens, 1, gather_index)
 
         # RoPE (full -> select)
-        freqs_full = self.video_rope(
-            t=t_frames,
-            h=h_patches,
-            w=w_patches,
-            device=device,
-            dtype=tokens.dtype
-        )
-        freqs_visible = freqs_full[visible_indices]  # (B,N_vis,D/2)
+        if patch_positions is not None:
+            # Use provided patch positions for RoPE calculation
+            # patch_positions: (num_patches, 3) with [t, h, w] for each patch
+            freqs_visible = self._compute_rope_from_positions(
+                patch_positions, visible_indices, device, tokens.dtype
+            )
+        else:
+            # Default: compute RoPE from grid
+            freqs_full = self.video_rope(
+                t=t_frames,
+                h=h_patches,
+                w=w_patches,
+                device=device,
+                dtype=tokens.dtype
+            )
+            freqs_visible = freqs_full[visible_indices]  # (B,N_vis,D/2)
 
 
         # 构造时间单向 mask (可选)
