@@ -57,6 +57,9 @@ def remap_state_dict_packing(src_state_dict):
     """
     Remap state dict from source model to packing model format.
     The packing model uses a slightly different architecture with combined QKV projection.
+    
+    Note: The packing model has a patch_embed layer with Conv2d that maps directly to the 
+    source model's conv1 (Conv2d). No weight reshaping is needed.
     """
     print("[Remap Packing] Starting state dict remapping for packing model...")
     new_dict = {}
@@ -64,8 +67,8 @@ def remap_state_dict_packing(src_state_dict):
     for k, v in src_state_dict.items():
         new_k = k
         if k.startswith("conv1."):
-            # conv1 -> embeddings.proj (3D conv)
-            new_k = k.replace("conv1.", "embeddings.proj.")
+            # conv1 -> patch_embed.proj (both are Conv2d, no reshaping needed)
+            new_k = k.replace("conv1.", "patch_embed.proj.")
         elif k.startswith("ln_pre."):
             new_k = k.replace("ln_pre.", "layernorm_pre.")
         elif k.startswith("ln_post."):
@@ -83,8 +86,8 @@ def remap_state_dict_packing(src_state_dict):
             if ".attn.in_proj" in new_k:
                 # Combined QKV projection - keep it as is for packing model
                 new_k = new_k.replace(".attn.in_proj", ".self_attn.qkv")
-            elif ".attn.proj." in new_k:
-                new_k = new_k.replace(".attn.proj.", ".self_attn.proj.")
+            elif ".attn.out_proj." in new_k:
+                new_k = new_k.replace(".attn.out_proj.", ".self_attn.proj.")
         new_dict[new_k] = v
 
     return new_dict
@@ -96,6 +99,9 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
 
     This function tests that the packing model (which uses grid_thw input like Qwen2VL)
     produces consistent outputs with the original source model.
+    
+    Note: The packing model expects input in [seq_len, patch_dim] format where
+    patch_dim = temporal_patch_size * patch_size * patch_size * in_channels.
     """
     print("\n=== Verifying Consistency with Packing Model (grid_thw input - bfloat16) ===")
 
@@ -119,7 +125,7 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
         patch_size = ps[0] if isinstance(ps, tuple) else ps
 
     # Calculate grid dimensions
-    _, _, height, width = input_tensor.shape
+    bs, channels, height, width = input_tensor.shape
     h_patches = height // patch_size
     w_patches = width // patch_size
     t_frames = 1
@@ -144,29 +150,24 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             traceback.print_exc()
             return
 
-        # Packing model forward - need to prepare pixel values in the right format
+        # Packing model forward - expects input in [seq_len, patch_dim] format
+        # where patch_dim = patch_size * patch_size * in_channels
         try:
-            # The packing model expects pixel values in (N, C, T_patch, H_patch, W_patch) format
-            # where N is the total number of patches
-            bs = input_tensor.shape[0]
-            total_patches = t_frames * h_patches * w_patches * bs
-
-            # Reshape input to patches for the packing model
-            # input_tensor: (B, C, H, W) -> (B, C, 1, H, W) -> patches
-            pixel_values_5d = input_tensor.unsqueeze(2)  # (B, C, 1, H, W)
-
-            # Reshape to (B, C, T, H_patches, patch_size, W_patches, patch_size)
-            pixel_values_patches = pixel_values_5d.view(
-                bs, 3, t_frames, h_patches, patch_size, w_patches, patch_size
+            # Reshape image to patches: (B, C, H, W) -> (seq_len, patch_dim)
+            # First reshape to (B, C, h_patches, patch_size, w_patches, patch_size)
+            patches = input_tensor.view(
+                bs, channels, h_patches, patch_size, w_patches, patch_size
             )
-            # Permute to (B, T, H_patches, W_patches, C, T_patch, H_patch_size, W_patch_size)
-            pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 2, 4, 6).contiguous()
-            # Reshape to (B * T * H * W, C, 1, patch_size, patch_size)
-            pixel_values_packed = pixel_values_patches.view(
-                total_patches, 3, 1, patch_size, patch_size
-            )
-
-            packing_out = packing_model(pixel_values=pixel_values_packed, grid_thw=grid_thw)
+            # Permute to (B, h_patches, w_patches, C, patch_size, patch_size)
+            patches = patches.permute(0, 2, 4, 1, 3, 5).contiguous()
+            # Reshape to (B * h_patches * w_patches, C * patch_size * patch_size)
+            seq_len = bs * t_frames * h_patches * w_patches
+            patch_dim = patch_size * patch_size * channels
+            hidden_states = patches.view(seq_len, patch_dim)
+            
+            print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
+            
+            packing_out = packing_model(hidden_states=hidden_states, grid_thw=grid_thw)
             packing_feat = packing_out.last_hidden_state
             packing_head = packing_out.pooler_output
         except Exception as e:
@@ -257,29 +258,28 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
         patch_size = ps[0] if isinstance(ps, tuple) else ps
 
     # Calculate grid dimensions
-    _, _, height, width = input_tensor.shape
+    bs, channels, height, width = input_tensor.shape
     h_patches = height // patch_size
     w_patches = width // patch_size
     t_frames = 1
-    bs = input_tensor.shape[0]
-    total_patches = t_frames * h_patches * w_patches * bs
 
     # Create grid_thw tensor
     grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
 
-    # Prepare pixel values for packing model
-    pixel_values_5d = input_tensor.unsqueeze(2)  # (B, C, 1, H, W)
-    pixel_values_patches = pixel_values_5d.view(
-        bs, 3, t_frames, h_patches, patch_size, w_patches, patch_size
-    )
-    pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 2, 4, 6).contiguous()
-    pixel_values_packed = pixel_values_patches.view(
-        total_patches, 3, 1, patch_size, patch_size
-    )
-
+    # Packing model expects input in [seq_len, patch_dim] format
     with torch.no_grad():
         src_out = src_model(input_tensor)['visible_embeddings']
-        tgt_out = vision_tower(pixel_values=pixel_values_packed, grid_thw=grid_thw).last_hidden_state
+        
+        # Reshape image to patches: (B, C, H, W) -> (seq_len, patch_dim)
+        patches = input_tensor.view(
+            bs, channels, h_patches, patch_size, w_patches, patch_size
+        )
+        patches = patches.permute(0, 2, 4, 1, 3, 5).contiguous()
+        seq_len = bs * t_frames * h_patches * w_patches
+        patch_dim = patch_size * patch_size * channels
+        hidden_states = patches.view(seq_len, patch_dim)
+        
+        tgt_out = vision_tower(hidden_states=hidden_states, grid_thw=grid_thw).last_hidden_state
 
     src_feat_flat = src_out.flatten(0, -2).float()
     tgt_feat_flat = tgt_out.float()

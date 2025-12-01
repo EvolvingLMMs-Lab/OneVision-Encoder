@@ -12,7 +12,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""PyTorch Llava ViT Packing model with grid_thw support (similar to Qwen2VL)."""
+"""PyTorch Llava ViT Packing model with grid_thw support (similar to Qwen2VL).
+
+This model requires FlashAttention 2 and accepts input in [seq_len, patch_dim] format
+where patch_dim = patch_size * patch_size * in_channels,
+like Qwen2VL for efficient variable-length sequence processing.
+"""
 
 from typing import Optional, Tuple, Union
 
@@ -27,8 +32,14 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.models.siglip.modeling_siglip import SiglipMLP
 from transformers.utils import logging, is_flash_attn_2_available
 
-if is_flash_attn_2_available():
-    from flash_attn import flash_attn_varlen_func
+# FlashAttention is mandatory for this model
+if not is_flash_attn_2_available():
+    raise ImportError(
+        "FlashAttention 2 is required for LlavaViTPackingModel. "
+        "Please install flash-attn: pip install flash-attn --no-build-isolation"
+    )
+
+from flash_attn import flash_attn_varlen_func
 
 logger = logging.get_logger(__name__)
 
@@ -92,7 +103,7 @@ class LlavaViTPackingConfig(PretrainedConfig):
         num_channels=3,
         image_size=448,
         patch_size=16,
-        temporal_patch_size=1,
+        temporal_patch_size=1,  # Kept for config compatibility, not used in Conv2d embeddings
         hidden_act="gelu",
         layer_norm_eps=1e-6,
         layer_norm_type="layer_norm",
@@ -111,7 +122,7 @@ class LlavaViTPackingConfig(PretrainedConfig):
         self.num_channels = num_channels
         self.image_size = image_size
         self.patch_size = patch_size
-        self.temporal_patch_size = temporal_patch_size
+        self.temporal_patch_size = temporal_patch_size  # Kept for config compatibility
         self.hidden_act = hidden_act
         self.layer_norm_eps = layer_norm_eps
         self.layer_norm_type = layer_norm_type
@@ -275,38 +286,46 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-class LlavaViTPackingEmbeddings(nn.Module):
-    """Patch embedding layer that handles variable-sized inputs."""
+class LlavaViTPackingPatchEmbed(nn.Module):
+    """Patch embedding layer for packing model (Qwen2VL style).
+    
+    Input: (seq_len, patch_size * patch_size * in_channels)
+    Output: (seq_len, hidden_size)
+    
+    Note: Uses Conv2d for compatibility with vit_preview_v0_hf weights.
+    """
 
     def __init__(self, config: LlavaViTPackingConfig):
         super().__init__()
-        self.config = config
-        self.embed_dim = config.hidden_size
         self.patch_size = config.patch_size
-        self.temporal_patch_size = config.temporal_patch_size
+        self.in_channels = config.num_channels
+        self.embed_dim = config.hidden_size
 
-        kernel_size = [config.temporal_patch_size, config.patch_size, config.patch_size]
-        self.proj = nn.Conv3d(
+        # Use Conv2d for compatibility with vit_preview_v0_hf weights
+        self.proj = nn.Conv2d(
             config.num_channels,
             config.hidden_size,
-            kernel_size=kernel_size,
-            stride=kernel_size,
+            kernel_size=config.patch_size,
+            stride=config.patch_size,
             bias=False,
         )
 
-    def forward(self, pixel_values: torch.FloatTensor) -> torch.Tensor:
-        """Embed patches from pixel values.
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """Embed patches from flattened pixel values.
 
         Args:
-            pixel_values: Flattened pixel values of shape
-                (sum(t*h*w for all images), num_channels, temporal_patch_size, patch_size, patch_size)
+            hidden_states: Flattened pixel values of shape 
+                (seq_len, patch_size * patch_size * in_channels)
 
         Returns:
-            Patch embeddings of shape (sum(t*h*w for all images), hidden_size)
+            Patch embeddings of shape (seq_len, hidden_size)
         """
         target_dtype = self.proj.weight.dtype
-        hidden_states = self.proj(pixel_values.to(dtype=target_dtype))
-        hidden_states = hidden_states.view(-1, self.embed_dim)
+        # Reshape to (seq_len, in_channels, patch_size, patch_size)
+        hidden_states = hidden_states.view(
+            -1, self.in_channels, self.patch_size, self.patch_size
+        )
+        hidden_states = self.proj(hidden_states.to(dtype=target_dtype)).view(-1, self.embed_dim)
         return hidden_states
 
 
@@ -337,7 +356,7 @@ class LlavaViTPackingAttention(nn.Module):
         cu_seqlens: torch.Tensor,
         position_embeddings: Tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
-        """Forward pass with variable-length attention using flash attention.
+        """Forward pass with variable-length attention using FlashAttention.
 
         Args:
             hidden_states: Input of shape (total_seq_len, hidden_size)
@@ -359,38 +378,20 @@ class LlavaViTPackingAttention(nn.Module):
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb_vision(query_states, key_states, cos, sin)
 
-        # Use Flash Attention with variable lengths
-        if is_flash_attn_2_available():
-            max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
-            attn_output = flash_attn_varlen_func(
-                query_states,
-                key_states,
-                value_states,
-                cu_seqlens_q=cu_seqlens,
-                cu_seqlens_k=cu_seqlens,
-                max_seqlen_q=max_seqlen,
-                max_seqlen_k=max_seqlen,
-                dropout_p=self.dropout if self.training else 0.0,
-                softmax_scale=self.scale,
-                causal=False,
-            )
-        else:
-            # Fallback: Process each sequence separately
-            attn_outputs = []
-            for i in range(len(cu_seqlens) - 1):
-                start = cu_seqlens[i].item()
-                end = cu_seqlens[i + 1].item()
-                q = query_states[start:end].unsqueeze(0).transpose(1, 2)  # (1, H, L, D)
-                k = key_states[start:end].unsqueeze(0).transpose(1, 2)
-                v = value_states[start:end].unsqueeze(0).transpose(1, 2)
-
-                attn_weights = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-                attn_weights = F.softmax(attn_weights, dim=-1)
-                attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
-                attn_out = torch.matmul(attn_weights, v)
-                attn_out = attn_out.transpose(1, 2).squeeze(0)  # (L, H, D)
-                attn_outputs.append(attn_out)
-            attn_output = torch.cat(attn_outputs, dim=0)
+        # Use FlashAttention with variable lengths (mandatory)
+        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
+        attn_output = flash_attn_varlen_func(
+            query_states,
+            key_states,
+            value_states,
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_k=cu_seqlens,
+            max_seqlen_q=max_seqlen,
+            max_seqlen_k=max_seqlen,
+            dropout_p=self.dropout if self.training else 0.0,
+            softmax_scale=self.scale,
+            causal=False,
+        )
 
         attn_output = attn_output.reshape(seq_length, -1)
         attn_output = self.proj(attn_output)
@@ -494,10 +495,11 @@ class LlavaViTPackingPreTrainedModel(PreTrainedModel):
 
 
 class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
-    """Llava ViT Model with packing support using grid_thw.
+    """Llava ViT Model with packing support using grid_thw (Qwen2VL style).
 
-    This model takes packed pixel values and grid_thw tensor to handle variable-sized
-    image/video inputs efficiently, similar to the Qwen2VL approach.
+    This model requires FlashAttention and accepts input in 
+    [seq_len, patch_dim] format where patch_dim = patch_size * patch_size * in_channels,
+    similar to Qwen2VL approach.
     """
 
     def __init__(self, config: LlavaViTPackingConfig):
@@ -505,7 +507,8 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
         self.config = config
         self.spatial_merge_size = config.spatial_merge_size
 
-        self.embeddings = LlavaViTPackingEmbeddings(config)
+        # Patch embeddings layer (Qwen2VL style)
+        self.patch_embed = LlavaViTPackingPatchEmbed(config)
         self.layernorm_pre = get_norm_layer(config)
         self.encoder = LlavaViTPackingEncoder(config)
         self.rotary_emb = VisionRotaryEmbedding(config)
@@ -521,18 +524,17 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
 
     def forward(
         self,
-        pixel_values: torch.Tensor,
+        hidden_states: torch.Tensor,
         grid_thw: torch.Tensor,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
-        """Forward pass with packing support.
+        """Forward pass with packing support (Qwen2VL style input).
 
         Args:
-            pixel_values: Flattened pixel values of shape
-                (sum(t*temporal_patch_size*h*patch_size*w*patch_size), num_channels)
-                or already processed patches of shape
-                (sum(t*h*w), num_channels, temporal_patch_size, patch_size, patch_size)
+            hidden_states: Flattened pixel values of shape (seq_len, patch_dim)
+                where seq_len = sum(t*h*w for all images in batch)
+                and patch_dim = patch_size * patch_size * in_channels.
             grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image,
                 where h and w are the number of patches (not pixels).
 
@@ -548,26 +550,22 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        # Reshape pixel values if needed
-        if pixel_values.dim() == 2:
-            # (total_patches, channels) -> need to reshape for Conv3d
-            # This assumes pixel_values are already flattened patches
-            pixel_values = pixel_values.view(
-                -1,
-                self.config.num_channels,
-                self.config.temporal_patch_size,
-                self.config.patch_size,
-                self.config.patch_size,
+        # hidden_states should be (seq_len, patch_dim) - flattened pixel values
+        if hidden_states.dim() != 2:
+            raise ValueError(
+                f"Expected hidden_states to have 2 dimensions (seq_len, patch_dim), "
+                f"got {hidden_states.dim()} dimensions with shape {hidden_states.shape}. "
+                f"Input should be flattened pixel values."
             )
 
-        # Patch embedding
-        hidden_states = self.embeddings(pixel_values)
+        # Patch embedding: (seq_len, patch_dim) -> (seq_len, hidden_size)
+        hidden_states = self.patch_embed(hidden_states)
 
         # Compute rotary position embeddings from grid_thw
         rotary_pos_emb = self.rotary_emb(grid_thw)
         position_embeddings = (rotary_pos_emb.cos(), rotary_pos_emb.sin())
 
-        # Compute cumulative sequence lengths for flash attention
+        # Compute cumulative sequence lengths for FlashAttention
         seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
         cu_seqlens = F.pad(seq_lengths.cumsum(dim=0), (1, 0), value=0).to(torch.int32)
 
@@ -627,11 +625,8 @@ def hf_llava_vit_packing_small_ln(pretrained: bool = False, ckpt_path=None, **kw
         layer_norm_type="layer_norm",
         use_head=True,
     )
-    # Use eager attention as default, flash_attention_2 if available
-    if is_flash_attn_2_available():
-        config._attn_implementation = "flash_attention_2"
-    else:
-        config._attn_implementation = "eager"
+    # FlashAttention is mandatory for this model
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTPackingModel(config)
     return model
 
@@ -648,11 +643,8 @@ def hf_llava_vit_packing_base_ln(pretrained: bool = False, ckpt_path=None, **kwa
         layer_norm_type="layer_norm",
         use_head=True,
     )
-    # Use eager attention as default, flash_attention_2 if available
-    if is_flash_attn_2_available():
-        config._attn_implementation = "flash_attention_2"
-    else:
-        config._attn_implementation = "eager"
+    # FlashAttention is mandatory for this model
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTPackingModel(config)
     return model
 
@@ -669,11 +661,8 @@ def hf_llava_vit_packing_large_ln(pretrained: bool = False, ckpt_path=None, **kw
         layer_norm_type="layer_norm",
         use_head=True,
     )
-    # Use eager attention as default, flash_attention_2 if available
-    if is_flash_attn_2_available():
-        config._attn_implementation = "flash_attention_2"
-    else:
-        config._attn_implementation = "eager"
+    # FlashAttention is mandatory for this model
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTPackingModel(config)
     return model
 
@@ -690,11 +679,8 @@ def hf_llava_vit_packing_huge_ln(pretrained: bool = False, ckpt_path=None, **kwa
         layer_norm_type="layer_norm",
         use_head=True,
     )
-    # Use eager attention as default, flash_attention_2 if available
-    if is_flash_attn_2_available():
-        config._attn_implementation = "flash_attention_2"
-    else:
-        config._attn_implementation = "eager"
+    # FlashAttention is mandatory for this model
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTPackingModel(config)
     return model
 
@@ -711,11 +697,8 @@ def hf_llava_vit_packing_giant_ln(pretrained: bool = False, ckpt_path=None, **kw
         layer_norm_type="layer_norm",
         use_head=True,
     )
-    # Use eager attention as default, flash_attention_2 if available
-    if is_flash_attn_2_available():
-        config._attn_implementation = "flash_attention_2"
-    else:
-        config._attn_implementation = "eager"
+    # FlashAttention is mandatory for this model
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTPackingModel(config)
     return model
 
@@ -724,24 +707,38 @@ if __name__ == "__main__":
     import timm
 
     # Test with a simple example
+    # Note: This requires FlashAttention and CUDA
+    print("Creating model (requires FlashAttention)...")
     model = timm.create_model("hf_llava_vit_packing_base_ln", pretrained=False)
     print(f"Model created: {type(model)}")
 
-    # Create test input
-    # Simulating 2 images: first is 1x14x14 patches, second is 1x7x7 patches
-    grid_thw = torch.tensor([[1, 14, 14], [1, 7, 7]], dtype=torch.long)
-    total_patches = (grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]).sum().item()
-    print(f"Total patches: {total_patches}")
+    # Create test input in [seq_len, patch_dim] format (Qwen2VL style)
+    # Simulating 1 image with 14x14 = 196 patches
+    # patch_dim = patch_size * patch_size * in_channels
+    # For base model: patch_size=16, in_channels=3
+    patch_size = 16
+    in_channels = 3
+    patch_dim = patch_size * patch_size * in_channels  # 16*16*3 = 768
+    seq_len = 14 * 14  # 196 patches for a single image
+    
+    grid_thw = torch.tensor([[1, 14, 14]], dtype=torch.long)
+    hidden_states = torch.randn(seq_len, patch_dim)  # (seq_len, patch_dim)
 
-    # Create pixel values (already in patch format)
-    pixel_values = torch.randn(
-        total_patches, 3, 1, 16, 16
-    )  # (N, C, temporal_patch, H_patch, W_patch)
+    print(f"Input shape: {hidden_states.shape}")
+    print(f"patch_dim = {patch_size}*{patch_size}*{in_channels} = {patch_dim}")
+    print(f"grid_thw: {grid_thw}")
 
-    # Forward pass
-    with torch.no_grad():
-        outputs = model(pixel_values=pixel_values, grid_thw=grid_thw)
+    # Forward pass (requires CUDA for FlashAttention)
+    if torch.cuda.is_available():
+        model = model.cuda()
+        hidden_states = hidden_states.cuda()
+        grid_thw = grid_thw.cuda()
+        
+        with torch.no_grad():
+            outputs = model(hidden_states=hidden_states, grid_thw=grid_thw)
 
-    print(f"Last hidden state shape: {outputs.last_hidden_state.shape}")
-    if outputs.pooler_output is not None:
-        print(f"Pooler output shape: {outputs.pooler_output.shape}")
+        print(f"Last hidden state shape: {outputs.last_hidden_state.shape}")
+        if outputs.pooler_output is not None:
+            print(f"Pooler output shape: {outputs.pooler_output.shape}")
+    else:
+        print("CUDA not available - skipping forward pass test (FlashAttention requires CUDA)")
