@@ -190,178 +190,19 @@ with torch.no_grad():
 
 ## Video Input
 
-For video input, set `t > 1` in `grid_thw` to specify the number of frames.
+For video input, the source model (`vit_preview_v0`) uses a **64-frame temporal context** with uniform frame sampling. When processing 8 frames, they are interpolated to specific positions within this 64-frame context:
 
-### Single Video Processing (8 Frames)
+- **8 frames** → interpolated to positions `[0, 9, 18, 27, 36, 45, 54, 63]` in 64-frame context
 
-```python
-import torch
-import numpy as np
+This ensures temporal RoPE (Rotary Position Embedding) frequencies match between the source model and the packing model, which is **essential for output consistency**.
 
-def video_to_packing_input(frames: list, patch_size: int = 16):
-    """Convert video frames to packing model input format.
-    
-    Args:
-        frames: List of PIL Images (video frames), all same size
-        patch_size: Size of each patch
-        
-    Returns:
-        hidden_states: (seq_len, patch_dim) tensor where seq_len = t * h * w
-        grid_thw: (1, 3) tensor with [t, h, w] patches
-    """
-    import torchvision.transforms as T
-    
-    t_frames = len(frames)
-    assert t_frames > 0, "Must provide at least one frame"
-    
-    # Assume all frames are the same size
-    w, h = frames[0].size
-    new_h = (h // patch_size) * patch_size
-    new_w = (w // patch_size) * patch_size
-    
-    h_patches = new_h // patch_size
-    w_patches = new_w // patch_size
-    
-    # Transform each frame
-    transform = T.Compose([
-        T.Resize((new_h, new_w)),
-        T.ToTensor(),
-        T.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
-                   std=[0.26862954, 0.26130258, 0.27577711]),
-    ])
-    
-    all_frame_patches = []
-    
-    for frame in frames:
-        pixel_tensor = transform(frame)  # (3, H, W)
-        channels = pixel_tensor.shape[0]
-        
-        # Reshape to patches: (C, H, W) -> (h_patches, w_patches, C, patch_size, patch_size)
-        patches = pixel_tensor.view(
-            channels, h_patches, patch_size, w_patches, patch_size
-        )
-        patches = patches.permute(1, 3, 0, 2, 4).contiguous()  # (h, w, C, pH, pW)
-        
-        # Flatten spatial dims: (h * w, patch_dim)
-        patch_dim = patch_size * patch_size * channels
-        frame_patches = patches.view(h_patches * w_patches, patch_dim)
-        all_frame_patches.append(frame_patches)
-    
-    # Stack all frames: (t * h * w, patch_dim)
-    hidden_states = torch.cat(all_frame_patches, dim=0)
-    
-    # Create grid_thw: [t, h, w]
-    grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long)
-    
-    return hidden_states, grid_thw
-
-
-# Example: 8-frame video at 224x224 with patch_size=16
-# Create synthetic video frames
-video_frames = [
-    Image.new('RGB', (224, 224), color=(i * 30, i * 20, i * 10)) 
-    for i in range(8)
-]
-
-hidden_states, grid_thw = video_to_packing_input(video_frames, patch_size=16)
-hidden_states = hidden_states.cuda().bfloat16()
-grid_thw = grid_thw.cuda()
-
-print(f"hidden_states shape: {hidden_states.shape}")  # (1568, 768)
-print(f"grid_thw: {grid_thw}")  # [[8, 14, 14]]
-# seq_len = 8 * 14 * 14 = 1568 patches
-
-with torch.no_grad():
-    outputs = model(hidden_states=hidden_states, grid_thw=grid_thw)
-
-print(f"Output shape: {outputs.last_hidden_state.shape}")  # (1568, hidden_size)
-print(f"Pooler output shape: {outputs.pooler_output.shape}")  # (1, hidden_size)
-```
-
-### Video with Different Frame Counts
-
-```python
-# Process videos with different number of frames
-def batch_videos_to_packing_input(videos: list, patch_size: int = 16):
-    """Convert multiple videos to a packed batch.
-    
-    Args:
-        videos: List of videos, each video is a list of PIL Images
-        patch_size: Size of each patch
-        
-    Returns:
-        hidden_states: (total_seq_len, patch_dim) tensor
-        grid_thw: (num_videos, 3) tensor
-    """
-    all_hidden_states = []
-    all_grid_thw = []
-    
-    for video_frames in videos:
-        hs, grid = video_to_packing_input(video_frames, patch_size)
-        all_hidden_states.append(hs)
-        all_grid_thw.append(grid)
-    
-    hidden_states = torch.cat(all_hidden_states, dim=0)
-    grid_thw = torch.cat(all_grid_thw, dim=0)
-    
-    return hidden_states, grid_thw
-
-
-# Example: Batch of 2 videos
-video1 = [Image.new('RGB', (224, 224), 'red') for _ in range(8)]    # 8 frames
-video2 = [Image.new('RGB', (224, 224), 'blue') for _ in range(4)]   # 4 frames
-
-videos = [video1, video2]
-hidden_states, grid_thw = batch_videos_to_packing_input(videos, patch_size=16)
-
-print(f"grid_thw:\n{grid_thw}")
-# [[8, 14, 14],   # 8 frames: 8 * 14 * 14 = 1568 patches
-#  [4, 14, 14]]   # 4 frames: 4 * 14 * 14 = 784 patches
-# Total: 1568 + 784 = 2352 patches
-```
-
-### Mixed Batch (Images + Videos)
-
-```python
-# You can mix images and videos in the same batch!
-# Images have t=1, videos have t>1
-
-# Image: 448x448
-image = Image.new('RGB', (448, 448), 'green')
-img_hs, img_grid = image_to_packing_input(image, patch_size=16)
-# img_grid = [[1, 28, 28]]  # 784 patches
-
-# Video: 8 frames at 224x224
-video = [Image.new('RGB', (224, 224), 'blue') for _ in range(8)]
-vid_hs, vid_grid = video_to_packing_input(video, patch_size=16)
-# vid_grid = [[8, 14, 14]]  # 1568 patches
-
-# Combine into batch
-hidden_states = torch.cat([img_hs, vid_hs], dim=0).cuda().bfloat16()
-grid_thw = torch.cat([img_grid, vid_grid], dim=0).cuda()
-
-print(f"Mixed batch grid_thw:\n{grid_thw}")
-# [[1, 28, 28],   # Image: 784 patches
-#  [8, 14, 14]]   # Video: 1568 patches
-# Total: 2352 patches
-
-with torch.no_grad():
-    outputs = model(hidden_states=hidden_states, grid_thw=grid_thw)
-# pooler_output: (2, hidden_size) - one for image, one for video
-```
+> **Important**: All video processing with the packing model should use interpolated temporal positions via `compute_patch_positions_with_interpolated_temporal` to match the source model's behavior.
 
 ---
 
 ## Using `patch_positions` with Interpolated Temporal Positions
 
-When processing videos with the packing model, you may need to match the RoPE positions used by the source model. The source model uses a 64-frame temporal context and applies visible_index for uniform frame sampling. To achieve output consistency with the source model, you must use `compute_patch_positions_with_interpolated_temporal` to compute patch positions with interpolated temporal values.
-
-### Why Interpolated Temporal Positions?
-
-The source model (`vit_preview_v0`) expects a 64-frame video input and uses `visible_index` to select frames uniformly. When processing only 8 frames, the source model places these frames at interpolated positions within the 64-frame context:
-
-- **8 frames** → interpolated to positions `[0, 9, 18, 27, 36, 45, 54, 63]` in 64-frame context
-- This ensures temporal RoPE frequencies match between source and packing models
+To achieve output consistency with the source model, you must use `compute_patch_positions_with_interpolated_temporal` to compute patch positions with interpolated temporal values.
 
 ### The `compute_patch_positions_with_interpolated_temporal` Function
 
@@ -530,8 +371,333 @@ The `interpolate_frame_indices` function computes interpolated positions using:
 | Use Case | Function | Example |
 |----------|----------|---------|
 | Images (single frame) | `compute_patch_positions_from_grid_thw` | Standard image processing |
-| Videos (no source model matching needed) | `compute_patch_positions_from_grid_thw` | Simple video processing |
 | Videos (source model consistency) | `compute_patch_positions_with_interpolated_temporal` | When output must match source model |
+
+---
+
+## Mixed Batch: Image + 8-Frame Video Packing with `patch_positions`
+
+This example demonstrates how to pack one image and one 8-frame video together in a single batch, with proper `patch_positions` for both. This is the recommended approach for mixed image-video processing with source model consistency.
+
+```python
+import torch
+from PIL import Image
+import torchvision.transforms as T
+from model_factory.vit_preview_v0_packing_hf import (
+    LlavaViTPackingModel,
+    compute_patch_positions_from_grid_thw,
+)
+from model_factory.convert_llava_vit_packing_to_hf import (
+    interpolate_frame_indices,
+    compute_patch_positions_with_interpolated_temporal,
+)
+
+# ============================================================
+# Configuration
+# ============================================================
+device = torch.device('cuda')
+patch_size = 16
+image_size = 224  # 224x224 image
+num_frames = 8
+target_frames = 64  # Source model's temporal context
+
+h_patches = image_size // patch_size  # 14
+w_patches = image_size // patch_size  # 14
+
+# ============================================================
+# Step 1: Prepare Image Input
+# ============================================================
+transform = T.Compose([
+    T.Resize((image_size, image_size)),
+    T.ToTensor(),
+    T.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711]),
+])
+
+# Load or create image
+image = Image.new('RGB', (image_size, image_size), color='green')
+image_tensor = transform(image)  # (3, 224, 224)
+
+# Convert image to patches
+channels = image_tensor.shape[0]
+image_patches = image_tensor.view(channels, h_patches, patch_size, w_patches, patch_size)
+image_patches = image_patches.permute(1, 3, 0, 2, 4).contiguous()  # (h, w, C, pH, pW)
+image_hidden_states = image_patches.view(h_patches * w_patches, patch_size * patch_size * channels)
+# Shape: (196, 768)
+
+# Compute patch_positions for image using compute_patch_positions_from_grid_thw
+image_grid_thw = torch.tensor([[1, h_patches, w_patches]], dtype=torch.long, device=device)
+image_patch_positions = compute_patch_positions_from_grid_thw(image_grid_thw)
+# Shape: (196, 3), values: [[0, 0, 0], [0, 0, 1], ..., [0, 13, 13]]
+
+# ============================================================
+# Step 2: Prepare Video Input with Interpolated Temporal Positions
+# ============================================================
+# Create or load video frames
+video_frames = [Image.new('RGB', (image_size, image_size), color=(i*30, i*20, i*10)) 
+                for i in range(num_frames)]
+
+# Convert video frames to patches
+all_video_patches = []
+for frame in video_frames:
+    frame_tensor = transform(frame)  # (3, 224, 224)
+    patches = frame_tensor.view(channels, h_patches, patch_size, w_patches, patch_size)
+    patches = patches.permute(1, 3, 0, 2, 4).contiguous()
+    frame_patches = patches.view(h_patches * w_patches, patch_size * patch_size * channels)
+    all_video_patches.append(frame_patches)
+
+video_hidden_states = torch.cat(all_video_patches, dim=0)
+# Shape: (1568, 768)
+
+# Compute interpolated frame indices for 64-frame context
+# 8 frames → interpolated to positions [0, 9, 18, 27, 36, 45, 54, 63] in 64-frame context
+frame_indices = torch.arange(num_frames).unsqueeze(0).to(device)  # [[0, 1, 2, 3, 4, 5, 6, 7]]
+total_frames_tensor = torch.tensor([num_frames]).to(device)  # [8]
+interpolated_indices = interpolate_frame_indices(frame_indices, total_frames_tensor, target_frames)
+# Result: [[0, 9, 18, 27, 36, 45, 54, 63]]
+
+# Compute patch_positions with interpolated temporal positions
+video_patch_positions = compute_patch_positions_with_interpolated_temporal(
+    interpolated_indices, h_patches, w_patches, device
+)
+# Shape: (1568, 3)
+
+video_grid_thw = torch.tensor([[num_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+
+# ============================================================
+# Step 3: Combine Image and Video into Packed Batch
+# ============================================================
+# Concatenate hidden_states
+packed_hidden_states = torch.cat([
+    image_hidden_states,  # (196, 768)
+    video_hidden_states,  # (1568, 768)
+], dim=0).to(device=device, dtype=torch.bfloat16)
+# Total shape: (1764, 768)
+
+# Concatenate grid_thw
+packed_grid_thw = torch.cat([
+    image_grid_thw,  # [[1, 14, 14]]
+    video_grid_thw,  # [[8, 14, 14]]
+], dim=0)
+# Shape: (2, 3)
+
+# Concatenate patch_positions
+packed_patch_positions = torch.cat([
+    image_patch_positions,  # (196, 3)
+    video_patch_positions,  # (1568, 3)
+], dim=0)
+# Shape: (1764, 3)
+
+print(f"packed_hidden_states shape: {packed_hidden_states.shape}")  # (1764, 768)
+print(f"packed_grid_thw: {packed_grid_thw.tolist()}")  # [[1, 14, 14], [8, 14, 14]]
+print(f"packed_patch_positions shape: {packed_patch_positions.shape}")  # (1764, 3)
+
+# ============================================================
+# Step 4: Forward Pass with Packing Model
+# ============================================================
+model = LlavaViTPackingModel.from_pretrained("/path/to/your_model_hf_packing", torch_dtype=torch.bfloat16)
+model = model.to(device).eval()
+
+with torch.no_grad():
+    outputs = model(
+        hidden_states=packed_hidden_states,
+        grid_thw=packed_grid_thw,
+        patch_positions=packed_patch_positions,
+    )
+
+print(f"Output shape: {outputs.last_hidden_state.shape}")  # (1764, hidden_size)
+print(f"Pooler output shape: {outputs.pooler_output.shape}")  # (2, hidden_size)
+# pooler_output[0]: image pooled representation
+# pooler_output[1]: video pooled representation
+```
+
+---
+
+## Verifying Consistency with Source Model (Separate Inference)
+
+This example demonstrates how to verify that the packing model produces consistent outputs with the source model (`vit_preview_v0`) by running separate inference for image and video inputs.
+
+```python
+import torch
+import torch.nn.functional as F
+from PIL import Image
+import torchvision.transforms as T
+import timm
+from model_factory.vit_preview_v0_packing_hf import (
+    LlavaViTPackingModel,
+    compute_patch_positions_from_grid_thw,
+)
+from model_factory.convert_llava_vit_packing_to_hf import (
+    interpolate_frame_indices,
+    compute_patch_positions_with_interpolated_temporal,
+)
+
+# ============================================================
+# Load Both Models
+# ============================================================
+device = torch.device('cuda')
+
+# Load source model (vit_preview_v0)
+src_model = timm.create_model("llava_vit_large_ln", pretrained=False)
+src_checkpoint = torch.load("/path/to/backbone.pt", map_location='cpu')
+src_state_dict = src_checkpoint.get("model", src_checkpoint.get("state_dict", src_checkpoint))
+src_model.load_state_dict(src_state_dict, strict=False)
+src_model = src_model.to(device, dtype=torch.bfloat16).eval()
+
+# Load packing model
+packing_model = LlavaViTPackingModel.from_pretrained(
+    "/path/to/your_model_hf_packing", 
+    torch_dtype=torch.bfloat16
+)
+packing_model = packing_model.to(device).eval()
+
+# ============================================================
+# Configuration
+# ============================================================
+patch_size = 16
+image_size = 224
+num_frames = 8
+target_frames = 64
+h_patches = image_size // patch_size  # 14
+w_patches = image_size // patch_size  # 14
+
+transform = T.Compose([
+    T.Resize((image_size, image_size)),
+    T.ToTensor(),
+    T.Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711]),
+])
+
+# ============================================================
+# Test 1: Image Consistency
+# ============================================================
+print("=" * 60)
+print("Test 1: Image Consistency")
+print("=" * 60)
+
+# Prepare image
+image = Image.new('RGB', (image_size, image_size), color='red')
+image_tensor = transform(image).unsqueeze(0).to(device, dtype=torch.bfloat16)  # (1, 3, 224, 224)
+
+with torch.no_grad():
+    # Source model forward (image input: B, C, H, W)
+    src_out = src_model(image_tensor)
+    src_image_feat = src_out['visible_embeddings']  # (1, 196, hidden_size)
+    
+    # Packing model forward
+    channels = 3
+    patches = image_tensor.view(1, channels, h_patches, patch_size, w_patches, patch_size)
+    patches = patches.permute(0, 2, 4, 1, 3, 5).contiguous()
+    hidden_states = patches.view(h_patches * w_patches, patch_size * patch_size * channels)
+    
+    grid_thw = torch.tensor([[1, h_patches, w_patches]], dtype=torch.long, device=device)
+    patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
+    
+    packing_out = packing_model(
+        hidden_states=hidden_states,
+        grid_thw=grid_thw,
+        patch_positions=patch_positions,
+    )
+    packing_image_feat = packing_out.last_hidden_state  # (196, hidden_size)
+
+# Compare outputs
+src_flat = src_image_feat.flatten(0, -2).float()
+packing_flat = packing_image_feat.float()
+
+cos_sim = F.cosine_similarity(src_flat, packing_flat, dim=-1)
+print(f"Image Min Cosine Similarity: {cos_sim.min().item():.8f}")
+print(f"Image Mean Cosine Similarity: {cos_sim.mean().item():.8f}")
+if cos_sim.min().item() > 0.99:
+    print("✅ Image Consistency: PASS")
+else:
+    print("❌ Image Consistency: FAIL")
+
+# ============================================================
+# Test 2: Video Consistency (8 frames)
+# ============================================================
+print("\n" + "=" * 60)
+print("Test 2: Video Consistency (8 frames)")
+print("=" * 60)
+
+# Create video frames
+video_frames = [Image.new('RGB', (image_size, image_size), color=(i*30, i*20, i*10)) 
+                for i in range(num_frames)]
+video_tensors = torch.stack([transform(f) for f in video_frames], dim=0)  # (8, 3, 224, 224)
+video_tensor = video_tensors.unsqueeze(0).permute(0, 2, 1, 3, 4).to(device, dtype=torch.bfloat16)
+# Shape: (1, 3, 8, 224, 224) -> (B, C, T, H, W)
+
+# Compute interpolated frame indices
+# 8 frames → interpolated to positions [0, 9, 18, 27, 36, 45, 54, 63] in 64-frame context
+frame_indices = torch.arange(num_frames).unsqueeze(0).to(device)
+total_frames_tensor = torch.tensor([num_frames]).to(device)
+interpolated_indices = interpolate_frame_indices(frame_indices, total_frames_tensor, target_frames)
+print(f"Interpolated indices: {interpolated_indices[0].tolist()}")
+
+with torch.no_grad():
+    # Source model forward (requires 64-frame padded video with visible_index)
+    bs = 1
+    channels = 3
+    frame_tokens = h_patches * w_patches
+    
+    # Create 64-frame padded video
+    padded_video = torch.zeros(bs, channels, target_frames, image_size, image_size,
+                               device=device, dtype=video_tensor.dtype)
+    
+    # Scatter original frames into interpolated positions
+    frame_idx_expanded = interpolated_indices.view(bs, 1, num_frames, 1, 1).expand(
+        bs, channels, num_frames, image_size, image_size
+    )
+    padded_video.scatter_(dim=2, index=frame_idx_expanded, src=video_tensor)
+    
+    # Compute visible_index
+    per = torch.arange(frame_tokens, device=device)
+    visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
+    visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
+    
+    src_video_out = src_model(padded_video, visible_indices=visible_index, mask_ratio=None)
+    src_video_feat = src_video_out['visible_embeddings']  # (1, 1568, hidden_size)
+    
+    # Packing model forward
+    patches = video_tensor.view(bs, channels, num_frames, h_patches, patch_size, w_patches, patch_size)
+    patches = patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
+    hidden_states = patches.view(num_frames * h_patches * w_patches, patch_size * patch_size * channels)
+    
+    grid_thw = torch.tensor([[num_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+    patch_positions = compute_patch_positions_with_interpolated_temporal(
+        interpolated_indices, h_patches, w_patches, device
+    )
+    
+    packing_video_out = packing_model(
+        hidden_states=hidden_states,
+        grid_thw=grid_thw,
+        patch_positions=patch_positions,
+    )
+    packing_video_feat = packing_video_out.last_hidden_state  # (1568, hidden_size)
+
+# Compare outputs
+src_video_flat = src_video_feat.flatten(0, -2).float()
+packing_video_flat = packing_video_feat.float()
+
+cos_sim_video = F.cosine_similarity(src_video_flat, packing_video_flat, dim=-1)
+print(f"Video Min Cosine Similarity: {cos_sim_video.min().item():.8f}")
+print(f"Video Mean Cosine Similarity: {cos_sim_video.mean().item():.8f}")
+if cos_sim_video.min().item() > 0.99:
+    print("✅ Video Consistency: PASS")
+else:
+    print("❌ Video Consistency: FAIL")
+
+# ============================================================
+# Summary
+# ============================================================
+print("\n" + "=" * 60)
+print("Summary")
+print("=" * 60)
+all_pass = cos_sim.min().item() > 0.99 and cos_sim_video.min().item() > 0.99
+if all_pass:
+    print("✅ All consistency tests PASSED")
+else:
+    print("❌ Some consistency tests FAILED")
+```
 
 ---
 
