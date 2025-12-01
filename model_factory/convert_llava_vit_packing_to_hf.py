@@ -826,13 +826,17 @@ def verify_multi_sample_consistency_packing(src_model, packing_model, real_image
     target_frames = 64  # src_model expects 64-frame context for video
     num_frames = 8  # Number of frames per video
 
-    # Define image and video sizes
-    image_sizes = [224, 336, 1080]  # Image resolutions divisible by patch_size (16)
-    # Adjust 1080 to 1088 (divisible by 16)
-    image_sizes_adjusted = [224, 336, 1088]
-    video_sizes = [384, 512]  # Video resolutions divisible by patch_size (16)
-    # Adjust 518 to 512 (divisible by 16)
+    # Define original image and video sizes (as specified in the requirements)
+    image_sizes_original = [224, 336, 1080]  # Original image resolutions
+    video_sizes_original = [384, 518]  # Original video resolutions
     
+    # Adjusted sizes to be divisible by patch_size (16)
+    # 1080 -> 1088, 518 -> 512
+    image_sizes_adjusted = [224, 336, 1088]
+    video_sizes = [384, 512]
+    
+    print(f"    Original image sizes: {image_sizes_original}")
+    print(f"    Original video sizes: {video_sizes_original}")
     print(f"    Adjusted image sizes (divisible by {patch_size}): {image_sizes_adjusted}")
     print(f"    Adjusted video sizes (divisible by {patch_size}): {video_sizes}")
 
@@ -859,7 +863,7 @@ def verify_multi_sample_consistency_packing(src_model, packing_model, real_image
                 align_corners=False
             ).to(dtype=torch.bfloat16)
         image_tensors.append(img_tensor)
-        print(f"    Image {i+1} Shape: {img_tensor.shape} (res={image_sizes[i]}, adjusted={img_size})")
+        print(f"    Image {i+1} Shape: {img_tensor.shape} (res={image_sizes_original[i]}, adjusted={img_size})")
     
     # === Prepare 2 videos ===
     video_tensors = []
@@ -884,8 +888,7 @@ def verify_multi_sample_consistency_packing(src_model, packing_model, real_image
         )
         interpolated_indices_list.append(interpolated_indices)
         
-        original_vid_size = [384, 518][i]
-        print(f"    Video {i+1} Shape: {vid_tensor.shape} (res={original_vid_size}, adjusted={vid_size})")
+        print(f"    Video {i+1} Shape: {vid_tensor.shape} (res={video_sizes_original[i]}, adjusted={vid_size})")
 
     bs = 1  # batch size for each sample
 
@@ -1054,7 +1057,7 @@ def verify_multi_sample_consistency_packing(src_model, packing_model, real_image
     
     # === Compare image outputs ===
     for i in range(len(image_tensors)):
-        print(f"\n    --- Image {i+1} Comparison (res={image_sizes[i]}) ---")
+        print(f"\n    --- Image {i+1} Comparison (res={image_sizes_original[i]}) ---")
         src_feat = src_image_feats[i]
         packing_feat = packing_image_feats[i]
         
@@ -1087,8 +1090,7 @@ def verify_multi_sample_consistency_packing(src_model, packing_model, real_image
 
     # === Compare video outputs ===
     for i in range(len(video_tensors)):
-        original_vid_size = [384, 518][i]
-        print(f"\n    --- Video {i+1} Comparison (res={original_vid_size}) ---")
+        print(f"\n    --- Video {i+1} Comparison (res={video_sizes_original[i]}) ---")
         src_feat = src_video_feats[i]
         packing_feat = packing_video_feats[i]
         
