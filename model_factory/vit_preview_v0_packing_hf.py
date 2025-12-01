@@ -238,18 +238,16 @@ class VisionRotaryEmbedding(nn.Module):
             patches_per_frame = h * w
 
             # Compute position ids for each axis
-            # Temporal positions are scaled by the number of frames (t) to match
-            # the original ViT's temporal RoPE behavior where temporal interval
-            # should not be 1 but rather t (e.g., for [8,14,14], interval is 8)
-            # This means temporal positions are: 0, t, 2t, 3t, ... for each frame
-            t_ids_scaled = torch.arange(t, device=device).repeat_interleave(patches_per_frame) * t
+            # Temporal position IDs are the frame index (0, 1, 2, ..., t-1) repeated
+            # for each patch in that frame, matching the source model's behavior
+            t_ids = torch.arange(t, device=device).repeat_interleave(patches_per_frame)
             h_base = torch.arange(h, device=device).repeat_interleave(w)
             h_ids = h_base.repeat(t)
             w_base = torch.arange(w, device=device).repeat(h)
             w_ids = w_base.repeat(t)
 
             # Compute frequencies for each axis
-            ft = torch.outer(t_ids_scaled.float(), inv_t)
+            ft = torch.outer(t_ids.float(), inv_t)
             fh = torch.outer(h_ids.float(), inv_h)
             fw = torch.outer(w_ids.float(), inv_w)
 
@@ -783,17 +781,15 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
     This utility function generates patch_positions tensor from grid_thw,
     which can be used to explicitly specify the RoPE positions for each patch.
     
-    Note: The temporal positions are scaled by the number of frames (t) to match
-    the packing model's temporal RoPE behavior where temporal interval
-    should not be 1 but rather t (e.g., for [8,14,14], interval is 8).
-    This means temporal positions are: 0, t, 2t, 3t, ... for each frame.
+    Note: The temporal positions are the frame index (0, 1, 2, ..., t-1), repeated
+    for each patch in that frame, matching the source model's behavior.
     
     Args:
         grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image
     
     Returns:
-        patch_positions: Tensor of shape (total_seq_len, 3) with [t_scaled, h, w] positions
-            for each patch in the sequence, where t_scaled = frame_idx * num_frames.
+        patch_positions: Tensor of shape (total_seq_len, 3) with [t, h, w] positions
+            for each patch in the sequence.
     """
     device = grid_thw.device
     positions = []
@@ -803,8 +799,8 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
         patches_per_frame = h * w
         
         # Compute position for each axis
-        # Temporal positions are scaled by t to match the packing model's behavior
-        t_ids = torch.arange(t, device=device).repeat_interleave(patches_per_frame) * t
+        # Temporal positions are the frame index, matching the source model
+        t_ids = torch.arange(t, device=device).repeat_interleave(patches_per_frame)
         h_base = torch.arange(h, device=device).repeat_interleave(w)
         h_ids = h_base.repeat(t)
         w_base = torch.arange(w, device=device).repeat(h)
