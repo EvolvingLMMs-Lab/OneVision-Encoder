@@ -614,6 +614,10 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
     image_size = 224
     target_frames = 64  # src_model expects 64-frame context
     
+    # Initialize variables to track video test results
+    min_cos_video = 0.0
+    video_test_passed = False
+    
     # Create synthesized video from real image
     video_tensor = get_synthesized_video(real_image_tensor, num_frames=num_frames, size=image_size)
     video_tensor = video_tensor.to(device, dtype=torch.bfloat16)
@@ -635,6 +639,10 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
     
     print(f"    Original frame indices: {frame_indices[0].tolist()}")
     print(f"    Interpolated indices (in 64-frame context): {interpolated_indices[0].tolist()}")
+    
+    # Initialize output variables
+    src_video_feat = None
+    tgt_video_out = None
     
     with torch.no_grad():
         # === Source model forward ===
@@ -723,6 +731,7 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
         print(f"    [Reloaded Video] Min Cosine Sim: {min_cos_video:.8f} (Mean: {mean_cos_video:.8f})")
         if min_cos_video > 0.99:
             print("    ✅ Reloaded Video Verification: PASS")
+            video_test_passed = True
         else:
             print("    ❌ Reloaded Video Verification: FAIL")
     
@@ -730,7 +739,8 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
     # Overall Summary
     # ============================================================
     print("\n    --- Overall Summary ---")
-    all_pass = min_cos > 0.99 and (min_cos_video if 'min_cos_video' in dir() else 0) > 0.99
+    image_test_passed = min_cos > 0.99
+    all_pass = image_test_passed and video_test_passed
     if all_pass:
         print("    ✅ Reloaded Packing Model (Image + Video): ALL PASS")
     else:
