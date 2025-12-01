@@ -788,6 +788,349 @@ def verify_mixed_video_image_consistency_packing(src_model, packing_model, real_
         print("    ❌ Mixed Video+Image Consistency: SOME FAILED")
 
 
+def verify_multi_sample_consistency_packing(src_model, packing_model, real_image_tensor):
+    """
+    Verify consistency between the source model and the packing model with multiple samples.
+    
+    This function tests:
+    - 3 images with resolutions: 224, 336, 1080
+    - 2 videos with 8 frames each: first video resolution 384, second video resolution 518
+    - All 5 samples are separately tested through src_model
+    - All 5 samples are packed together for packing_model forward
+    
+    Args:
+        src_model: The source ViT model
+        packing_model: The packing HF model
+        real_image_tensor: Real image tensor for creating test inputs
+    """
+    print("\n=== Verifying Multi-Sample Consistency (3 images + 2 videos - bfloat16) ===")
+    print("    Image resolutions: 224, 336, 1080")
+    print("    Video resolutions: 384 (8 frames), 518 (8 frames)")
+
+    src_model.eval()
+    packing_model.eval()
+
+    device = next(src_model.parameters()).device
+    print(f"    Running on Device: {device}")
+
+    dtype = next(src_model.parameters()).dtype
+    print(f"    Model Dtype: {dtype}")
+
+    # Get patch size from source model
+    patch_size = 16
+    if hasattr(src_model, "patch_size"):
+        ps = src_model.patch_size
+        patch_size = ps[0] if isinstance(ps, tuple) else ps
+
+    channels = 3
+    target_frames = 64  # src_model expects 64-frame context for video
+    num_frames = 8  # Number of frames per video
+
+    # Define original image and video sizes (as specified in the requirements)
+    image_sizes_original = [224, 336, 1080]  # Original image resolutions
+    video_sizes_original = [384, 518]  # Original video resolutions
+    
+    # Adjusted sizes to be divisible by patch_size (16)
+    # 1080 -> 1088, 518 -> 512
+    image_sizes_adjusted = [224, 336, 1088]
+    video_sizes = [384, 512]
+    
+    print(f"    Original image sizes: {image_sizes_original}")
+    print(f"    Original video sizes: {video_sizes_original}")
+    print(f"    Adjusted image sizes (divisible by {patch_size}): {image_sizes_adjusted}")
+    print(f"    Adjusted video sizes (divisible by {patch_size}): {video_sizes}")
+
+    # ============================================================
+    # Prepare All Inputs
+    # ============================================================
+    
+    # === Prepare 3 images ===
+    image_tensors = []
+    image_h_patches_list = []
+    image_w_patches_list = []
+    for i, img_size in enumerate(image_sizes_adjusted):
+        h_patches = img_size // patch_size
+        w_patches = img_size // patch_size
+        image_h_patches_list.append(h_patches)
+        image_w_patches_list.append(w_patches)
+        
+        img_tensor = real_image_tensor.to(device, dtype=torch.bfloat16)
+        if img_tensor.shape[-1] != img_size or img_tensor.shape[-2] != img_size:
+            img_tensor = F.interpolate(
+                img_tensor.float(), 
+                size=(img_size, img_size), 
+                mode='bicubic', 
+                align_corners=False
+            ).to(dtype=torch.bfloat16)
+        image_tensors.append(img_tensor)
+        print(f"    Image {i+1} Shape: {img_tensor.shape} (res={image_sizes_original[i]}, adjusted={img_size})")
+    
+    # === Prepare 2 videos ===
+    video_tensors = []
+    video_h_patches_list = []
+    video_w_patches_list = []
+    interpolated_indices_list = []
+    for i, vid_size in enumerate(video_sizes):
+        h_patches = vid_size // patch_size
+        w_patches = vid_size // patch_size
+        video_h_patches_list.append(h_patches)
+        video_w_patches_list.append(w_patches)
+        
+        vid_tensor = get_synthesized_video(real_image_tensor, num_frames=num_frames, size=vid_size)
+        vid_tensor = vid_tensor.to(device, dtype=torch.bfloat16)
+        video_tensors.append(vid_tensor)
+        
+        # Compute interpolated frame indices for 64-frame context
+        frame_indices = torch.arange(num_frames).unsqueeze(0).to(device)
+        total_frames_tensor = torch.tensor([num_frames]).to(device)
+        interpolated_indices = interpolate_frame_indices(
+            frame_indices, total_frames_tensor, target_frames
+        )
+        interpolated_indices_list.append(interpolated_indices)
+        
+        print(f"    Video {i+1} Shape: {vid_tensor.shape} (res={video_sizes_original[i]}, adjusted={vid_size})")
+
+    bs = 1  # batch size for each sample
+
+    with torch.no_grad():
+        # ============================================================
+        # Source model forward - Process Each Sample Separately
+        # ============================================================
+        src_image_feats = []
+        src_video_feats = []
+        
+        # === Process each image separately with src_model ===
+        for i, img_tensor in enumerate(image_tensors):
+            try:
+                src_image_out = src_model(img_tensor)
+                if isinstance(src_image_out, dict):
+                    src_image_feat = src_image_out.get('visible_embeddings')
+                else:
+                    src_image_feat = src_image_out
+                src_image_feats.append(src_image_feat)
+                print(f"    Source image {i+1} output shape: {src_image_feat.shape}")
+            except Exception as e:
+                print(f"    [Error] Source image {i+1} forward failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return
+
+        # === Process each video separately with src_model ===
+        for i, (vid_tensor, interpolated_indices) in enumerate(zip(video_tensors, interpolated_indices_list)):
+            try:
+                vid_size = video_sizes[i]
+                h_patches = video_h_patches_list[i]
+                w_patches = video_w_patches_list[i]
+                frame_tokens = h_patches * w_patches
+                
+                # Create 64-frame padded video and use visible_index
+                padded_videos = torch.zeros(bs, channels, target_frames, vid_size, vid_size, 
+                                            device=device, dtype=vid_tensor.dtype)
+                
+                # Scatter original frames into interpolated positions
+                seq_len = num_frames
+                frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(
+                    bs, channels, seq_len, vid_size, vid_size
+                )
+                padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=vid_tensor)
+                
+                # Compute visible_index for the uniformly sampled frames
+                per = torch.arange(frame_tokens, device=device)
+                visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
+                visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
+                
+                src_video_out = src_model(padded_videos, visible_indices=visible_index, mask_ratio=None)
+                if isinstance(src_video_out, dict):
+                    src_video_feat = src_video_out.get('visible_embeddings')
+                else:
+                    src_video_feat = src_video_out
+                src_video_feats.append(src_video_feat)
+                print(f"    Source video {i+1} output shape: {src_video_feat.shape}")
+            except Exception as e:
+                print(f"    [Error] Source video {i+1} forward failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return
+
+        # ============================================================
+        # Packing model forward - Process All Samples Together
+        # ============================================================
+        try:
+            patch_dim = patch_size * patch_size * channels
+            
+            all_hidden_states = []
+            all_patch_positions = []
+            grid_thw_list = []
+            seq_lengths = []  # Track sequence lengths for each sample
+            
+            # === Prepare image patches ===
+            for i, img_tensor in enumerate(image_tensors):
+                h_patches = image_h_patches_list[i]
+                w_patches = image_w_patches_list[i]
+                img_size = image_sizes_adjusted[i]
+                
+                img_patches = img_tensor.view(
+                    bs, channels, h_patches, patch_size, w_patches, patch_size
+                )
+                img_patches = img_patches.permute(0, 2, 4, 1, 3, 5).contiguous()
+                img_seq_len = bs * 1 * h_patches * w_patches
+                img_hidden_states = img_patches.view(img_seq_len, patch_dim)
+                all_hidden_states.append(img_hidden_states)
+                seq_lengths.append(img_seq_len)
+                
+                # For image, temporal position is 0 (single frame)
+                img_patch_positions = []
+                for h in range(h_patches):
+                    for w in range(w_patches):
+                        img_patch_positions.append([0, h, w])
+                img_patch_positions = torch.tensor(img_patch_positions, dtype=torch.long, device=device)
+                all_patch_positions.append(img_patch_positions)
+                
+                grid_thw_list.append([1, h_patches, w_patches])
+            
+            # === Prepare video patches ===
+            for i, (vid_tensor, interpolated_indices) in enumerate(zip(video_tensors, interpolated_indices_list)):
+                h_patches = video_h_patches_list[i]
+                w_patches = video_w_patches_list[i]
+                
+                vid_patches = vid_tensor.view(
+                    bs, channels, num_frames, h_patches, patch_size, w_patches, patch_size
+                )
+                vid_patches = vid_patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
+                vid_seq_len = bs * num_frames * h_patches * w_patches
+                vid_hidden_states = vid_patches.view(vid_seq_len, patch_dim)
+                all_hidden_states.append(vid_hidden_states)
+                seq_lengths.append(vid_seq_len)
+                
+                # Compute video patch_positions with interpolated temporal positions
+                vid_patch_positions = compute_patch_positions_with_interpolated_temporal(
+                    interpolated_indices, h_patches, w_patches, device
+                )
+                all_patch_positions.append(vid_patch_positions)
+                
+                grid_thw_list.append([num_frames, h_patches, w_patches])
+            
+            # === Combine all samples ===
+            combined_hidden_states = torch.cat(all_hidden_states, dim=0)
+            combined_patch_positions = torch.cat(all_patch_positions, dim=0)
+            combined_grid_thw = torch.tensor(grid_thw_list, dtype=torch.long, device=device)
+            
+            print(f"    Combined input shape: {combined_hidden_states.shape}")
+            print(f"    Combined patch_positions shape: {combined_patch_positions.shape}")
+            print(f"    Combined grid_thw: {combined_grid_thw.tolist()}")
+            
+            packing_out = packing_model(
+                hidden_states=combined_hidden_states,
+                grid_thw=combined_grid_thw,
+                patch_positions=combined_patch_positions,
+            )
+            packing_feat = packing_out.last_hidden_state
+            
+            # Split the output back into individual samples
+            packing_image_feats = []
+            packing_video_feats = []
+            current_idx = 0
+            for i in range(len(image_tensors)):
+                sample_len = seq_lengths[i]
+                packing_image_feats.append(packing_feat[current_idx:current_idx + sample_len])
+                current_idx += sample_len
+            for i in range(len(video_tensors)):
+                sample_len = seq_lengths[len(image_tensors) + i]
+                packing_video_feats.append(packing_feat[current_idx:current_idx + sample_len])
+                current_idx += sample_len
+            
+            for i, feat in enumerate(packing_image_feats):
+                print(f"    Packing image {i+1} output shape: {feat.shape}")
+            for i, feat in enumerate(packing_video_feats):
+                print(f"    Packing video {i+1} output shape: {feat.shape}")
+                
+        except Exception as e:
+            print(f"    [Error] Packing model forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+    # ============================================================
+    # Compare Outputs for Each Sample
+    # ============================================================
+    all_pass = True
+    
+    # === Compare image outputs ===
+    for i in range(len(image_tensors)):
+        print(f"\n    --- Image {i+1} Comparison (res={image_sizes_original[i]}) ---")
+        src_feat = src_image_feats[i]
+        packing_feat = packing_image_feats[i]
+        
+        if src_feat is not None and packing_feat is not None:
+            src_flat = src_feat.flatten(0, -2).float()
+            packing_flat = packing_feat.float()
+
+            if src_flat.shape[0] != packing_flat.shape[0]:
+                print(f"    [Warning] Shape mismatch: src {src_flat.shape} vs packing {packing_flat.shape}")
+                min_len = min(src_flat.shape[0], packing_flat.shape[0])
+                src_flat = src_flat[:min_len]
+                packing_flat = packing_flat[:min_len]
+
+            diff_feat = (src_flat - packing_flat).abs().max().item()
+            cos_sim = F.cosine_similarity(src_flat, packing_flat, dim=-1)
+
+            min_cos = cos_sim.min().item()
+            mean_cos = cos_sim.mean().item()
+
+            print(f"    [Image {i+1}] Max Diff:       {diff_feat:.6f}")
+            print(f"    [Image {i+1}] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+
+            if min_cos > 0.99:
+                print(f"    ✅ Image {i+1}: PASS")
+            else:
+                print(f"    ❌ Image {i+1}: FAIL")
+                all_pass = False
+        else:
+            all_pass = False
+
+    # === Compare video outputs ===
+    for i in range(len(video_tensors)):
+        print(f"\n    --- Video {i+1} Comparison (res={video_sizes_original[i]}) ---")
+        src_feat = src_video_feats[i]
+        packing_feat = packing_video_feats[i]
+        
+        if src_feat is not None and packing_feat is not None:
+            src_flat = src_feat.flatten(0, -2).float()
+            packing_flat = packing_feat.float()
+
+            if src_flat.shape[0] != packing_flat.shape[0]:
+                print(f"    [Warning] Shape mismatch: src {src_flat.shape} vs packing {packing_flat.shape}")
+                min_len = min(src_flat.shape[0], packing_flat.shape[0])
+                src_flat = src_flat[:min_len]
+                packing_flat = packing_flat[:min_len]
+
+            diff_feat = (src_flat - packing_flat).abs().max().item()
+            cos_sim = F.cosine_similarity(src_flat, packing_flat, dim=-1)
+
+            min_cos = cos_sim.min().item()
+            mean_cos = cos_sim.mean().item()
+
+            print(f"    [Video {i+1}] Max Diff:       {diff_feat:.6f}")
+            print(f"    [Video {i+1}] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+
+            if min_cos > 0.99:
+                print(f"    ✅ Video {i+1}: PASS")
+            else:
+                print(f"    ❌ Video {i+1}: FAIL")
+                all_pass = False
+        else:
+            all_pass = False
+
+    # ============================================================
+    # Overall Summary
+    # ============================================================
+    print("\n    --- Multi-Sample Overall Summary ---")
+    if all_pass:
+        print("    ✅ Multi-Sample Consistency (3 images + 2 videos): ALL PASS")
+    else:
+        print("    ❌ Multi-Sample Consistency (3 images + 2 videos): SOME FAILED")
+
+
 def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor):
     print("\n=== Verifying Loaded Saved Packing Model (Simulating User Usage - bfloat16) ===")
     print(f"--> Loading from: {output_dir}")
@@ -1081,6 +1424,11 @@ def convert_and_save_packing(src_model_name, tgt_model_name, weight_path, output
 
     # 验证 Packing 模型一致性 (视频+图片混合输入，视频使用 compute_patch_positions_with_interpolated_temporal)
     verify_mixed_video_image_consistency_packing(src_model, tgt_model, real_img, num_frames=8, video_size=224, image_size=448)
+
+    # 验证 Packing 模型一致性 (3个图片 + 2个视频的多样本测试)
+    # 3 images: 224, 336, 1080 resolutions
+    # 2 videos: 384 resolution (8 frames), 518 resolution (8 frames)
+    verify_multi_sample_consistency_packing(src_model, tgt_model, real_img)
 
     if output_dir:
         print(f"\n--> Saving HF Packing Model to {output_dir}...")
