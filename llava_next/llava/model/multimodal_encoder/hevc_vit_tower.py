@@ -62,11 +62,8 @@ class HEVCViTVisionTower(nn.Module):
             image_features = image_forward_outs.hidden_states[self.select_layer]
 
         # Note: HEVC ViT does not have a cls token, so we just return all patch features
-        if select_feature_type == "patch":
-            image_features = image_features
-        elif select_feature_type == "cls_patch":
-            image_features = image_features
-        else:
+        # Both "patch" and "cls_patch" return the same features for HEVC ViT
+        if select_feature_type not in ["patch", "cls_patch"]:
             raise ValueError(f"Unexpected select feature: {select_feature_type}")
         return image_features
 
