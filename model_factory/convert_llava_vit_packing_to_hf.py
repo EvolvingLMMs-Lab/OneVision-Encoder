@@ -512,6 +512,282 @@ def verify_video_consistency_packing(src_model, packing_model, real_image_tensor
             print("    ❌ Video Packing Head:    FAIL")
 
 
+def verify_mixed_video_image_consistency_packing(src_model, packing_model, real_image_tensor, num_frames=8, video_size=224, image_size=448):
+    """
+    Verify consistency between the source model and the packing model with mixed video+image input.
+
+    This function tests that the packing model produces consistent outputs with the
+    original source model when processing a combined batch of video and image inputs.
+    
+    The video uses `compute_patch_positions_with_interpolated_temporal` for RoPE calculation,
+    and both video and image are processed together in a single packing model forward pass.
+    
+    The src_model processes video and image separately, and the results are compared with
+    the packing model's combined output.
+    
+    Args:
+        src_model: The source ViT model
+        packing_model: The packing HF model
+        real_image_tensor: Real image tensor for creating test inputs
+        num_frames: Number of video frames to test (default: 8)
+        video_size: Size of each video frame (default: 224)
+        image_size: Size of the image (default: 448)
+    """
+    print(f"\n=== Verifying Mixed Video+Image Consistency with Packing Model ({num_frames} frames + image - bfloat16) ===")
+
+    src_model.eval()
+    packing_model.eval()
+
+    device = next(src_model.parameters()).device
+    print(f"    Running on Device: {device}")
+
+    dtype = next(src_model.parameters()).dtype
+    print(f"    Model Dtype: {dtype}")
+
+    # Get patch size from source model
+    patch_size = 16
+    if hasattr(src_model, "patch_size"):
+        ps = src_model.patch_size
+        patch_size = ps[0] if isinstance(ps, tuple) else ps
+
+    channels = 3
+    target_frames = 64  # src_model expects 64-frame context for video
+    
+    # ============================================================
+    # Prepare Video Input
+    # ============================================================
+    video_h_patches = video_size // patch_size
+    video_w_patches = video_size // patch_size
+    video_frame_tokens = video_h_patches * video_w_patches
+    
+    # Create synthesized video from real image
+    video_tensor = get_synthesized_video(real_image_tensor, num_frames=num_frames, size=video_size)
+    video_tensor = video_tensor.to(device, dtype=torch.bfloat16)
+    print(f"    Video Input Shape: {video_tensor.shape} (B, C, T, H, W)")
+    
+    # Compute interpolated frame indices for 64-frame context
+    frame_indices = torch.arange(num_frames).unsqueeze(0).to(device)  # [1, 8]
+    total_frames_tensor = torch.tensor([num_frames]).to(device)  # [1]
+    interpolated_indices = interpolate_frame_indices(
+        frame_indices, total_frames_tensor, target_frames
+    )  # [1, 8] - indices in 64-frame context
+    
+    print(f"    Video original frame indices: {frame_indices[0].tolist()}")
+    print(f"    Video interpolated indices (in 64-frame context): {interpolated_indices[0].tolist()}")
+
+    # ============================================================
+    # Prepare Image Input
+    # ============================================================
+    image_h_patches = image_size // patch_size
+    image_w_patches = image_size // patch_size
+    
+    # Prepare image input
+    image_tensor = real_image_tensor.to(device, dtype=torch.bfloat16)
+    if image_tensor.shape[-1] != image_size or image_tensor.shape[-2] != image_size:
+        image_tensor = F.interpolate(
+            image_tensor.float(), 
+            size=(image_size, image_size), 
+            mode='bicubic', 
+            align_corners=False
+        ).to(dtype=torch.bfloat16)
+    print(f"    Image Input Shape: {image_tensor.shape} (B, C, H, W)")
+
+    bs = 1  # batch size for each (video and image will be processed separately by src_model)
+
+    with torch.no_grad():
+        # ============================================================
+        # Source model forward - Process Video and Image Separately
+        # ============================================================
+        
+        # === Video forward with src_model ===
+        try:
+            # Create 64-frame padded video and use visible_index
+            padded_videos = torch.zeros(bs, channels, target_frames, video_size, video_size, 
+                                        device=device, dtype=video_tensor.dtype)
+            
+            # Scatter original frames into interpolated positions
+            seq_len = frame_indices.shape[1]
+            frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(
+                bs, channels, seq_len, video_size, video_size
+            )
+            padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=video_tensor)
+            
+            # Compute visible_index for the uniformly sampled frames
+            per = torch.arange(video_frame_tokens, device=device)
+            visible_index = (interpolated_indices.unsqueeze(-1) * video_frame_tokens + per).reshape(bs, -1)
+            visible_index = visible_index.clamp_max(target_frames * video_frame_tokens - 1)
+            
+            print(f"    Video padded shape: {padded_videos.shape}")
+            print(f"    Video visible_index shape: {visible_index.shape}")
+            
+            src_video_out = src_model(padded_videos, visible_indices=visible_index, mask_ratio=None)
+            if isinstance(src_video_out, dict):
+                src_video_feat = src_video_out.get('visible_embeddings')
+            else:
+                src_video_feat = src_video_out
+        except Exception as e:
+            print(f"    [Error] Source video forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+        # === Image forward with src_model ===
+        try:
+            src_image_out = src_model(image_tensor)
+            if isinstance(src_image_out, dict):
+                src_image_feat = src_image_out.get('visible_embeddings')
+            else:
+                src_image_feat = src_image_out
+            print(f"    Source image output shape: {src_image_feat.shape}")
+        except Exception as e:
+            print(f"    [Error] Source image forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+        # ============================================================
+        # Packing model forward - Process Video and Image Together
+        # ============================================================
+        try:
+            # === Prepare video patches ===
+            video_patches = video_tensor.view(
+                bs, channels, num_frames, video_h_patches, patch_size, video_w_patches, patch_size
+            )
+            video_patches = video_patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
+            video_seq_len = bs * num_frames * video_h_patches * video_w_patches
+            patch_dim = patch_size * patch_size * channels
+            video_hidden_states = video_patches.view(video_seq_len, patch_dim)
+            
+            # Compute video patch_positions with interpolated temporal positions
+            # This uses compute_patch_positions_with_interpolated_temporal as required
+            video_patch_positions = compute_patch_positions_with_interpolated_temporal(
+                interpolated_indices, video_h_patches, video_w_patches, device
+            )
+            
+            # === Prepare image patches ===
+            image_patches = image_tensor.view(
+                bs, channels, image_h_patches, patch_size, image_w_patches, patch_size
+            )
+            image_patches = image_patches.permute(0, 2, 4, 1, 3, 5).contiguous()
+            image_seq_len = bs * 1 * image_h_patches * image_w_patches
+            image_hidden_states = image_patches.view(image_seq_len, patch_dim)
+            
+            # For image, temporal position is 0 (single frame)
+            image_patch_positions = []
+            for h in range(image_h_patches):
+                for w in range(image_w_patches):
+                    image_patch_positions.append([0, h, w])
+            image_patch_positions = torch.tensor(image_patch_positions, dtype=torch.long, device=device)
+            
+            # === Combine video and image ===
+            combined_hidden_states = torch.cat([video_hidden_states, image_hidden_states], dim=0)
+            combined_patch_positions = torch.cat([video_patch_positions, image_patch_positions], dim=0)
+            
+            # Create grid_thw for the combined input
+            # Video: (num_frames, video_h_patches, video_w_patches)
+            # Image: (1, image_h_patches, image_w_patches)
+            combined_grid_thw = torch.tensor([
+                [num_frames, video_h_patches, video_w_patches],
+                [1, image_h_patches, image_w_patches]
+            ], dtype=torch.long, device=device)
+            
+            print(f"    Combined input shape: {combined_hidden_states.shape}")
+            print(f"    Combined patch_positions shape: {combined_patch_positions.shape}")
+            print(f"    Combined grid_thw: {combined_grid_thw.tolist()}")
+            
+            packing_out = packing_model(
+                hidden_states=combined_hidden_states,
+                grid_thw=combined_grid_thw,
+                patch_positions=combined_patch_positions,
+            )
+            packing_feat = packing_out.last_hidden_state
+            
+            # Split the output back into video and image parts
+            packing_video_feat = packing_feat[:video_seq_len]
+            packing_image_feat = packing_feat[video_seq_len:]
+            
+            print(f"    Packing video output shape: {packing_video_feat.shape}")
+            print(f"    Packing image output shape: {packing_image_feat.shape}")
+        except Exception as e:
+            print(f"    [Error] Packing model forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+    # ============================================================
+    # Compare Video Outputs
+    # ============================================================
+    print("\n    --- Video Comparison ---")
+    if src_video_feat is not None and packing_video_feat is not None:
+        src_video_flat = src_video_feat.flatten(0, -2).float()
+        packing_video_flat = packing_video_feat.float()
+
+        if src_video_flat.shape[0] != packing_video_flat.shape[0]:
+            print(f"    [Warning] Video shape mismatch: src {src_video_flat.shape} vs packing {packing_video_flat.shape}")
+            min_len = min(src_video_flat.shape[0], packing_video_flat.shape[0])
+            src_video_flat = src_video_flat[:min_len]
+            packing_video_flat = packing_video_flat[:min_len]
+
+        diff_feat = (src_video_flat - packing_video_flat).abs().max().item()
+        cos_sim = F.cosine_similarity(src_video_flat, packing_video_flat, dim=-1)
+
+        min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
+
+        print(f"    [Mixed Video Feature] Max Diff:       {diff_feat:.6f}")
+        print(f"    [Mixed Video Feature] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+
+        if min_cos > 0.99:
+            print("    ✅ Mixed Video Feature: PASS")
+            video_pass = True
+        else:
+            print("    ❌ Mixed Video Feature: FAIL")
+            video_pass = False
+    else:
+        video_pass = False
+
+    # ============================================================
+    # Compare Image Outputs
+    # ============================================================
+    print("\n    --- Image Comparison ---")
+    if src_image_feat is not None and packing_image_feat is not None:
+        src_image_flat = src_image_feat.flatten(0, -2).float()
+        packing_image_flat = packing_image_feat.float()
+
+        if src_image_flat.shape[0] != packing_image_flat.shape[0]:
+            print(f"    [Warning] Image shape mismatch: src {src_image_flat.shape} vs packing {packing_image_flat.shape}")
+            min_len = min(src_image_flat.shape[0], packing_image_flat.shape[0])
+            src_image_flat = src_image_flat[:min_len]
+            packing_image_flat = packing_image_flat[:min_len]
+
+        diff_feat = (src_image_flat - packing_image_flat).abs().max().item()
+        cos_sim = F.cosine_similarity(src_image_flat, packing_image_flat, dim=-1)
+
+        min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
+
+        print(f"    [Mixed Image Feature] Max Diff:       {diff_feat:.6f}")
+        print(f"    [Mixed Image Feature] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+
+        if min_cos > 0.99:
+            print("    ✅ Mixed Image Feature: PASS")
+            image_pass = True
+        else:
+            print("    ❌ Mixed Image Feature: FAIL")
+            image_pass = False
+    else:
+        image_pass = False
+
+    # ============================================================
+    # Overall Summary
+    # ============================================================
+    print("\n    --- Mixed Video+Image Overall Summary ---")
+    if video_pass and image_pass:
+        print("    ✅ Mixed Video+Image Consistency: ALL PASS")
+    else:
+        print("    ❌ Mixed Video+Image Consistency: SOME FAILED")
+
+
 def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor):
     print("\n=== Verifying Loaded Saved Packing Model (Simulating User Usage - bfloat16) ===")
     print(f"--> Loading from: {output_dir}")
@@ -802,6 +1078,9 @@ def convert_and_save_packing(src_model_name, tgt_model_name, weight_path, output
 
     # 验证 Packing 模型一致性 (多帧视频)
     verify_video_consistency_packing(src_model, tgt_model, real_img, num_frames=8, image_size=224)
+
+    # 验证 Packing 模型一致性 (视频+图片混合输入，视频使用 compute_patch_positions_with_interpolated_temporal)
+    verify_mixed_video_image_consistency_packing(src_model, tgt_model, real_img, num_frames=8, video_size=224, image_size=448)
 
     if output_dir:
         print(f"\n--> Saving HF Packing Model to {output_dir}...")
