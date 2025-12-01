@@ -92,7 +92,7 @@ class LlavaViTPackingConfig(PretrainedConfig):
         num_channels=3,
         image_size=448,
         patch_size=16,
-        temporal_patch_size=1,
+        temporal_patch_size=1,  # Kept for config compatibility, not used in Conv2d embeddings
         hidden_act="gelu",
         layer_norm_eps=1e-6,
         layer_norm_type="layer_norm",
@@ -111,7 +111,7 @@ class LlavaViTPackingConfig(PretrainedConfig):
         self.num_channels = num_channels
         self.image_size = image_size
         self.patch_size = patch_size
-        self.temporal_patch_size = temporal_patch_size
+        self.temporal_patch_size = temporal_patch_size  # Kept for config compatibility
         self.hidden_act = hidden_act
         self.layer_norm_eps = layer_norm_eps
         self.layer_norm_type = layer_norm_type
@@ -276,21 +276,20 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
 
 
 class LlavaViTPackingEmbeddings(nn.Module):
-    """Patch embedding layer that handles variable-sized inputs."""
+    """Patch embedding layer that handles variable-sized inputs using Conv2d."""
 
     def __init__(self, config: LlavaViTPackingConfig):
         super().__init__()
         self.config = config
         self.embed_dim = config.hidden_size
         self.patch_size = config.patch_size
-        self.temporal_patch_size = config.temporal_patch_size
 
-        kernel_size = [config.temporal_patch_size, config.patch_size, config.patch_size]
-        self.proj = nn.Conv3d(
-            config.num_channels,
-            config.hidden_size,
-            kernel_size=kernel_size,
-            stride=kernel_size,
+        # Use Conv2d instead of Conv3d for compatibility with vit_preview_v0_hf weights
+        self.patch_embedding = nn.Conv2d(
+            in_channels=config.num_channels,
+            out_channels=config.hidden_size,
+            kernel_size=config.patch_size,
+            stride=config.patch_size,
             bias=False,
         )
 
@@ -298,15 +297,18 @@ class LlavaViTPackingEmbeddings(nn.Module):
         """Embed patches from pixel values.
 
         Args:
-            pixel_values: Flattened pixel values of shape
-                (sum(t*h*w for all images), num_channels, temporal_patch_size, patch_size, patch_size)
+            pixel_values: Pixel values of shape (batch_size, num_channels, height, width)
 
         Returns:
-            Patch embeddings of shape (sum(t*h*w for all images), hidden_size)
+            Patch embeddings of shape (batch_size * num_patches, hidden_size)
         """
-        target_dtype = self.proj.weight.dtype
-        hidden_states = self.proj(pixel_values.to(dtype=target_dtype))
-        hidden_states = hidden_states.view(-1, self.embed_dim)
+        target_dtype = self.patch_embedding.weight.dtype
+        # pixel_values: (B, C, H, W)
+        hidden_states = self.patch_embedding(pixel_values.to(dtype=target_dtype))
+        # hidden_states: (B, embed_dim, H_patches, W_patches)
+        batch_size = hidden_states.shape[0]
+        hidden_states = hidden_states.flatten(2).transpose(1, 2)  # (B, num_patches, embed_dim)
+        hidden_states = hidden_states.reshape(-1, self.embed_dim)  # (B * num_patches, embed_dim)
         return hidden_states
 
 
@@ -529,10 +531,8 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
         """Forward pass with packing support.
 
         Args:
-            pixel_values: Flattened pixel values of shape
-                (sum(t*temporal_patch_size*h*patch_size*w*patch_size), num_channels)
-                or already processed patches of shape
-                (sum(t*h*w), num_channels, temporal_patch_size, patch_size, patch_size)
+            pixel_values: Pixel values of shape (batch_size, num_channels, height, width)
+                where height and width are the original image dimensions.
             grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image,
                 where h and w are the number of patches (not pixels).
 
@@ -548,19 +548,11 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        # Reshape pixel values if needed
-        if pixel_values.dim() == 2:
-            # (total_patches, channels) -> need to reshape for Conv3d
-            # This assumes pixel_values are already flattened patches
-            pixel_values = pixel_values.view(
-                -1,
-                self.config.num_channels,
-                self.config.temporal_patch_size,
-                self.config.patch_size,
-                self.config.patch_size,
-            )
+        # pixel_values should be (B, C, H, W) for Conv2d
+        if pixel_values.dim() != 4:
+            raise ValueError(f"Expected pixel_values to have 4 dimensions (B, C, H, W), got {pixel_values.dim()}")
 
-        # Patch embedding
+        # Patch embedding using Conv2d
         hidden_states = self.embeddings(pixel_values)
 
         # Compute rotary position embeddings from grid_thw
@@ -727,16 +719,21 @@ if __name__ == "__main__":
     model = timm.create_model("hf_llava_vit_packing_base_ln", pretrained=False)
     print(f"Model created: {type(model)}")
 
-    # Create test input
-    # Simulating 2 images: first is 1x14x14 patches, second is 1x7x7 patches
-    grid_thw = torch.tensor([[1, 14, 14], [1, 7, 7]], dtype=torch.long)
-    total_patches = (grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]).sum().item()
-    print(f"Total patches: {total_patches}")
+    # Create test input - now using (B, C, H, W) format for Conv2d
+    # First image: 224x224 (14x14 patches with patch_size=16)
+    # Second image: 112x112 (7x7 patches with patch_size=16)
+    batch_size = 2
+    patch_size = 16
+    h1, w1 = 14, 14  # patches
+    h2, w2 = 7, 7    # patches
 
-    # Create pixel values (already in patch format)
-    pixel_values = torch.randn(
-        total_patches, 3, 1, 16, 16
-    )  # (N, C, temporal_patch, H_patch, W_patch)
+    # For packing, we need separate images - using batch processing
+    # Using single batch with 224x224 image for simplicity
+    grid_thw = torch.tensor([[1, 14, 14]], dtype=torch.long)
+    pixel_values = torch.randn(1, 3, 224, 224)  # (B, C, H, W)
+
+    print(f"Input shape: {pixel_values.shape}")
+    print(f"grid_thw: {grid_thw}")
 
     # Forward pass
     with torch.no_grad():

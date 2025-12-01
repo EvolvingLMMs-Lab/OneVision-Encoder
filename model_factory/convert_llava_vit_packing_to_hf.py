@@ -57,6 +57,7 @@ def remap_state_dict_packing(src_state_dict):
     """
     Remap state dict from source model to packing model format.
     The packing model uses a slightly different architecture with combined QKV projection.
+    Now uses Conv2d like vit_preview_v0_hf, so conv1 -> embeddings.patch_embedding directly.
     """
     print("[Remap Packing] Starting state dict remapping for packing model...")
     new_dict = {}
@@ -64,13 +65,8 @@ def remap_state_dict_packing(src_state_dict):
     for k, v in src_state_dict.items():
         new_k = k
         if k.startswith("conv1."):
-            # conv1 -> embeddings.proj (2D conv -> 3D conv)
-            new_k = k.replace("conv1.", "embeddings.proj.")
-            if k == "conv1.weight":
-                # Source 2D conv: (out_channels, in_channels, H, W)
-                # Target 3D conv: (out_channels, in_channels, T, H, W) where T=1
-                # Use unsqueeze(2) to add temporal dimension at position 2
-                v = v.unsqueeze(2)
+            # conv1 -> embeddings.patch_embedding (both are Conv2d now)
+            new_k = k.replace("conv1.", "embeddings.patch_embedding.")
         elif k.startswith("ln_pre."):
             new_k = k.replace("ln_pre.", "layernorm_pre.")
         elif k.startswith("ln_post."):
@@ -149,32 +145,11 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             traceback.print_exc()
             return
 
-        # Packing model forward - need to prepare pixel values in the right format
+        # Packing model forward - now uses (B, C, H, W) format with Conv2d
         try:
-            # The packing model expects pixel values in (N, C, T_patch, H_patch, W_patch) format
-            # where N is the total number of patches
-            bs = input_tensor.shape[0]
-            total_patches = t_frames * h_patches * w_patches * bs
-
-            # Reshape input to patches for the packing model
-            # input_tensor: (B, C, H, W) -> (B, C, 1, H, W) -> patches
-            pixel_values_5d = input_tensor.unsqueeze(2)  # (B, C, 1, H, W)
-
-            # Reshape to (B, C, T, H_patches, patch_size, W_patches, patch_size)
-            # Dimensions: 0=B, 1=C, 2=T, 3=H_patches, 4=patch_size, 5=W_patches, 6=patch_size
-            pixel_values_patches = pixel_values_5d.view(
-                bs, 3, t_frames, h_patches, patch_size, w_patches, patch_size
-            )
-            # Permute to (B, T, H_patches, W_patches, C, patch_size, patch_size)
-            # From indices: 0, 2, 3, 5, 1, 4, 6
-            pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
-            # Reshape to (B * T * H_patches * W_patches, C, 1, patch_size, patch_size)
-            # Insert temporal_patch_size=1 dimension at position 2
-            pixel_values_packed = pixel_values_patches.view(
-                total_patches, 3, patch_size, patch_size
-            ).unsqueeze(2)  # Add temporal dimension
-
-            packing_out = packing_model(pixel_values=pixel_values_packed, grid_thw=grid_thw)
+            # The packing model now expects pixel values in (B, C, H, W) format
+            # Same as vit_preview_v0_hf
+            packing_out = packing_model(pixel_values=input_tensor, grid_thw=grid_thw)
             packing_feat = packing_out.last_hidden_state
             packing_head = packing_out.pooler_output
         except Exception as e:
@@ -269,31 +244,14 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
     h_patches = height // patch_size
     w_patches = width // patch_size
     t_frames = 1
-    bs = input_tensor.shape[0]
-    total_patches = t_frames * h_patches * w_patches * bs
 
     # Create grid_thw tensor
     grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
 
-    # Prepare pixel values for packing model
-    pixel_values_5d = input_tensor.unsqueeze(2)  # (B, C, 1, H, W)
-    # Reshape to (B, C, T, H_patches, patch_size, W_patches, patch_size)
-    # Dimensions: 0=B, 1=C, 2=T, 3=H_patches, 4=patch_size, 5=W_patches, 6=patch_size
-    pixel_values_patches = pixel_values_5d.view(
-        bs, 3, t_frames, h_patches, patch_size, w_patches, patch_size
-    )
-    # Permute to (B, T, H_patches, W_patches, C, patch_size, patch_size)
-    # From indices: 0, 2, 3, 5, 1, 4, 6
-    pixel_values_patches = pixel_values_patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
-    # Reshape to (B * T * H_patches * W_patches, C, 1, patch_size, patch_size)
-    # Insert temporal_patch_size=1 dimension at position 2
-    pixel_values_packed = pixel_values_patches.view(
-        total_patches, 3, patch_size, patch_size
-    ).unsqueeze(2)  # Add temporal dimension
-
+    # Packing model now uses (B, C, H, W) format with Conv2d - same as input_tensor
     with torch.no_grad():
         src_out = src_model(input_tensor)['visible_embeddings']
-        tgt_out = vision_tower(pixel_values=pixel_values_packed, grid_thw=grid_thw).last_hidden_state
+        tgt_out = vision_tower(pixel_values=input_tensor, grid_thw=grid_thw).last_hidden_state
 
     src_feat_flat = src_out.flatten(0, -2).float()
     tgt_feat_flat = tgt_out.float()
