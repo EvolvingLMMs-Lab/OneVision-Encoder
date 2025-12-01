@@ -16,7 +16,10 @@ try:
     from model_factory import vit_preview_v0     # 你的 Source 模型定义
     # Import the packing model with grid_thw support
     from model_factory import vit_preview_v0_packing_hf
-    from model_factory.vit_preview_v0_packing_hf import LlavaViTPackingModel
+    from model_factory.vit_preview_v0_packing_hf import (
+        LlavaViTPackingModel,
+        compute_patch_positions_from_grid_thw,
+    )
 except ImportError:
     print("[Warning] Could not import model definitions directly. Ensure they are in PYTHONPATH.")
 
@@ -165,9 +168,17 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             patch_dim = patch_size * patch_size * channels
             hidden_states = patches.view(seq_len, patch_dim)
             
-            print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
+            # Compute patch_positions from grid_thw for RoPE calculation
+            patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
             
-            packing_out = packing_model(hidden_states=hidden_states, grid_thw=grid_thw)
+            print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
+            print(f"    patch_positions shape: {patch_positions.shape}")
+            
+            packing_out = packing_model(
+                hidden_states=hidden_states,
+                grid_thw=grid_thw,
+                patch_positions=patch_positions,
+            )
             packing_feat = packing_out.last_hidden_state
             packing_head = packing_out.pooler_output
         except Exception as e:
@@ -298,9 +309,17 @@ def verify_video_consistency_packing(src_model, packing_model, num_frames=8, ima
             patch_dim = patch_size * patch_size * channels
             hidden_states = patches.view(seq_len, patch_dim)
             
-            print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
+            # Compute patch_positions from grid_thw for RoPE calculation
+            patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
             
-            packing_out = packing_model(hidden_states=hidden_states, grid_thw=grid_thw)
+            print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
+            print(f"    patch_positions shape: {patch_positions.shape}")
+            
+            packing_out = packing_model(
+                hidden_states=hidden_states,
+                grid_thw=grid_thw,
+                patch_positions=patch_positions,
+            )
             packing_feat = packing_out.last_hidden_state
             packing_head = packing_out.pooler_output
         except Exception as e:
@@ -412,7 +431,14 @@ def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor)
         patch_dim = patch_size * patch_size * channels
         hidden_states = patches.view(seq_len, patch_dim)
         
-        tgt_out = vision_tower(hidden_states=hidden_states, grid_thw=grid_thw).last_hidden_state
+        # Compute patch_positions from grid_thw for RoPE calculation
+        patch_positions = compute_patch_positions_from_grid_thw(grid_thw)
+        
+        tgt_out = vision_tower(
+            hidden_states=hidden_states,
+            grid_thw=grid_thw,
+            patch_positions=patch_positions,
+        ).last_hidden_state
 
     src_feat_flat = src_out.flatten(0, -2).float()
     tgt_feat_flat = tgt_out.float()

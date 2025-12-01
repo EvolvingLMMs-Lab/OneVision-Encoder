@@ -262,6 +262,50 @@ class VisionRotaryEmbedding(nn.Module):
         emb = torch.cat([pos_ids, pos_ids], dim=-1)
         return emb
 
+    def forward_from_positions(self, patch_positions: torch.Tensor) -> torch.Tensor:
+        """Compute rotary position embeddings from explicit patch positions.
+
+        This method computes RoPE frequencies directly from patch positions,
+        which allows for patches from different spatial-temporal locations
+        to be processed together (e.g., for packing multiple images/videos).
+
+        Note: This method expects pre-scaled temporal positions if you want
+        consistency with the default grid_thw-based forward() method. Use
+        `compute_patch_positions_from_grid_thw()` to generate positions that
+        match the default scaling behavior.
+
+        Args:
+            patch_positions: Tensor of shape (num_patches, 3) containing [t, h, w] 
+                positions for each patch in the sequence. For consistency with
+                the default forward() behavior, temporal positions should be
+                pre-scaled (e.g., [0, 8, 16, 24, ...] for 8 frames instead of
+                [0, 1, 2, 3, ...]).
+
+        Returns:
+            Rotary position embeddings of shape (num_patches, head_dim)
+        """
+        device = patch_positions.device
+
+        inv_t = self.inv_freq_t.to(device=device)
+        inv_h = self.inv_freq_h.to(device=device)
+        inv_w = self.inv_freq_w.to(device=device)
+
+        # Extract positions for each axis
+        t_pos = patch_positions[:, 0].float()
+        h_pos = patch_positions[:, 1].float()
+        w_pos = patch_positions[:, 2].float()
+
+        # Compute frequencies for each axis
+        ft = torch.outer(t_pos, inv_t)
+        fh = torch.outer(h_pos, inv_h)
+        fw = torch.outer(w_pos, inv_w)
+
+        # Concatenate frequencies
+        freqs = torch.cat([ft, fh, fw], dim=-1)
+        # Duplicate for full head_dim
+        emb = torch.cat([freqs, freqs], dim=-1)
+        return emb
+
 
 class Siglip2MultiheadAttentionPoolingHead(nn.Module):
     """Multi-Head Attention Pooling with a learned probe (PMA-style)."""
@@ -531,6 +575,7 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
         self,
         hidden_states: torch.Tensor,
         grid_thw: torch.Tensor,
+        patch_positions: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
@@ -542,6 +587,11 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
                 and patch_dim = patch_size * patch_size * in_channels.
             grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image,
                 where h and w are the number of patches (not pixels).
+            patch_positions: Optional tensor of shape (seq_len, 3) containing [t, h, w] 
+                positions for each patch in the sequence. When provided, this overrides
+                the default position calculation based on grid_thw for RoPE computation.
+                This is useful when patches come from different images/videos with
+                varying spatial-temporal positions.
 
         Returns:
             BaseModelOutputWithPooling with last_hidden_state and optionally pooler_output
@@ -566,8 +616,22 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
         # Patch embedding: (seq_len, patch_dim) -> (seq_len, hidden_size)
         hidden_states = self.patch_embed(hidden_states)
 
-        # Compute rotary position embeddings from grid_thw
-        rotary_pos_emb = self.rotary_emb(grid_thw)
+        # Compute rotary position embeddings
+        if patch_positions is not None:
+            # Use explicit patch positions for RoPE calculation
+            if patch_positions.ndim != 2 or patch_positions.shape[1] != 3:
+                raise ValueError(
+                    f"patch_positions must have shape (seq_len, 3), got {patch_positions.shape}"
+                )
+            if patch_positions.shape[0] != hidden_states.shape[0]:
+                raise ValueError(
+                    f"patch_positions seq_len ({patch_positions.shape[0]}) must match "
+                    f"hidden_states seq_len ({hidden_states.shape[0]})"
+                )
+            rotary_pos_emb = self.rotary_emb.forward_from_positions(patch_positions)
+        else:
+            # Compute positions from grid_thw (default behavior)
+            rotary_pos_emb = self.rotary_emb(grid_thw)
         position_embeddings = (rotary_pos_emb.cos(), rotary_pos_emb.sin())
 
         # Compute cumulative sequence lengths for FlashAttention
@@ -706,6 +770,51 @@ def hf_llava_vit_packing_giant_ln(pretrained: bool = False, ckpt_path=None, **kw
     config._attn_implementation = "flash_attention_2"
     model = LlavaViTPackingModel(config)
     return model
+
+
+# ---------------------------------------------------------------------------
+# Utility Functions
+# ---------------------------------------------------------------------------
+
+
+def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tensor:
+    """Compute patch positions from grid_thw tensor.
+    
+    This utility function generates patch_positions tensor from grid_thw,
+    which can be used to explicitly specify the RoPE positions for each patch.
+    
+    Note: The temporal positions are scaled by the number of frames (t) to match
+    the packing model's temporal RoPE behavior where temporal interval
+    should not be 1 but rather t (e.g., for [8,14,14], interval is 8).
+    This means temporal positions are: 0, t, 2t, 3t, ... for each frame.
+    
+    Args:
+        grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image
+    
+    Returns:
+        patch_positions: Tensor of shape (total_seq_len, 3) with [t_scaled, h, w] positions
+            for each patch in the sequence, where t_scaled = frame_idx * num_frames.
+    """
+    device = grid_thw.device
+    positions = []
+    
+    for t, h, w in grid_thw:
+        t, h, w = t.item(), h.item(), w.item()
+        patches_per_frame = h * w
+        
+        # Compute position for each axis
+        # Temporal positions are scaled by t to match the packing model's behavior
+        t_ids = torch.arange(t, device=device).repeat_interleave(patches_per_frame) * t
+        h_base = torch.arange(h, device=device).repeat_interleave(w)
+        h_ids = h_base.repeat(t)
+        w_base = torch.arange(w, device=device).repeat(h)
+        w_ids = w_base.repeat(t)
+        
+        # Stack positions as (L, 3) tensor
+        pos = torch.stack([t_ids, h_ids, w_ids], dim=-1)
+        positions.append(pos)
+    
+    return torch.cat(positions, dim=0)
 
 
 if __name__ == "__main__":
