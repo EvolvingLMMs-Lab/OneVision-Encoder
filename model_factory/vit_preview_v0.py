@@ -181,31 +181,20 @@ class LlavaViTEncoder(nn.Module):
         Returns:
             Tensor of shape (B, N_vis, D/2) containing the RoPE frequencies for visible patches.
         """
-        # patch_positions: (num_patches, 3) -> [t, h, w] for each patch
-        # visible_indices: (B, N_vis)
+        t_pos = patch_positions[:, 0].float()
+        h_pos = patch_positions[:, 1].float()
+        w_pos = patch_positions[:, 2].float()
         
-        # Get the positions for visible patches
-        # patch_positions is already in (num_patches, 3) format with [t, h, w]
-        t_pos = patch_positions[:, 0].float()  # (num_patches,)
-        h_pos = patch_positions[:, 1].float()  # (num_patches,)
-        w_pos = patch_positions[:, 2].float()  # (num_patches,)
-        
-        # Get inverse frequencies from the video_rope module
         inv_t = self.video_rope.inv_freq_t.to(device=device, dtype=dtype)
         inv_h = self.video_rope.inv_freq_h.to(device=device, dtype=dtype)
         inv_w = self.video_rope.inv_freq_w.to(device=device, dtype=dtype)
         
-        # Compute frequencies for all patches
-        ft = torch.outer(t_pos.to(device), inv_t)  # (num_patches, t_size)
-        fh = torch.outer(h_pos.to(device), inv_h)  # (num_patches, h_size)
-        fw = torch.outer(w_pos.to(device), inv_w)  # (num_patches, w_size)
+        ft = torch.outer(t_pos.to(device), inv_t)
+        fh = torch.outer(h_pos.to(device), inv_h)
+        fw = torch.outer(w_pos.to(device), inv_w)
         
-        # Concatenate to get full frequencies
-        freqs_full = torch.cat([ft, fh, fw], dim=-1)  # (num_patches, half)
-        
-        # Select frequencies for visible patches
-        # visible_indices: (B, N_vis)
-        freqs_visible = freqs_full[visible_indices]  # (B, N_vis, half)
+        freqs_full = torch.cat([ft, fh, fw], dim=-1)
+        freqs_visible = freqs_full[visible_indices]
         
         return freqs_visible
 
@@ -249,12 +238,8 @@ class LlavaViTEncoder(nn.Module):
 
         # import pdb; pdb.set_trace()
         # masking
-        if t_frames == 1:
-            visible_indices = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)  # (B, L)
-            visible_mask_bool = torch.ones(batch, total_patches, dtype=torch.bool, device=device)        # (B, L)
-            ids_restore = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)      # (B, L)
-        elif visible_indices is None:
-            # When visible_indices is None for video input (t_frames > 1), use all patches as visible
+        if t_frames == 1 or visible_indices is None:
+            # Use all patches as visible for single frame or when no masking is specified
             visible_indices = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)  # (B, L)
             visible_mask_bool = torch.ones(batch, total_patches, dtype=torch.bool, device=device)        # (B, L)
             ids_restore = torch.arange(total_patches, device=device).unsqueeze(0).expand(batch, -1)      # (B, L)
@@ -277,7 +262,6 @@ class LlavaViTEncoder(nn.Module):
         # RoPE (full -> select)
         if patch_positions is not None:
             # Use provided patch positions for RoPE calculation
-            # patch_positions: (num_patches, 3) with [t, h, w] for each patch
             freqs_visible = self._compute_rope_from_positions(
                 patch_positions, visible_indices, device, tokens.dtype
             )
