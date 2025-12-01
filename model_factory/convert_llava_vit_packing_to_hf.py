@@ -222,6 +222,139 @@ def verify_consistency_packing(src_model, packing_model, real_image_tensor):
             print("    ❌ Packing Head:    FAIL")
 
 
+def verify_video_consistency_packing(src_model, packing_model, num_frames=8, image_size=224):
+    """
+    Verify consistency between the source model and the packing model with video input.
+
+    This function tests that the packing model produces consistent outputs with the
+    original source model when processing video input (multiple frames).
+    
+    Args:
+        src_model: The source ViT model
+        packing_model: The packing HF model
+        num_frames: Number of video frames to test (default: 8)
+        image_size: Size of each frame (default: 224)
+    """
+    print(f"\n=== Verifying Video Consistency with Packing Model ({num_frames} frames - bfloat16) ===")
+
+    src_model.eval()
+    packing_model.eval()
+
+    device = next(src_model.parameters()).device
+    print(f"    Running on Device: {device}")
+
+    dtype = next(src_model.parameters()).dtype
+    print(f"    Model Dtype: {dtype}")
+
+    # Get patch size from source model
+    patch_size = 16
+    if hasattr(src_model, "patch_size"):
+        ps = src_model.patch_size
+        patch_size = ps[0] if isinstance(ps, tuple) else ps
+
+    # Calculate grid dimensions
+    channels = 3
+    h_patches = image_size // patch_size
+    w_patches = image_size // patch_size
+    t_frames = num_frames
+
+    # Create random video input tensor (B=1, C, T, H, W)
+    video_tensor = torch.randn(1, channels, t_frames, image_size, image_size, device=device, dtype=torch.bfloat16)
+    print(f"    Video Input Shape: {video_tensor.shape} (B, C, T, H, W)")
+    print(f"    grid_thw: [{t_frames}, {h_patches}, {w_patches}]")
+
+    # Create grid_thw tensor
+    grid_thw = torch.tensor([[t_frames, h_patches, w_patches]], dtype=torch.long, device=device)
+
+    with torch.no_grad():
+        # Source model forward - expects (B, C, T, H, W) input
+        try:
+            src_out = src_model(video_tensor)
+            if isinstance(src_out, dict):
+                src_feat = src_out.get('visible_embeddings')
+                src_head = src_out.get('head_output')
+            else:
+                src_feat = src_out
+                src_head = None
+        except Exception as e:
+            print(f"    [Error] Source forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+        # Packing model forward - expects input in [seq_len, patch_dim] format
+        try:
+            # Reshape video to patches: (B, C, T, H, W) -> (seq_len, patch_dim)
+            bs = video_tensor.shape[0]
+            
+            # Reshape to (B, C, T, h_patches, patch_size, w_patches, patch_size)
+            patches = video_tensor.view(
+                bs, channels, t_frames, h_patches, patch_size, w_patches, patch_size
+            )
+            # Permute to (B, T, h_patches, w_patches, C, patch_size, patch_size)
+            patches = patches.permute(0, 2, 3, 5, 1, 4, 6).contiguous()
+            # Reshape to (B * T * h_patches * w_patches, C * patch_size * patch_size)
+            seq_len = bs * t_frames * h_patches * w_patches
+            patch_dim = patch_size * patch_size * channels
+            hidden_states = patches.view(seq_len, patch_dim)
+            
+            print(f"    Packing input shape: {hidden_states.shape} (seq_len={seq_len}, patch_dim={patch_dim})")
+            
+            packing_out = packing_model(hidden_states=hidden_states, grid_thw=grid_thw)
+            packing_feat = packing_out.last_hidden_state
+            packing_head = packing_out.pooler_output
+        except Exception as e:
+            print(f"    [Error] Packing model forward failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+
+    # Compare outputs
+    if src_feat is not None and packing_feat is not None:
+        # Reshape for comparison (src_feat: (B, N, C), packing_feat: (total_N, C))
+        src_feat_flat = src_feat.flatten(0, -2).float()  # (B*N, C)
+        packing_feat_flat = packing_feat.float()  # (total_N, C)
+
+        # Check if shapes match
+        if src_feat_flat.shape[0] != packing_feat_flat.shape[0]:
+            print(f"    [Warning] Shape mismatch: src {src_feat_flat.shape} vs packing {packing_feat_flat.shape}")
+            # Try to handle different output sizes
+            min_len = min(src_feat_flat.shape[0], packing_feat_flat.shape[0])
+            src_feat_flat = src_feat_flat[:min_len]
+            packing_feat_flat = packing_feat_flat[:min_len]
+
+        diff_feat = (src_feat_flat - packing_feat_flat).abs().max().item()
+        cos_sim = F.cosine_similarity(src_feat_flat, packing_feat_flat, dim=-1)
+
+        min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
+
+        print(f"    [Video Packing Feature] Max Diff:       {diff_feat:.6f}")
+        print(f"    [Video Packing Feature] Min Cosine Sim: {min_cos:.8f} (Mean: {mean_cos:.8f})")
+
+        if min_cos > 0.99:
+            print("    ✅ Video Packing Feature: PASS")
+        else:
+            print("    ❌ Video Packing Feature: FAIL")
+
+    if src_head is not None and packing_head is not None:
+        diff_head = (src_head - packing_head).abs().max().item()
+        src_head_f = src_head.float()
+        packing_head_f = packing_head.float()
+        cos_sim_head = F.cosine_similarity(src_head_f, packing_head_f, dim=-1)
+
+        min_cos_head = cos_sim_head.min().item()
+        mean_cos_head = cos_sim_head.mean().item()
+
+        print(f"    [Video Packing Head]    Max Diff:       {diff_head:.6f}")
+        print(f"    [Video Packing Head]    Min Cosine Sim: {min_cos_head:.8f} (Mean: {mean_cos_head:.8f})")
+
+        if min_cos_head > 0.99:
+            print("    ✅ Video Packing Head:    PASS")
+        else:
+            print("    ❌ Video Packing Head:    FAIL")
+
+
 def verify_saved_model_loading_packing(src_model, output_dir, real_image_tensor):
     print("\n=== Verifying Loaded Saved Packing Model (Simulating User Usage - bfloat16) ===")
     print(f"--> Loading from: {output_dir}")
@@ -352,8 +485,11 @@ def convert_and_save_packing(src_model_name, tgt_model_name, weight_path, output
     print("\n--> Fetching real image for verification (448x448)...")
     real_img = get_real_coco_image(size=448)
 
-    # 验证 Packing 模型一致性
+    # 验证 Packing 模型一致性 (单帧图像)
     verify_consistency_packing(src_model, tgt_model, real_img)
+
+    # 验证 Packing 模型一致性 (多帧视频)
+    verify_video_consistency_packing(src_model, tgt_model, num_frames=8, image_size=224)
 
     if output_dir:
         print(f"\n--> Saving HF Packing Model to {output_dir}...")

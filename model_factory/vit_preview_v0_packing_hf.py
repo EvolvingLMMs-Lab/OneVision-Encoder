@@ -235,16 +235,21 @@ class VisionRotaryEmbedding(nn.Module):
         for t, h, w in grid_thw:
             t, h, w = t.item(), h.item(), w.item()
             L = t * h * w
+            patches_per_frame = h * w
 
             # Compute position ids for each axis
-            t_ids = torch.arange(t, device=device).repeat_interleave(h * w)
+            # Temporal positions are scaled by the number of frames (t) to match
+            # the original ViT's temporal RoPE behavior where temporal interval
+            # should not be 1 but rather t (e.g., for [8,14,14], interval is 8)
+            # This means temporal positions are: 0, t, 2t, 3t, ... for each frame
+            t_ids_scaled = torch.arange(t, device=device).repeat_interleave(patches_per_frame) * t
             h_base = torch.arange(h, device=device).repeat_interleave(w)
             h_ids = h_base.repeat(t)
             w_base = torch.arange(w, device=device).repeat(h)
             w_ids = w_base.repeat(t)
 
             # Compute frequencies for each axis
-            ft = torch.outer(t_ids.float(), inv_t)
+            ft = torch.outer(t_ids_scaled.float(), inv_t)
             fh = torch.outer(h_ids.float(), inv_h)
             fw = torch.outer(w_ids.float(), inv_w)
 
