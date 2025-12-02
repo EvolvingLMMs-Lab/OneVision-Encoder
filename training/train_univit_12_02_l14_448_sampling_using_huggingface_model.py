@@ -1,824 +1,998 @@
-# coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-""" PyTorch Llava ViT model."""
+import argparse
+import logging
+import os
+import sys
+import time
+from typing import Any, Dict, List
 
-from typing import Optional, Tuple, Union
-
+import numpy as np
 import torch
-import torch.nn as nn
-from timm.models.registry import register_model
-from torch.nn import functional as F
-from transformers.activations import ACT2FN
-from transformers.configuration_utils import PretrainedConfig
-from transformers.modeling_outputs import (BaseModelOutput,
-                                           BaseModelOutputWithPooling)
-from transformers.modeling_utils import PreTrainedModel
-from transformers.models.siglip.modeling_siglip import SiglipMLP
-from transformers.utils import (add_start_docstrings,
-                                add_start_docstrings_to_model_forward, logging,
-                                replace_return_docstrings, is_flash_attn_2_available)
+from timm import create_model
+from torch import distributed
+from torch.nn.utils import clip_grad_norm_
+from torch.utils.tensorboard import SummaryWriter
+from transformers import CLIPImageProcessor
 
-if is_flash_attn_2_available():
-    from flash_attn import flash_attn_func
+import model_factory
+from dataset import DATASET_REGISTRY, Property
+from training.checkpoint_utils import load_checkpoint, save_checkpoint
+from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
+from training.lr_scheduler import PolynomialLRWarmup
+from model_factory.vit_preview_v0_hf import LlavaViTModel
 
-logger = logging.get_logger(__name__)
+torch._dynamo.config.optimize_ddp = True
 
 
-# ---------------------------------------------------------------------------
-# Configuration Class
-# ---------------------------------------------------------------------------
+parser = argparse.ArgumentParser(description="Multi-dataset video training")
 
-class LlavaViTConfig(PretrainedConfig):
-    r"""
-    This is the configuration class to store the configuration of a [`LlavaViTModel`]. It is used to instantiate a
-    Llava ViT model according to the specified arguments, defining the model architecture. Instantiating a configuration
-    with the defaults will yield a similar configuration to that of the Llava ViT architecture.
+# ---------------------------
+# General / 通用
+# ---------------------------
+parser.add_argument("--debug", type=int, default=0, help="Enable debug mode (0/1). When 1, may reduce dataset size or add extra checks / 是否开启调试模式")
+parser.add_argument("--output", default="output", help="Output directory for logs and checkpoints / 输出目录")
+parser.add_argument("--workers", type=int, default=2, help="Number of DataLoader workers per process / DataLoader 进程内工作线程数")
+parser.add_argument("--local_rank", type=int, default=0, help="Local rank passed by launcher; do not set manually / 启动器传入的本地进程序号，通常无需手动设置")
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+# ---------------------------
+# Data loading / 数据加载
+# ---------------------------
+parser.add_argument("--dataloader-type", default="dali", help="Data loader backend, e.g., 'dali' or 'torch' / 数据加载后端")
+parser.add_argument("--dali_is_training", type=int, default=1, help="DALI training mode (0/1). 1 enables training augmentations / DALI 是否处于训练模式")
+parser.add_argument("--image_size", default="224", help="Input size as 'H,W' or single 'S' (interpreted as S,S) / 输入尺寸，'H,W' 或单值 'S'(等价于 S,S)")
+parser.add_argument("--image_size_video", default="224", help="Input size as 'H,W' or single 'S' (interpreted as S,S) / 输入尺寸，'H,W' 或单值 'S'(等价于 S,S)")
+parser.add_argument("--input_gray", type=int, default=0, help="Treat input as grayscale (0/1) / 输入按灰度处理（0/1）")
+parser.add_argument("--num_frames", type=int, default=8, help="Number of frames per clip / 每个样本的帧数")
+parser.add_argument("--random_diff", type=int, default=10, help="Random diff for sampling jitter across datasets / 数据集采样抖动的随机扰动")
+
+# ---------------------------
+# Multi-dataset (heads) / 多数据集（多头）
+# 说明：左侧为新复数参数名，右侧为旧名别名，dest 统一为新名，向后兼容
+# ---------------------------
+parser.add_argument("--list_datasets", nargs='+', type=str, default=["k710_ssv2_univit_pfs"],
+                    help="Dataset registry names, one or more / 数据集注册名，可多个")
+parser.add_argument("--list_batch_sizes", nargs='+', type=int, default=[32],
+                    help="Per-dataset batch sizes / 各数据集的 batch 大小")
+parser.add_argument("--list_sample_rates", nargs='+', type=float, default=[0.1],
+                    help="Per-dataset sampling rate / 各数据集采样权重")
+parser.add_argument("--list_margins", nargs='+', type=float, default=[0.3],
+                    help="Per-dataset loss margin / 各数据集损失 margin")
+parser.add_argument("--list_filters", nargs='+', type=float, default=[0.75],
+                    help="Per-dataset filter ratio or threshold / 各数据集过滤比例或阈值")
+parser.add_argument("--list_lr_pfc_weights", nargs='+', type=float, default=[1.0],
+                    help="Per-dataset LR scale for PFC params / 各数据集 PFC 参数学习率缩放")
+parser.add_argument("--list_loss_weights", nargs='+', type=float, default=[1.0],
+                    help="Per-dataset loss weights / 各数据集损失权重")
+parser.add_argument("--list_init_partial_fc_paths", nargs='+', type=str, default=["NULL"],
+                    help="Per-dataset init path for partial-FC or 'NULL' / 各数据集 PFC 初始化路径或 'NULL'")
+
+# ---------------------------
+# Model / 模型
+# ---------------------------
+parser.add_argument("--model_name", default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head", help="Backbone model name / 主干模型名称")
+parser.add_argument("--model_weight", default="/vlm/xiangan/VideoMLCD/checkpoints/llava_vit_s_16.py/00190000/backbone.pt",
+                    help="Path to pretrained weights or None / 预训练权重路径，或 None")
+parser.add_argument("--embedding_size", type=int, default=384, help="Embedding dimension of the head / 头部嵌入维度")
+parser.add_argument("--gradient_checkpoint", type=int, default=0, help="Enable gradient checkpointing (0/1) / 是否启用梯度检查点（节省显存）")
+parser.add_argument("--mask", type=int, default=0, help="Enable mask-related training (0/1) / 是否启用 mask 相关训练")
+parser.add_argument("--finetune_backbone", type=int, default=1, help="Finetune backbone parameters (0/1) / 是否微调主干网络")
+
+# ---------------------------
+# Optimization / 优化
+# ---------------------------
+parser.add_argument("--opt", default="adamw", help="Optimizer name, e.g., 'adamw' / 优化器名称")
+parser.add_argument("--lr", type=float, default=1e-3, help="Base learning rate / 基础学习率")
+parser.add_argument("--weight_decay", type=float, default=0.05, help="Weight decay for non-PFC params / 非 PFC 参数的权重衰减")
+parser.add_argument("--weight_decay_pfc", type=float, default=0.05, help="Weight decay for PFC params / PFC 参数的权重衰减")
+parser.add_argument("--warmup_ratio", type=float, default=0.1, help="Warmup ratio of total training steps / 训练总步数的预热比例")
+parser.add_argument("--backward_passes_per_step", type=int, default=1, help="Gradient accumulation steps before optimizer step / 每次优化前累积的反传次数")
+parser.add_argument("--repeat_pfc", type=int, default=0, help="Repeat factor for PFC ops or rebuild cycles / PFC 重复或重建次数（如适用）")
+parser.add_argument("--save_pfc", type=int, default=1, help="Save PFC weights in checkpoints (0/1) / 是否在检查点中保存 PFC 权重")
+
+# ---------------------------
+# Initialization / Resume / 初始化与恢复
+# ---------------------------
+parser.add_argument("--init_backbone", default="NULL", help="Backbone init path or 'NULL' / 主干网络初始化路径，或 'NULL'")
+
+# ---------------------------
+# Logging & Checkpoint / 日志与检查点
+# ---------------------------
+parser.add_argument("--frequent", type=int, default=10, help="Log/validation frequency in steps / 日志与验证的步数间隔")
+parser.add_argument("--ckpt_interval", type=int, default=2000, help="Checkpoint save interval in steps / 检查点保存步数间隔")
+
+# ---------------------------
+# Training schedule / 训练调度
+# ---------------------------
+parser.add_argument("--num_sampled_data", type=int, default=60000000, help="Total sampled examples used to compute total steps / 用于估算总步数的采样样本总量")
+
+# ---------------------------
+# Visualization / 可视化
+# ---------------------------
+parser.add_argument("--visualize", type=int, default=0, help="Save input clips as GIFs (0/1) / 是否将输入视频保存为 GIF")
+parser.add_argument("--vis_samples", type=int, default=2, help="Number of samples to visualize per batch / 每个 batch 可视化的样本数")
+parser.add_argument("--vis_interval", type=int, default=10, help="Visualization save interval in steps / 可视化保存的步数间隔")
+
+# ---------------------------
+# Index sampling for ViT input / ViT 输入的索引采样
+# ---------------------------
+
+parser.add_argument("--total_indices", type=int, default=2000, help="Visible indices total count / 可见索引总数")
+parser.add_argument("--target_num", type=int, default=1568, help="Sampled indices count / 采样索引个数")
+parser.add_argument("--must_num", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
+parser.add_argument("--num_tokens_per_frame", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
+
+# ---------------------------
+# Multi-frame training / 多帧训练
+# 说明：视频分支支持4帧、8帧、16帧、32帧混合训练，每个rank使用不同帧数
+# batch size反比：32帧bs=base, 16帧bs=2*base, 8帧bs=4*base, 4帧bs=8*base
+# ---------------------------
+parser.add_argument("--enable_multi_frame", type=int, default=1,
+                    help="Enable multi-frame training (0/1). When enabled, different ranks use different frame counts / 是否启用多帧混合训练")
+parser.add_argument("--multi_frame_list", nargs='+', type=int, default=[8],
+                    help="List of frame counts to use in multi-frame training / 多帧训练时使用的帧数列表")
+parser.add_argument("--base_num_frames", type=int, default=8,
+                    help="Base frame count for batch size calculation. Batch size is inversely proportional: bs = base_bs * (base_num_frames / actual_num_frames) / 用于计算batch size的基准帧数")
+
+args = parser.parse_args()
+
+rank = int(os.getenv("RANK", "0"))
+local_rank = int(os.getenv("LOCAL_RANK", "0"))
+world_size = int(os.getenv("WORLD_SIZE", "1"))
+distributed.init_process_group(backend="nccl")
+
+torch.cuda.set_device(local_rank)
+torch.backends.cudnn.benchmark = True
+
+os.makedirs(args.output, exist_ok=True)
+
+if rank == 0:
+    logger: logging.Logger = logging.getLogger(__name__)  # 模块级 logger
+    formatter = logging.Formatter(f"rank-id:{rank:03d}:%(asctime)s-%(message)s")
+    file_handler = logging.FileHandler(os.path.join(args.output, f"training_{rank:03d}.logger"))
+    stream_handler = logging.StreamHandler(sys.stdout)
+    file_handler.setFormatter(formatter)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.setLevel(logging.INFO)
+else:
+    logger: logging.Logger = logging.getLogger(__name__)  # 模块级 logger
+    formatter = logging.Formatter(f"rank-id:{rank:03d}:%(asctime)s-%(message)s")
+    file_handler = logging.FileHandler(os.path.join(args.output, f"training_{rank:03d}.logger"))
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.setLevel(logging.INFO)
+
+def unwrap_module(model):
+    """Unwraps a model from DistributedDataParallel or torch.compile if it is wrapped."""
+    if hasattr(model, "module"):
+        return model.module
+    if hasattr(model, "_orig_mod"):
+        return model._orig_mod
+    return model
+
+
+# CLIP Specific Constants for image processor
+CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
+CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
+
+
+def is_hf_model_dir(path):
+    """Check if a path is a HuggingFace model directory (contains config.json)."""
+    if not os.path.isdir(path):
+        return False
+    return os.path.exists(os.path.join(path, "config.json"))
+
+
+def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
+    """
+    Save model in HuggingFace transformers format using save_pretrained().
 
     Args:
-        hidden_size (`int`, *optional*, defaults to 768):
-            Dimensionality of the encoder layers and the pooler layer.
-        intermediate_size (`int`, *optional*, defaults to 3072):
-            Dimensionality of the "intermediate" (i.e., feed-forward) layer in the Transformer encoder.
-        num_hidden_layers (`int`, *optional*, defaults to 12):
-            Number of hidden layers in the Transformer encoder.
-        num_attention_heads (`int`, *optional*, defaults to 12):
-            Number of attention heads for each attention layer in the Transformer encoder.
-        num_channels (`int`, *optional*, defaults to 3):
-            The number of input channels.
-        image_size (`int`, *optional*, defaults to 224):
-            The size (resolution) of each image.
-        patch_size (`int`, *optional*, defaults to 16):
-            The size (resolution) of each patch.
-        hidden_act (`str` or `function`, *optional*, defaults to `"gelu"`):
-            The non-linear activation function (function or string) in the encoder and pooler.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-6):
-            The epsilon used by the layer normalization layers.
-        layer_norm_type (`str`, *optional*, defaults to `"layer_norm"`):
-            The type of layer normalization to use. Supported values: `"layer_norm"`, `"rms_norm"`.
-        attention_dropout (`float`, *optional*, defaults to 0.0):
-            The dropout ratio for the attention probabilities.
-        initializer_range (`float`, *optional*, defaults to 0.02):
-            The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
-        rope_theta (`float`, *optional*, defaults to 10000.0):
-            The base period of the RoPE embeddings.
-        use_head (`bool`, *optional*, defaults to `True`):
-            Whether to use the pooling head.
+        output_dir: Base output directory
+        backbone: The backbone model (may be wrapped in DDP or torch.compile)
+        global_step: Current training step
+        image_size: Image size for the processor config
+    """
+    # Only save on rank 0
+    if rank != 0:
+        return
 
-    Example:
+    # Create HuggingFace checkpoint directory
+    hf_dir = os.path.join(output_dir, f"{global_step:08d}_hf")
+    os.makedirs(hf_dir, exist_ok=True)
 
-    ```python
-    >>> from transformers import LlavaViTConfig, LlavaViTModel
+    # Unwrap the model from DDP and torch.compile
+    model = unwrap_module(backbone)
 
-    >>> # Initializing a LlavaViT configuration
-    >>> configuration = LlavaViTConfig()
+    # Save using HuggingFace save_pretrained
+    if hasattr(model, "save_pretrained"):
+        model.save_pretrained(hf_dir)
+        logger.info(f"Saved HuggingFace model to {hf_dir}")
 
-    >>> # Initializing a model (with random weights) from the configuration
-    >>> model = LlavaViTModel(configuration)
+        # Save CLIPImageProcessor config
+        processor = CLIPImageProcessor(
+            size=image_size,
+            crop_size=image_size,
+            image_mean=CLIP_MEAN,
+            image_std=CLIP_STD,
+            resample=3,
+            do_center_crop=True,
+            do_normalize=True,
+            do_resize=True,
+            feature_extractor_type="CLIPFeatureExtractor"
+        )
+        processor.save_pretrained(hf_dir)
+        logger.info(f"Saved CLIPImageProcessor to {hf_dir}")
+    else:
+        logger.warning(f"Model does not have save_pretrained method, skipping HF checkpoint save")
 
-    >>> # Accessing the model configuration
-    >>> configuration = model.config
-    ```"""
 
-    model_type = "llava_vit"
+def main():
+    """Main training function."""
+    global_step = 0
 
+    # image_size 保持你原逻辑
+    args.image_size = [int(x) for x in args.image_size.split(",")]
+    if len(args.image_size) == 1:
+        args.image_size = args.image_size * 2
+    args.image_size_video = [int(x) for x in args.image_size_video.split(",")]
+    if len(args.image_size_video) == 1:
+        args.image_size_video = args.image_size_video * 2
+
+    # =====================================================
+    # Multi-frame training configuration / 多帧训练配置
+    # 根据 rank % 4 确定每个 GPU 使用的帧数
+    # batch size 与帧数成反比: base_bs * (base_num_frames / actual_num_frames)
+    # =====================================================
+    if args.enable_multi_frame:
+        num_frame_options = len(args.multi_frame_list)
+        frame_index = rank % num_frame_options
+        args.actual_num_frames = args.multi_frame_list[frame_index]
+        # 计算 batch size 缩放因子：帧数越少，batch size 越大
+        # 验证 base_num_frames 必须能被 actual_num_frames 整除
+        if args.base_num_frames % args.actual_num_frames != 0:
+            raise ValueError(
+                f"base_num_frames ({args.base_num_frames}) must be divisible by "
+                f"actual_num_frames ({args.actual_num_frames}). "
+                f"Please adjust multi_frame_list or base_num_frames."
+            )
+        frame_scale_factor = args.base_num_frames // args.actual_num_frames
+        logger.info(f"[Multi-frame] rank={rank}, frame_index={frame_index}, "
+                    f"actual_num_frames={args.actual_num_frames}, "
+                    f"frame_scale_factor={frame_scale_factor}")
+    else:
+        args.actual_num_frames = args.num_frames
+        frame_scale_factor = 1
+        logger.info(f"[Single-frame] Using fixed num_frames={args.actual_num_frames}")
+
+    # 实例化数据集（使用复数参数名）
+    args.list_datasets = [DATASET_REGISTRY.get(x)() for x in args.list_datasets]
+    args.num_heads = len(args.list_datasets)
+
+    # 如果 argparse 已经做了类型转换，下面几行可以省略；保留也安全
+    args.list_batch_sizes = [int(x) for x in args.list_batch_sizes]
+    args.list_sample_rates = [float(x) for x in args.list_sample_rates]
+    args.list_margins = [float(x) for x in args.list_margins]
+    args.list_filters = [float(x) for x in args.list_filters]
+    args.list_lr_pfc_weights = [float(x) for x in args.list_lr_pfc_weights]
+    args.list_loss_weights = [float(x) for x in args.list_loss_weights]
+
+    def _expand(name, v):
+        if len(v) == 1:
+            return v * args.num_heads
+        if len(v) != args.num_heads:
+            raise ValueError(f"{name}: expected 1 or {args.num_heads} values, got {len(v)}")
+        return v
+
+    args.list_batch_sizes = _expand("list_batch_sizes", args.list_batch_sizes)
+    args.list_sample_rates = _expand("list_sample_rates", args.list_sample_rates)
+    args.list_margins = _expand("list_margins", args.list_margins)
+    args.list_filters = _expand("list_filters", args.list_filters)
+    args.list_lr_pfc_weights = _expand("list_lr_pfc_weights", args.list_lr_pfc_weights)
+    args.list_loss_weights = _expand("list_loss_weights", args.list_loss_weights)
+    args.list_init_partial_fc_paths = _expand("list_init_partial_fc_paths", args.list_init_partial_fc_paths)
+
+    # =====================================================
+    # 根据多帧配置调整每个数据集的 batch size
+    # 对于 video 类型 (dali_type == "decord")，应用帧数缩放
+    # =====================================================
+    args.list_batch_sizes_adjusted = []
+    for head_id, dataset_config in enumerate(args.list_datasets):
+        base_bs = args.list_batch_sizes[head_id]
+        if dataset_config.dali_type == "decord":
+            # 视频分支：batch size 与帧数成反比
+            adjusted_bs = base_bs * frame_scale_factor
+            logger.info(f"[head_id={head_id}] Video branch: base_bs={base_bs}, "
+                        f"adjusted_bs={adjusted_bs} (scale={frame_scale_factor}x)")
+        else:
+            # 图像分支：保持原有 batch size
+            adjusted_bs = base_bs
+            logger.info(f"[head_id={head_id}] Image branch: bs={adjusted_bs}")
+        args.list_batch_sizes_adjusted.append(adjusted_bs)
+
+    # 其余派生量
+    args.batch_size = sum(args.list_batch_sizes_adjusted)
+    args.list_head_names = [x.name for x in args.list_datasets]
+    args.total_steps = int(args.num_sampled_data / args.batch_size / world_size)
+
+    for arg in vars(args):
+        msg = f"{format(arg, '<30')}  {format(str(getattr(args, arg)))}"
+        logger.info(msg)
+
+
+    # Initialize models using timm's create_model
+    backbone = create_model(args.model_name).cuda().train()
+
+    if args.init_backbone != "NULL":
+        assert os.path.exists(args.init_backbone)
+
+        # Check if init_backbone is a HuggingFace model directory
+        if is_hf_model_dir(args.init_backbone):
+            # Load from HuggingFace pretrained directory
+            backbone = LlavaViTModel.from_pretrained(
+                args.init_backbone,
+                torch_dtype=torch.bfloat16
+            ).cuda().train()
+            logger.info(f"Loaded HuggingFace backbone from {args.init_backbone}")
+        else:
+            # Load from .pt checkpoint file
+            state_dict = torch.load(args.init_backbone, "cpu")
+            state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+            state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+            backbone.load_state_dict(state_dict, strict=True)
+            logger.info(f"Loaded backbone weights from {args.init_backbone}")
+
+    # 根据 finetune_backbone 控制哪些层参与训练：
+    # - finetune_backbone = 1: 整个 backbone 可训练
+    # - finetune_backbone = 0: 只有 head 可训练，其它全部冻结
+    if args.finetune_backbone:
+        backbone.requires_grad_(True)
+    else:
+        # 先全部冻结
+        backbone.requires_grad_(False)
+        # 仅打开 head 的梯度（假设 LlavaViTEncoder 上有 .head）
+        backbone_module = unwrap_module(backbone)
+        if hasattr(backbone_module, "head"):
+            for p in backbone_module.head.parameters():
+                p.requires_grad = True
+        else:
+            raise RuntimeError(
+                "finetune_backbone==0 但 backbone 上没有属性 'head'，"
+                "请确认使用的是 LlavaViTEncoder 并且 use_head=True。"
+            )
+
+    backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
+
+    dict_pfc_modules = {}
+    list_module_pfc = []
+    parameters: List[dict] = [
+        {"params": backbone_parameters},
+    ]
+
+    for head_id, _ in enumerate(range(args.num_heads)):
+        head_name = args.list_head_names[head_id]
+        dataset_config = args.list_datasets[head_id]
+        dataset_config: Property
+
+        if dataset_config.pfc_types[0] == "partial_fc":
+            margin_loss = CombinedMarginLoss(
+                64,
+                1,
+                0,
+                args.list_margins[head_id],
+                args.list_filters[head_id]
+            )
+            partial_fc = PartialFC_V2(
+                margin_loss,
+                args.embedding_size,
+                dataset_config.num_classes,
+                args.list_sample_rates[head_id],
+                fp16=False,
+            )
+        else:
+            raise ValueError(
+                f"dataset_config.pfc_type {dataset_config.pfc_types[0]} not support!"
+            )
+
+        partial_fc.train().cuda()
+        # list_module_pfc.append(torch.compile(partial_fc))
+        list_module_pfc.append(partial_fc)
+        dict_pfc_modules[head_name] = partial_fc
+
+        lr_pfc = args.lr * args.list_lr_pfc_weights[head_id]
+        parameters.append(
+            {
+                "params": partial_fc.parameters(),
+                "lr": lr_pfc,
+                "weight_decay": args.weight_decay_pfc,
+            }
+        )
+
+        init_partial_fc = args.list_init_partial_fc_paths[head_id]
+        if init_partial_fc != "NULL":
+            init_partial_fc = init_partial_fc % rank
+            logger.info(f"init_partial_fc: {init_partial_fc}")
+            if os.path.exists(init_partial_fc):
+                if init_partial_fc.endswith(".npy"):
+                    _weight = torch.from_numpy(np.load(init_partial_fc)).cuda()
+                    partial_fc.weight = torch.nn.Parameter(_weight)
+                    logger.info(f"Loaded partial FC weights from {init_partial_fc}")
+                elif init_partial_fc.endswith(".pt"):
+                    _weight = torch.load(init_partial_fc, "cpu")
+                    partial_fc.load_state_dict(_weight, strict=True)
+                    logger.info(f"Loaded partial FC state from {init_partial_fc}")
+            else:
+                raise FileNotFoundError(f"Partial FC init file not found: {init_partial_fc}")
+
+    if args.opt == "adamw":
+        optimizer_cls = torch.optim.AdamW
+
+        opt = optimizer_cls(parameters, lr=args.lr, weight_decay=args.weight_decay)
+        lr_scheduler = PolynomialLRWarmup(
+            opt, int(args.total_steps * args.warmup_ratio), args.total_steps, 2
+        )
+    else:
+        raise ValueError(f"{args.opt} not support!")
+
+    result = load_checkpoint(
+        args.output,
+        None,
+        backbone,
+        dict_pfc_modules,
+        lr_scheduler,
+        None,
+        args.list_head_names,
+    )
+    if result is not None:
+        global_step = result['global_step']
+        logger.info(f"Resuming from step {global_step}")
+    else:
+        global_step = 0
+
+    def wrap_ddp(model):
+        return torch.nn.parallel.DistributedDataParallel(
+            module=model,
+            broadcast_buffers=False,
+            device_ids=[local_rank],
+            bucket_cap_mb=32,
+            find_unused_parameters=True,
+            static_graph=True)
+
+    backbone_ddp = wrap_ddp(backbone)
+    # backbone_ddp_compiled = backbone_ddp
+    backbone_ddp_compiled = torch.compile(backbone_ddp)
+
+    list_dali_dataloader = []
+    list_head_names = []
+    # print("开始加载数据了")
+    for head_id, dataset_config in enumerate(args.list_datasets):
+        if dataset_config.dali_type == "decord":
+            from dataloader.data_decord_video_sampling_frame import get_dali_dataloader
+
+            # def get_dali_dataloader(
+            #     data_root_path: str,
+            #     data_csv_path: str,
+            #     mode: str = "val",
+            #     batch_size: int = 32,
+            #     sequence_length: int = 16,
+            #     input_size: int = 224,
+            #     short_side_size: int = 224,
+            #     use_rgb: bool = True,
+            #     mean: List[float] = [0.48145466, 0.4578275, 0.40821073],
+            #     std: List[float] = [0.26862954, 0.26130258, 0.27577711],
+            #     dali_num_threads: int = 4,
+            #     dali_py_num_workers: int = 8,
+            #     decord_num_threads: int = 2,
+            #     seed: int = 0,
+            # ) -> DALIWarper:
+
+            # 使用调整后的 batch size 和实际帧数
+            train_iter = get_dali_dataloader(
+                data_root_path="",
+                data_csv_path=dataset_config.prefixes[0],
+                mode="train",
+                dali_num_threads=2,
+                dali_py_num_workers=4 // frame_scale_factor,
+                decord_num_threads=frame_scale_factor,
+                batch_size=args.list_batch_sizes_adjusted[head_id],
+                input_size=args.image_size_video[0],
+                sequence_length=args.actual_num_frames,
+                seed=0+rank,
+                shard_id=dataset_config.shard_id,
+                num_shards=dataset_config.num_shards)
+            logger.info(f"[head_id={head_id}] Video dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, "
+                        f"num_frames={args.actual_num_frames}")
+
+
+        elif dataset_config.dali_type == "origin":
+            if args.debug:
+                from dataloader.data_v2 import SyntheticDataIter
+                train_iter = SyntheticDataIter(
+                    args.list_batch_sizes_adjusted[head_id], 224, local_rank
+                )
+            else:
+                from dataloader.data_v2 import MultiRecDALIWarper
+                # print("dataset_config.prefix", dataset_config.prefixes)
+                train_iter = MultiRecDALIWarper(
+                    list_prefix=dataset_config.prefixes,
+                    batch_size=args.list_batch_sizes_adjusted[head_id],
+                    image_size=args.image_size,
+                    workers=args.workers,
+                    shard_id=dataset_config.shard_id,
+                    num_shards=dataset_config.num_shards
+        )
+        else:
+            raise ValueError(
+                f"dataset_config.dali_type {dataset_config.dali_type} not support!"
+            )
+
+        list_dali_dataloader.append(train_iter)
+        list_head_names.append(dataset_config.name)
+
+    if rank == 0:
+        tb_writer = SummaryWriter(log_dir=f"{args.output}/tensorboard")
+    else:
+        tb_writer = None
+
+    # Initialize callback for logging
+    batch_end_callback = BatchEndCallBack(
+        frequent=args.frequent,
+        list_head_names=list_head_names,
+        output=args.output,
+        total_steps=args.total_steps,
+        tb_writer=tb_writer,
+    )
+    log_args(args, logger, writer=tb_writer, save_dir=args.output, rank=rank)
+
+
+    # -------- 这里加一段logger，输出每个rank分到的数据 --------
+
+    for head_id, dataset_config in enumerate(args.list_datasets):
+        name = dataset_config.name if hasattr(dataset_config, "name") else f"head_{head_id}"
+        prefixes = getattr(dataset_config, "prefixes", None)
+        logger.info(
+            f"[rank {rank}][local_rank {local_rank}] head_id={head_id} dataset={name} assigned_prefixes_num={len(prefixes) if prefixes is not None else 'N/A'}"
+        )
+        if prefixes is not None:
+            preview_prefixes = prefixes
+            logger.info(f"[rank {rank}][local_rank {local_rank}] prefixes preview: {preview_prefixes}")
+            # 如需全部打印，可以用:
+            # for p in prefixes:
+            #     logger.info(f"    {p}")
+
+    # -----------------------------------------------------
+
+    list_iter = []
+    list_next_data_batch = []
+    for i in range(args.num_heads):
+        # list_dali_dataloader[i].reset()
+        list_iter.append(iter(list_dali_dataloader[i]))
+        list_next_data_batch.append(next(list_iter[i]))
+
+    if global_step > args.total_steps:
+        logger.info("global_step > total_steps")
+        exit()
+
+    num_samples = 0
+    end_of_batch = False
+    while not end_of_batch:
+        list_data_batch = list_next_data_batch
+        num_samples += sum(args.list_batch_sizes_adjusted) * world_size
+
+        list_embedding = []
+        list_batch_sizes = []
+        for head_id, dataset_config in enumerate(args.list_datasets):
+
+            dataset_config: Property
+            if dataset_config.dali_type in ["decord"]:
+                videos = list_data_batch[head_id]["videos"]       # [B, C, T, H, W]
+                labels = list_data_batch[head_id]["labels"].view(-1)
+                frame_indices = list_data_batch[head_id]["indices"]   # [B, seq_len]
+                total_frames = list_data_batch[head_id]["total_frames"]  # [B, 1] or [B]
+
+                bs, C, T, H, W = videos.shape
+                target_frames = 64
+
+                # === 插值indices到目标帧数 ===
+                interpolated_indices = interpolate_frame_indices(
+                    frame_indices,
+                    total_frames.view(-1),
+                    target_frames
+                )   # [B, seq_len]
+
+                padded_videos = torch.zeros(bs, C, target_frames, H, W, device="cuda", dtype=videos.dtype)
+                # 为scatter准备indices
+                seq_len = frame_indices.shape[1]
+                frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
+                # scatter填充各帧
+                padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
+
+                # 计算可见帧token编号
+                per = torch.arange(args.num_tokens_per_frame, device="cuda")
+                visible_index = (interpolated_indices.unsqueeze(-1) * args.num_tokens_per_frame + per).reshape(bs, -1)
+                visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
+
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    head_embedding  = backbone_ddp_compiled(padded_videos, visible_index)["head_output"]
+                head_embedding = head_embedding.float()
+                list_embedding.append(head_embedding)
+
+            elif dataset_config.dali_type in ["origin"]:
+                head_input = list_data_batch[head_id]["pixel_values"]
+                list_batch_sizes.append(head_input.size(0))
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    head_embedding = backbone_ddp_compiled(head_input)["head_output"]
+                head_embedding = head_embedding.float()
+                list_embedding.append(head_embedding)
+            else:
+                raise ValueError(f"Unsupported DALI type: {dataset_config.dali_type}")
+
+        list_loss = []
+        list_loss_float = []
+
+        for head_id, pfc in enumerate(list_module_pfc):
+            dataset_config = args.list_datasets[head_id]
+            head_embedding = list_embedding[head_id]
+            head_label = list_data_batch[head_id]["labels"].long().cuda()
+            label_select = dataset_config.label_select
+            random_diff = dataset_config.random_diff
+            loss_weight = args.list_loss_weights[head_id]
+            head_label = head_label[
+                :, label_select : label_select + random_diff
+            ]
+            head_loss = pfc(head_embedding, head_label, random_diff) * loss_weight
+            list_loss.append(head_loss)
+            list_loss_float.append(head_loss.item())
+
+        is_accumulation_step = (global_step % args.backward_passes_per_step != 0)
+        scaled_loss = sum(list_loss) / args.backward_passes_per_step
+
+        if is_accumulation_step:
+            # 中间累积步骤，避免DDP通信
+            with backbone_ddp_compiled.no_sync():
+                scaled_loss.backward()
+        else:
+            # 最后一步正常backward，会进行梯度同步
+            scaled_loss.backward()
+
+            # 只在累积完成时执行梯度裁剪和优化器更新
+            clip_grad_norm_(backbone_ddp_compiled.parameters(), max_norm=5, norm_type=2)
+            for pfc in list_module_pfc:
+                clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
+            opt.step()
+            opt.zero_grad()
+
+        # 学习率更新
+        lr_scheduler.step()
+
+        batch_end_callback(
+            global_step=global_step,
+            lr_scheduler=lr_scheduler,
+            list_loss_float=list_loss_float,
+            batch_size=args.batch_size,
+            num_samples=num_samples
+        )
+
+        global_step += 1
+
+        for i in range(args.num_heads):
+            list_next_data_batch[i] = next(list_iter[i])
+
+        if global_step % args.ckpt_interval == 0:
+            save_checkpoint(
+                args.output,
+                backbone,
+                pfc_modules=dict_pfc_modules,
+                lr_scheduler=lr_scheduler,
+                amp=None,
+                global_step=global_step,
+                list_head_names=args.list_head_names,
+                keep_num=20,
+            )
+            # Also save in HuggingFace format
+            save_hf_checkpoint(
+                args.output,
+                backbone,
+                global_step=global_step,
+                image_size=args.image_size[0]
+            )
+
+        if global_step > args.total_steps:
+            save_checkpoint(
+                args.output,
+                backbone,
+                pfc_modules=dict_pfc_modules,
+                lr_scheduler=lr_scheduler,
+                amp=None,
+                global_step=global_step,
+                list_head_names=args.list_head_names,
+                keep_num=20,
+            )
+            # Also save final model in HuggingFace format
+            save_hf_checkpoint(
+                args.output,
+                backbone,
+                global_step=global_step,
+                image_size=args.image_size[0]
+            )
+            logger.info(f"Training completed at step {global_step}")
+            exit()
+
+
+def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
+    """
+    插值原始帧索引到目标帧数
+    """
+    bs, seq_len = frame_indices.shape
+    device = frame_indices.device
+    total_frames_float = total_frames.float().view(bs, 1)
+    frame_indices_float = frame_indices.float()
+    total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
+    interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
+    interpolated_indices = torch.round(interpolated_indices).long()
+    interpolated_indices = torch.clamp(interpolated_indices, 0, target_frames - 1)
+    return interpolated_indices
+
+
+class BatchEndCallBack(object):
     def __init__(
         self,
-        hidden_size=768,
-        intermediate_size=3072,
-        num_hidden_layers=12,
-        num_attention_heads=12,
-        num_channels=3,
-        image_size=448,
-        patch_size=16,
-        hidden_act="gelu",
-        layer_norm_eps=1e-6,
-        layer_norm_type="layer_norm",
-        attention_dropout=0.0,
-        initializer_range=0.02,
-        rope_theta=10000.0,
-        use_head=True,
-        **kwargs,
+        frequent: int,
+        list_head_names: List[str],
+        output: str,
+        total_steps: int,
+        tb_writer = None,
     ):
-        super().__init__(**kwargs)
-        self.hidden_size = hidden_size
-        self.intermediate_size = intermediate_size
-        self.num_hidden_layers = num_hidden_layers
-        self.num_attention_heads = num_attention_heads
-        self.num_channels = num_channels
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.hidden_act = hidden_act
-        self.layer_norm_eps = layer_norm_eps
-        self.layer_norm_type = layer_norm_type
-        self.attention_dropout = attention_dropout
-        self.initializer_range = initializer_range
-        self.rope_theta = rope_theta
-        self.use_head = use_head
+        self.frequent: int = frequent
+        self.list_head_names: List[str] = list_head_names
+        self.output: str = output
+        self.total_steps: int = total_steps
+
+        self.num_head = len(self.list_head_names)
+        self.time_start = time.time()
+        self.list_loss_metric = [ScalaMetric() for _ in self.list_head_names]  # 只保留一个loss
+        self.init = False
+        self.tic = 0
+        # 用于计算平均每步时间
+        self.step_times = []
+        self.max_time_history = 100  # 保留最近100个step的时间来平均
+        # 累计样本数计数器
+        self.total_examples = 0
+        # Create TensorBoard writer if rank 0
+        if rank == 0:
+            self.tb_writer = tb_writer
+        else:
+            self.tb_writer = None
+        self.logger = logging.getLogger(__name__)
+
+    def __call__(
+        self,
+        global_step: int,
+        lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
+        list_loss_float: List[float],  # 只需要一个loss列表
+        batch_size: int,
+        num_samples=None,  # 新增参数，用于记录每个batch实际处理的样本数
+    ):
+        for i in range(self.num_head):
+            self.list_loss_metric[i].update(list_loss_float[i])
+
+        if global_step > 0 and global_step % self.frequent == 0:
+            if self.init:
+                current_time = time.time()
+                time_elapsed = current_time - self.tic
+                self.tic = current_time
+
+                # 计算这个frequent间隔内每个step的平均时间
+                time_per_step = time_elapsed / self.frequent
+
+                # 保存到历史记录，用于平滑计算
+                self.step_times.append(time_per_step)
+                if len(self.step_times) > self.max_time_history:
+                    self.step_times.pop(0)
+
+                # 计算平均每步时间（使用最近的记录）
+                avg_time_per_step = sum(self.step_times) / len(self.step_times)
+
+                # 计算剩余步数
+                remaining_steps = self.total_steps - global_step
+
+                # 计算预计剩余时间（小时）
+                remaining_time_hours = (avg_time_per_step * remaining_steps) / 3600
+
+                try:
+                    # 计算当前吞吐量
+                    speed: float = self.frequent * batch_size / time_elapsed
+                    speed_total = speed * world_size
+                except ZeroDivisionError:
+                    speed = float("inf")
+                    speed_total = float("inf")
+
+                # 使用f-string格式化输出信息
+                header = f"rank {speed:.2f} total {speed_total:.2f} its/s lr: {lr_scheduler.get_last_lr()[0]:.8f} "
+                progress = f"step: {global_step}/{self.total_steps} ({global_step/self.total_steps*100:.2f}%) "
+                time_info = f"remain: {remaining_time_hours:.2f} hours"
+
+                loss_str_format = ""
+                for head_id, name in enumerate(self.list_head_names):
+                    # Add to TensorBoard if rank 0
+                    if rank == 0 and self.tb_writer:
+                        self.tb_writer.add_scalar(
+                            f"loss/{name}",
+                            self.list_loss_metric[head_id].avg,
+                            global_step
+                        )
+                        self.tb_writer.add_scalar(
+                            f"lr/{name}",
+                            lr_scheduler.get_last_lr()[head_id + 1],
+                            global_step
+                        )
+
+                        self.tb_writer.add_scalar(
+                            f"samples vs. loss/{name}",
+                            self.list_loss_metric[head_id].avg,
+                            num_samples,
+                        )
+
+                    loss_str_format += f"\n{f'name: {name}':<50}{f'lr: {lr_scheduler.get_last_lr()[head_id + 1]:.8f}':<20}"
+                    loss_str_format += f"{f'loss: {self.list_loss_metric[head_id].avg:.4f}':<20}"
+                    self.list_loss_metric[head_id].reset()
+
+                # 添加样本数信息到日志
+                examples_info = f"samples: {num_samples}"
+                msg = f"{header}{progress}{time_info} {examples_info}{loss_str_format}"
+
+                if rank == 0:
+                    logger.info(msg)
+                    # Flush TensorBoard writer
+                    if self.tb_writer:
+                        self.tb_writer.flush()
+            else:
+                self.init = True
+                self.tic = time.time()
 
 
-# ---------------------------------------------------------------------------
-# Model Docstrings
-# ---------------------------------------------------------------------------
+class ScalaMetric(object):
+    def __init__(self):
+        self.val = None
+        self.avg = None
+        self.sum = None
+        self.count = None
+        self.reset()
 
-LLAVA_VIT_START_DOCSTRING = r"""
-    This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
-    library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
-    etc.)
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
 
-    This model is also a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass.
-    Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage
-    and behavior.
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
-    Parameters:
-        config ([`LlavaViTConfig`]): Model configuration class with all the parameters of the model.
-            Initializing with a config file does not load the weights associated with the model, only the
-            configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
-"""
 
-LLAVA_VIT_INPUTS_DOCSTRING = r"""
+def save_video_as_gif(tensor, path, fps=10, mean=None, std=None):
+    """
+    Save a video tensor as a GIF file with proper denormalization.
+
     Args:
-        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)` or `(batch_size, num_channels, num_frames, height, width)`):
-            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`].
-        visible_indices (`torch.Tensor`, *optional*):
-            Indices of visible patches for masking. Used in MAE-style pretraining or inference.
-        output_attentions (`bool`, *optional*):
-            Whether or not to return the attentions tensors of all attention layers. See `attentions` under returned
-            tensors for more detail.
-        output_hidden_states (`bool`, *optional*):
-            Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
-            more detail.
-        return_dict (`bool`, *optional*):
-            Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
-"""
-
-
-# ---------------------------------------------------------------------------
-# Helper Functions & Layers
-# ---------------------------------------------------------------------------
-
-def get_norm_layer(config):
-    if config.layer_norm_type == "rms_norm":
-        return nn.RMSNorm(config.hidden_size, eps=config.layer_norm_eps)
-    else:
-        return nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-
-
-# def rotate_half(x):
-#     x1 = x[..., : x.shape[-1] // 2]
-#     x2 = x[..., x.shape[-1] // 2 :]
-#     return torch.cat((-x2, x1), dim=-1)
-
-
-def rotate_half(x):
+        tensor: Tensor of shape [3, num_frames, height, width]
+        path: Path to save the GIF
+        fps: Frames per second for the GIF
+        mean: Mean values used for normalization [R, G, B]
+        std: Standard deviation values used for normalization [R, G, B]
     """
-    Interleaved rotation to match Source model's implementation.
-    (x1, x2, x3, x4) -> (-x2, x1, -x4, x3)
+    import imageio
+
+    # Make sure the directory exists
+    Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
+
+    # Set default ImageNet mean and std if not provided
+    if mean is None:
+        mean = [x * 255 for x in [0.48145466, 0.4578275, 0.40821073]]
+    if std is None:
+        std = [x * 255 for x in [0.26862954, 0.26130258, 0.27577711]]
+
+    # Convert mean and std to tensors with proper shape for broadcasting
+    mean_tensor = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
+    std_tensor = torch.tensor(std).view(3, 1, 1).to(tensor.device)
+
+    # Convert to numpy array and ensure it's in the right format for imageio
+    frames = []
+    for i in range(tensor.shape[1]):  # Iterate through frames
+        # Properly denormalize: pixel = pixel * std + mean
+        frame = tensor[:, i] * std_tensor + mean_tensor
+
+        # Convert from [3, H, W] to [H, W, 3]
+        frame = frame.permute(1, 2, 0).cpu().detach().numpy()
+
+        # Clip values to valid range and convert to uint8
+        frame = np.clip(frame, 0, 255).astype(np.uint8)
+        frames.append(frame)
+
+    # Save as GIF
+    imageio.mimsave(path, frames, fps=fps)
+    return path
+
+
+def _sanitize_for_json(v):
+    """尽量把值转成 JSON 可序列化类型；不行就转成字符串。"""
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    if isinstance(v, (list, tuple)):
+        return [_sanitize_for_json(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _sanitize_for_json(val) for k, val in v.items()}
+    # 其它（例如 Namespace、Path、自定义对象等）
+    return str(v)
+
+def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, rank: int = 0):
+
     """
-    x_even = x[..., ::2]
-    x_odd = x[..., 1::2]
-    return torch.stack((-x_odd, x_even), dim=-1).flatten(-2)
-
-
-def apply_rotary_pos_emb(q, k, freqs):
-    # q, k: (B, H, L, D)
-    # freqs: (B, L, D)
-
-    # We need to broadcast freqs to match heads
-    # (B, L, D) -> (B, 1, L, D)
-
-    # !!! CRITICAL FIX: Cast cos/sin to q.dtype (bf16/fp16) immediately
-    # freqs are typically float32, so cos() returns float32.
-    # Without this cast, (q * cos) upcasts q to float32, causing FlashAttention to fail.
-    cos = freqs.cos().unsqueeze(1).to(q.dtype)
-    sin = freqs.sin().unsqueeze(1).to(q.dtype)
-
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
-
-
-class VideoRotaryEmbeddingSplit466(nn.Module):
+    打印并记录训练参数。
+    - logger: 你的 logger 实例（支持 .info）
+    - writer: TensorBoard SummaryWriter（可为 None）
+    - save_dir: 额外保存 JSON 的路径（可为 None）
+    - rank: 仅在 rank==0 执行（分布式时避免重复）
     """
-    3D (T,H,W) Rotary frequency constructor with 4:6:6 split.
-    """
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__()
-        head_dim = config.hidden_size // config.num_attention_heads
-        base = config.rope_theta
-
-        assert head_dim % 2 == 0, "head_dim must be even for rotary."
-        assert head_dim % 16 == 0, "head_dim must be divisible by 16."
-        half = head_dim // 2
-        assert half % 16 == 0, "head_dim//2 must also be divisible by 16 to split into 4:6:6."
-
-        self.head_dim = head_dim
-        self.half = half
-
-        unit = half // 16
-        self.t_size = 4 * unit
-        self.h_size = 6 * unit
-        self.w_size = 6 * unit
-
-        self.register_buffer("inv_freq_t", 1.0 / (base ** (torch.arange(self.t_size, dtype=torch.float32) / self.t_size)), persistent=False)
-        self.register_buffer("inv_freq_h", 1.0 / (base ** (torch.arange(self.h_size, dtype=torch.float32) / self.h_size)), persistent=False)
-        self.register_buffer("inv_freq_w", 1.0 / (base ** (torch.arange(self.w_size, dtype=torch.float32) / self.w_size)), persistent=False)
-
-    def forward(self, t: int, h: int, w: int, device=None):
-        if device is None: device = self.inv_freq_t.device
-
-        inv_t = self.inv_freq_t.to(device=device)
-        inv_h = self.inv_freq_h.to(device=device)
-        inv_w = self.inv_freq_w.to(device=device)
-
-        ft = torch.outer(torch.arange(t, device=device, dtype=torch.float32), inv_t)
-        fh = torch.outer(torch.arange(h, device=device, dtype=torch.float32), inv_h)
-        fw = torch.outer(torch.arange(w, device=device, dtype=torch.float32), inv_w)
-
-        t_ids = torch.arange(t, device=device).repeat_interleave(h * w)
-        h_ids = torch.arange(h, device=device).repeat_interleave(w).repeat(t)
-        w_ids = torch.arange(w, device=device).repeat(h).repeat(t)
-
-        freqs = torch.cat([ft[t_ids], fh[h_ids], fw[w_ids]], dim=-1)
-        return freqs
-
-
-class Siglip2MultiheadAttentionPoolingHead(nn.Module):
-    """
-    Multi-Head Attention Pooling with a learned probe (PMA-style).
-    """
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__()
-        self.embed_dim = config.hidden_size
-        self.probe = nn.Parameter(torch.randn(1, 1, config.hidden_size))
-        self.attention = nn.MultiheadAttention(config.hidden_size, config.num_attention_heads, batch_first=True)
-        self.norm = nn.RMSNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.mlp = SiglipMLP(config)
-
-    def forward(self, hidden_states):
-        batch_size = hidden_states.shape[0]
-        probe = self.probe.repeat(batch_size, 1, 1)
-
-        attn_output, _ = self.attention(probe, hidden_states, hidden_states)
-
-        residual = attn_output
-        attn_output = self.norm(attn_output)
-        attn_output = residual + self.mlp(attn_output)
-
-        return attn_output[:, 0]
-
-
-# ---------------------------------------------------------------------------
-# Modeling Components
-# ---------------------------------------------------------------------------
-
-class LlavaViTEmbeddings(nn.Module):
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__()
-        self.config = config
-        self.embed_dim = config.hidden_size
-        self.image_size = config.image_size
-        self.patch_size = config.patch_size
-
-        self.patch_embedding = nn.Conv2d(
-            in_channels=config.num_channels,
-            out_channels=self.embed_dim,
-            kernel_size=self.patch_size,
-            stride=self.patch_size,
-            bias=False,
-        )
-
-    def forward(self, pixel_values: torch.FloatTensor) -> torch.Tensor:
-        # Handle 4D (B, C, H, W) or 5D (B, C, T, H, W) inputs
-        if pixel_values.dim() == 4:
-             pixel_values = pixel_values.unsqueeze(2) # (B, C, 1, H, W)
-
-        batch_size, channels, t_frames, height, width = pixel_values.shape
-
-        # Merge time into batch for Conv2d
-        x_2d = pixel_values.permute(0, 2, 1, 3, 4).reshape(batch_size * t_frames, channels, height, width)
-
-        # Patch Embed
-        embeddings = self.patch_embedding(x_2d)  # (B*T, C, Hp, Wp)
-        embeddings = embeddings.flatten(2).transpose(1, 2) # (B*T, L_frame, C)
-
-        # Flatten all patches
-        total_patches = t_frames * (height // self.patch_size) * (width // self.patch_size)
-        embeddings = embeddings.reshape(batch_size, total_patches, self.embed_dim)
-
-        return embeddings
-
-
-class LlavaViTAttention(nn.Module):
-    """Multi-headed attention with RoPE support"""
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__()
-        self.config = config
-        self.embed_dim = config.hidden_size
-        self.num_heads = config.num_attention_heads
-        self.head_dim = self.embed_dim // self.num_heads
-        if self.head_dim * self.num_heads != self.embed_dim:
-             raise ValueError(
-                f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
-            )
-
-        self.scale = self.head_dim**-0.5
-        self.dropout = config.attention_dropout
-
-        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim)
-        self.v_proj = nn.Linear(self.embed_dim, self.embed_dim)
-        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        rotary_pos_emb: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-
-        batch_size, q_len, _ = hidden_states.size()
-
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
-
-        # (B, L, H, D) -> Transpose to (B, H, L, D)
-        query_states = query_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-
-        if rotary_pos_emb is not None:
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
-
-        # Calculate attention scores
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scale
-
-        if attention_mask is not None:
-            if attention_mask.size() != (batch_size, 1, q_len, q_len):
-                if attention_mask.dim() == 3:
-                     attention_mask = attention_mask.unsqueeze(1)
-            attn_weights = attn_weights + attention_mask
-
-        # FIX: Remove dtype=torch.float32 to stay in original dtype (bf16/fp16)
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-        attn_weights = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
-
-        attn_output = torch.matmul(attn_weights, value_states)
-
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.reshape(batch_size, q_len, self.embed_dim)
-
-        attn_output = self.out_proj(attn_output)
-
-        return attn_output, attn_weights if output_attentions else None
-
-
-class LlavaViTFlashAttention2(nn.Module):
-    """
-    Multi-headed attention with RoPE support using Flash Attention 2.
-    This module implements the same attention mechanism as LlavaViTAttention but uses
-    Flash Attention for improved performance and memory efficiency.
-    """
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__()
-        self.config = config
-        self.embed_dim = config.hidden_size
-        self.num_heads = config.num_attention_heads
-        self.head_dim = self.embed_dim // self.num_heads
-        if self.head_dim * self.num_heads != self.embed_dim:
-            raise ValueError(
-                f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
-            )
-
-        self.scale = self.head_dim**-0.5
-        self.dropout = config.attention_dropout
-
-        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim)
-        self.v_proj = nn.Linear(self.embed_dim, self.embed_dim)
-        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        rotary_pos_emb: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        """
-        Forward pass using Flash Attention 2.
-        """
-        batch_size, q_len, _ = hidden_states.size()
-
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
-
-        # Flash Attention requires (B, L, H, D) format
-        query_states = query_states.view(batch_size, q_len, self.num_heads, self.head_dim)
-        key_states = key_states.view(batch_size, q_len, self.num_heads, self.head_dim)
-        value_states = value_states.view(batch_size, q_len, self.num_heads, self.head_dim)
-
-        # Apply RoPE if provided
-        if rotary_pos_emb is not None:
-            # Transpose for RoPE application: (B, L, H, D) -> (B, H, L, D)
-            query_states = query_states.transpose(1, 2)
-            key_states = key_states.transpose(1, 2)
-            # NOTE: apply_rotary_pos_emb now ensures NO float32 cast happens
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
-            # Transpose back: (B, H, L, D) -> (B, L, H, D)
-            query_states = query_states.transpose(1, 2)
-            key_states = key_states.transpose(1, 2)
-
-        # FIX: Removed the explicit float32 check and downcast.
-        # We assume input is already correct (bf16/fp16) thanks to RoPE fix.
-
-        # Flash Attention forward pass
-        attn_output = flash_attn_func(
-            query_states,
-            key_states,
-            value_states,
-            dropout_p=self.dropout if self.training else 0.0,
-            softmax_scale=self.scale,
-            causal=False,
-        )
-
-        # Reshape to (B, L, embed_dim)
-        attn_output = attn_output.reshape(batch_size, q_len, self.embed_dim)
-
-        # No extra casting here.
-        attn_output = self.out_proj(attn_output)
-
-        return attn_output, None
-
-
-LLAVA_VIT_ATTENTION_CLASSES = {
-    "eager": LlavaViTAttention,
-    "flash_attention_2": LlavaViTFlashAttention2,
-}
-
-
-class LlavaViTEncoderLayer(nn.Module):
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__()
-        self.embed_dim = config.hidden_size
-        # Get attention implementation from config, default to "eager"
-        attn_implementation = getattr(config, "_attn_implementation", "eager")
-        if attn_implementation not in LLAVA_VIT_ATTENTION_CLASSES:
-            raise ValueError(
-                f"Unknown attention implementation: {attn_implementation}. "
-                f"Available implementations: {list(LLAVA_VIT_ATTENTION_CLASSES.keys())}"
-            )
-        self.self_attn = LLAVA_VIT_ATTENTION_CLASSES[attn_implementation](config)
-        self.layer_norm1 = get_norm_layer(config)
-        self.mlp = SiglipMLP(config)
-        self.layer_norm2 = get_norm_layer(config)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        rotary_pos_emb: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-
-        residual = hidden_states
-        hidden_states = self.layer_norm1(hidden_states)
-
-        hidden_states, attn_weights = self.self_attn(
-            hidden_states=hidden_states,
-            attention_mask=attention_mask,
-            rotary_pos_emb=rotary_pos_emb,
-            output_attentions=output_attentions,
-        )
-        hidden_states = residual + hidden_states
-
-        residual = hidden_states
-        hidden_states = self.layer_norm2(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
-
-        outputs = (hidden_states, attn_weights) if output_attentions else (hidden_states,)
-        return outputs
-
-
-class LlavaViTEncoder(nn.Module):
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__()
-        self.config = config
-        self.layers = nn.ModuleList([LlavaViTEncoderLayer(config) for _ in range(config.num_hidden_layers)])
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        rotary_pos_emb: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
-        output_hidden_states: bool = False,
-        return_dict: bool = True,
-    ) -> Union[Tuple, BaseModelOutput]:
-
-        all_hidden_states = () if output_hidden_states else None
-        all_self_attentions = () if output_attentions else None
-
-        for layer in self.layers:
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
-
-            layer_outputs = layer(
-                hidden_states,
-                attention_mask=attention_mask,
-                rotary_pos_emb=rotary_pos_emb,
-                output_attentions=output_attentions,
-            )
-
-            hidden_states = layer_outputs[0]
-
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[1],)
-
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
-
-        if not return_dict:
-            return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
-
-        return BaseModelOutput(
-            last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Main Models
-# ---------------------------------------------------------------------------
-
-@add_start_docstrings(
-    "The bare Llava ViT Model outputting raw hidden-states without any specific head on top.",
-    LLAVA_VIT_START_DOCSTRING,
-)
-class LlavaViTPreTrainedModel(PreTrainedModel):
-    config_class = LlavaViTConfig
-    base_model_prefix = "llava_vit"
-    supports_gradient_checkpointing = True
-    _no_split_modules = ["LlavaViTEncoderLayer"]
-    _supports_flash_attn_2 = True
-
-    def _init_weights(self, module):
-        """Initialize the weights"""
-        std = self.config.initializer_range
-        if isinstance(module, (nn.Linear, nn.Conv2d)):
-            module.weight.data.normal_(mean=0.0, std=std)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=std)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, (nn.LayerNorm, nn.RMSNorm)):
-            # 修复：RMSNorm 没有 bias，必须先检查 hasattr
-            module.weight.data.fill_(1.0)
-            if hasattr(module, 'bias') and module.bias is not None:
-                module.bias.data.zero_()
-
-
-@add_start_docstrings(
-    "Llava ViT Model with a vision transformer encoder.",
-    LLAVA_VIT_START_DOCSTRING,
-)
-class LlavaViTModel(LlavaViTPreTrainedModel):
-    def __init__(self, config: LlavaViTConfig):
-        super().__init__(config)
-        self.config = config
-
-        self.embeddings = LlavaViTEmbeddings(config)
-        self.layernorm_pre = get_norm_layer(config)
-        self.encoder = LlavaViTEncoder(config)
-        self.video_rope = VideoRotaryEmbeddingSplit466(config)
-
-        if config.use_head:
-             self.layernorm_post = get_norm_layer(config)
-             self.head = Siglip2MultiheadAttentionPoolingHead(config)
-        else:
-             self.layernorm_post = None
-             self.head = None
-
-        self.post_init()
-
-    @add_start_docstrings_to_model_forward(LLAVA_VIT_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=LlavaViTConfig)
-    def forward(
-        self,
-        pixel_values: torch.Tensor,
-        visible_indices: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, BaseModelOutputWithPooling]:
-        r"""
-        Returns:
-
-        Examples:
-
-        ```python
-        >>> from transformers import LlavaViTModel
-        >>> import torch
-
-        >>> model = LlavaViTModel.from_pretrained("DeepGlint-AI/llava-vit")
-        >>> pixel_values = torch.randn(1, 3, 224, 224) # Video input can be 5D (B, C, T, H, W) or 4D
-        >>> outputs = model(pixel_values)
-        >>> last_hidden_states = outputs.last_hidden_state
-        ```
-        """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        # Determine video dimensions for RoPE
-        # Note: pixel_values passed to embeddings can be 4D or 5D
-        if pixel_values.dim() == 5:
-             t_frames = pixel_values.shape[2]
-             height = pixel_values.shape[3]
-             width = pixel_values.shape[4]
-        else:
-             t_frames = 1
-             height = pixel_values.shape[2]
-             width = pixel_values.shape[3]
-
-        # 1. Embeddings
-        hidden_states = self.embeddings(pixel_values)
-        batch_size, total_patches, _ = hidden_states.shape
-
-        # 2. Visible Indices Handling
-        if visible_indices is None:
-             visible_indices = torch.arange(total_patches, device=pixel_values.device).unsqueeze(0).expand(batch_size, -1)
-
-        gather_index = visible_indices.unsqueeze(-1).expand(-1, -1, self.config.hidden_size)
-        hidden_states = torch.gather(hidden_states, 1, gather_index)
-
-        # 3. RoPE Construction
-        freqs_full = self.video_rope(
-            t=t_frames,
-            h=height // self.config.patch_size,
-            w=width // self.config.patch_size,
-            device=pixel_values.device
-        )
-        freqs_visible = freqs_full[visible_indices]
-
-        # Concatenate D/2 + D/2 -> D for applying rope
-        freqs_visible = torch.cat([freqs_visible, freqs_visible], dim=-1)
-
-        # 4. Pre-Norm & Encoder
-        hidden_states = self.layernorm_pre(hidden_states)
-
-        encoder_outputs = self.encoder(
-            hidden_states,
-            attention_mask=None,
-            rotary_pos_emb=freqs_visible,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        sequence_output = encoder_outputs[0]
-
-        # === 修改开始 ===
-        # Source Logic: out = self.ln_post(out); head_output = self.head(out)
-        # 为了对齐，我们在 encoder 输出后立即应用 Post-  Norm
-        if self.layernorm_post is not None:
-            sequence_output = self.layernorm_post(sequence_output)
-
-        # 5. Pooling Head
-        pooled_output = None
-        if self.head is not None:
-            # 因为 sequence_output 已经 Norm 过了，这里直接传给 head
-            pooled_output = self.head(sequence_output)
-        # === 修改结束 ===
-
-        if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
-
-        return BaseModelOutputWithPooling(
-            last_hidden_state=sequence_output, # 现在这包含了 ln_post 的效果
-            pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
-        )
-
-
-# ---------------------------------------------------------------------------
-# TIMM Registry Functions
-# ---------------------------------------------------------------------------
-@register_model
-def hf_llava_vit_small_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
-    config = LlavaViTConfig(
-        patch_size=16,
-        hidden_size=384,
-        num_attention_heads=384 // 64,
-        num_hidden_layers=6,
-        intermediate_size=1536,
-        hidden_act="gelu",
-        layer_norm_type="layer_norm",
-        use_head=True
-    )
-    config._attn_implementation = "flash_attention_2"
-    model = LlavaViTModel(config)
-    return model
-
-@register_model
-def hf_llava_vit_base_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
-    config = LlavaViTConfig(
-        patch_size=16,
-        hidden_size=768,
-        num_attention_heads=768 // 64,
-        num_hidden_layers=12,
-        intermediate_size=3072,
-        hidden_act="gelu",
-        layer_norm_type="layer_norm",
-        use_head=True
-    )
-    config._attn_implementation = "flash_attention_2"
-    model = LlavaViTModel(config)
-    return model
-
-@register_model
-def hf_llava_vit_large_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
-    config = LlavaViTConfig(
-        patch_size=14,
-        hidden_size=1024,
-        num_attention_heads=1024 // 64,
-        num_hidden_layers=24,
-        intermediate_size=4096,
-        hidden_act="gelu",
-        layer_norm_type="layer_norm",
-        use_head=True
-    )
-    config._attn_implementation = "flash_attention_2"
-    model = LlavaViTModel(config)
-    return model
-
-@register_model
-def hf_llava_vit_huge_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
-    config = LlavaViTConfig(
-        patch_size=14,
-        hidden_size=1280,
-        num_attention_heads=1280 // 64,
-        num_hidden_layers=32,
-        intermediate_size=5120,
-        hidden_act="gelu",
-        layer_norm_type="layer_norm",
-        use_head=True
-    )
-    config._attn_implementation = "flash_attention_2"
-    model = LlavaViTModel(config)
-    return model
-
-@register_model
-def hf_llava_vit_giant_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
-    config = LlavaViTConfig(
-        patch_size=14,
-        hidden_size=1536,
-        num_attention_heads=1536 // 96,
-        num_hidden_layers=40,
-        intermediate_size=6144,
-        hidden_act="gelu",
-        layer_norm_type="layer_norm",
-        use_head=True
-    )
-    config._attn_implementation = "flash_attention_2"
-    model = LlavaViTModel(config)
-    return model
-
-
-
+    if rank != 0:
+        return
+
+    args_dict: Dict[str, Any] = vars(args) if not isinstance(args, dict) else args
+    # 排序保证可重复
+    sorted_items = sorted(args_dict.items(), key=lambda x: x[0])
+
+    # Megatron-LM 风格日志
+    sep = "-" * 92
+    logger.info(sep)
+    logger.info("Training / Runtime Arguments")
+    logger.info(sep)
+    # 你原本的格式是左对齐 30，这里模仿 Megatron 可右对齐或统一宽度
+    # 下面采用 name: value 风格，也可以改成两列对齐
+    max_key_len = max(len(k) for k, _ in sorted_items) if sorted_items else 0
+    col_width = max(20, max_key_len)
+    for k, v in sorted_items:
+        # 避免太长的列表完全刷屏，可以截断（可选）
+        vs = str(v)
+        if len(vs) > 300:
+            vs = vs[:297] + "..."
+        logger.info(f"{k:<{col_width}} = {vs}")
+    logger.info(sep)
+
+    # ---------- TensorBoard 记录 ----------
+    if writer is not None:
+        # 1) 作为 hparams（会出现在 HPARAMS 面板）
+        # 需要全部是 “简单” 类型；否则转换
+        # hparam_dict = {}
+        # for k, v in sorted_items:
+        #     sv = _sanitize_for_json(v)
+        #     # hparams 里放的要是 int / float / str / bool，复杂的就转成 str
+        #     if isinstance(sv, (int, float, str, bool)) or sv is None:
+        #         hparam_dict[k] = sv
+        #     else:
+        #         hparam_dict[k] = str(sv)
+        # # add_hparams 需要一个 metrics dict；没有真实指标时给个空或 dummy
+        # writer.add_hparams(hparam_dict, {"_dummy_metric": 0.0})
+
+        # 2) 作为 Markdown 表格（TEXT 面板）
+        md_lines = ["| Argument | Value |", "|----------|-------|"]
+        for k, v in sorted_items:
+            vs = str(v).replace("|", "\\|")
+            if len(vs) > 500:
+                vs = vs[:497] + "..."
+            md_lines.append(f"| {k} | {vs} |")
+        writer.add_text("markdown_table", "\n".join(md_lines), global_step=0)
+
+        # 3) 纯文本 JSON（TEXT 面板）
+        # json_blob = json.dumps({k: _sanitize_for_json(v) for k, v in sorted_items},
+        #                        indent=2, ensure_ascii=False)
+        # writer.add_text("args/json_full", f"```\n{json_blob}\n```", global_step=0)
+
+
+    # 可选：记录一个时间戳
+    # if writer is not None:
+    #     writer.add_text("args/run_timestamp", datetime.utcnow().isoformat(), global_step=0)
 
 if __name__ == "__main__":
-    import timm
-
-    model = timm.create_model("hf_llava_vit_large_ln", pretrained=False)
-
-    bs = 4
-    test_input = torch.randn(bs, 3, 224, 224, device=model.device)
-    last_hidden_state = model(test_input).last_hidden_state
-
-    print(f"Input shape: {test_input.shape}")
-    print(f"Last hidden state shape: {last_hidden_state.shape}")
+    main()
