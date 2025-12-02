@@ -780,10 +780,10 @@ def hf_llava_vit_large_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
 def hf_llava_vit_huge_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config = LlavaViTConfig(
         patch_size=14,
-        hidden_size=1280,
-        num_attention_heads=1280 // 64,
-        num_hidden_layers=32,
-        intermediate_size=5120,
+        hidden_size=1536,
+        num_attention_heads=16,
+        num_hidden_layers=27,
+        intermediate_size=4608,
         hidden_act="gelu",
         layer_norm_type="layer_norm",
         use_head=True
@@ -814,11 +814,13 @@ def hf_llava_vit_giant_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
 if __name__ == "__main__":
     import timm
 
-    model = timm.create_model("hf_llava_vit_large_ln", pretrained=False)
+    model = timm.create_model("hf_llava_vit_huge_ln", pretrained=False).cuda()
 
     bs = 4
     test_input = torch.randn(bs, 3, 224, 224, device=model.device)
-    last_hidden_state = model(test_input).last_hidden_state
+    # model, test_input = model.bfloat16(), test_input.bfloat16()
+    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        last_hidden_state = model(test_input).last_hidden_state
 
     print(f"Input shape: {test_input.shape}")
     print(f"Last hidden state shape: {last_hidden_state.shape}")
