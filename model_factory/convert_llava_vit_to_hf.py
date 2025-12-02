@@ -212,7 +212,7 @@ def verify_consistency_video(src_model, tgt_model, real_image_tensor_high_res):
     frame_indices = torch.arange(original_frames).unsqueeze(0).repeat(bs, 1).to(device)
     total_frames_tensor = torch.tensor([original_frames]*bs).to(device)
 
-    patch_size = 16
+    patch_size = 14
     if hasattr(src_model, "patch_size"):
         ps = src_model.patch_size
         patch_size = ps[0] if isinstance(ps, tuple) else ps
@@ -352,7 +352,7 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
     hf_state_dict = remap_state_dict(src_model.state_dict())
 
     print("--> Loading weights into Target...")
-    missing, unexpected = tgt_model.load_state_dict(hf_state_dict, strict=False)
+    missing, unexpected = tgt_model.load_state_dict(hf_state_dict, strict=True)
 
     real_missing = [k for k in missing if "attn.bias" not in k]
     if len(real_missing) > 0:
