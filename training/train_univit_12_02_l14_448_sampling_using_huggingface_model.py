@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import os
 import sys
@@ -209,7 +210,7 @@ def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
     if hasattr(model, "save_pretrained"):
         # Save the model using HuggingFace format
         model.save_pretrained(hf_dir)
-        logging.info(f"Saved HuggingFace model to {hf_dir}")
+        logger.info(f"Saved HuggingFace model to {hf_dir}")
         
         # Save CLIPImageProcessor config
         processor = CLIPImageProcessor(
@@ -224,21 +225,20 @@ def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
             feature_extractor_type="CLIPFeatureExtractor"
         )
         processor.save_pretrained(hf_dir)
-        logging.info(f"Saved CLIPImageProcessor to {hf_dir}")
+        logger.info(f"Saved CLIPImageProcessor to {hf_dir}")
     else:
         # For non-HuggingFace models, save state dict and config
         # This allows later conversion to HuggingFace format
         state_dict = {k: v.cpu() for k, v in model.state_dict().items()}
         torch.save(state_dict, os.path.join(hf_dir, "pytorch_model.bin"))
-        logging.info(f"Saved model state dict to {hf_dir}/pytorch_model.bin")
+        logger.info(f"Saved model state dict to {hf_dir}/pytorch_model.bin")
         
         # Try to save model config if available
         if hasattr(model, "config"):
-            import json
             config_dict = model.config.__dict__ if hasattr(model.config, "__dict__") else {}
             with open(os.path.join(hf_dir, "config.json"), "w") as f:
                 json.dump(config_dict, f, indent=2)
-            logging.info(f"Saved model config to {hf_dir}/config.json")
+            logger.info(f"Saved model config to {hf_dir}/config.json")
 
 
 def load_hf_checkpoint(hf_model_path, dtype=torch.bfloat16):
@@ -260,7 +260,7 @@ def load_hf_checkpoint(hf_model_path, dtype=torch.bfloat16):
         hf_model_path,
         torch_dtype=dtype
     )
-    logging.info(f"Loaded HuggingFace model from {hf_model_path}")
+    logger.info(f"Loaded HuggingFace model from {hf_model_path}")
     return model
 
 
@@ -933,7 +933,6 @@ class ScalaMetric(object):
 
 
 def save_video_as_gif(tensor, path, fps=10, mean=None, std=None):
-    import imageio
     """
     Save a video tensor as a GIF file with proper denormalization.
 
@@ -944,7 +943,7 @@ def save_video_as_gif(tensor, path, fps=10, mean=None, std=None):
         mean: Mean values used for normalization [R, G, B]
         std: Standard deviation values used for normalization [R, G, B]
     """
-
+    import imageio
 
     # Make sure the directory exists
     Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
