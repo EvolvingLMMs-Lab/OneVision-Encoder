@@ -613,7 +613,13 @@ def main():
                 visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
 
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding  = backbone_ddp_compiled(padded_videos, visible_index)["head_output"]
+
+                    output = backbone_ddp_compiled(padded_videos, visible_index)
+                    if hasattr(output, "pooler_output"):
+                        head_embedding = output.pooler_output
+                    else:
+                        head_embedding  = output["head_output"]
+
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)
 
@@ -621,8 +627,14 @@ def main():
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding = backbone_ddp_compiled(head_input)["head_output"]
+
+                    output = backbone_ddp_compiled(head_input)
+                    if hasattr(output, "pooler_output"):
+                        head_embedding = output.pooler_output
+                    else:
+                        head_embedding  = output["head_output"]
                 head_embedding = head_embedding.float()
+
                 list_embedding.append(head_embedding)
             else:
                 raise ValueError(f"Unsupported DALI type: {dataset_config.dali_type}")
