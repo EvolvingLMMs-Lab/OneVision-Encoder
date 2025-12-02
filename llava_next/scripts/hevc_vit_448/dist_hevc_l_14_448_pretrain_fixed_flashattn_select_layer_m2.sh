@@ -12,7 +12,7 @@ export PYTHONPATH=$(pwd)
 
 LLM_VERSION="/vlm/pretrain_models/Qwen/Qwen2.5-7B-Instruct"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
-VISION_MODEL_VERSION="/video_vit/pretrain_models/deepglint/hevc/backbone_hevc_vit_flash_attn_hf"
+VISION_MODEL_VERSION="/video_vit/pretrain_models/deepglint/hevc/backbone_hevc_vit_hf_version_12_01_version_00192000"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 DATA_ROOT="/vlm/data/pretrain_data"
 

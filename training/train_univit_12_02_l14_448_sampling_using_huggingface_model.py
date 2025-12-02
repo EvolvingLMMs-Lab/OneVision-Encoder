@@ -186,7 +186,7 @@ def is_hf_model_dir(path):
 def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
     """
     Save model in HuggingFace transformers format using save_pretrained().
-    
+
     Args:
         output_dir: Base output directory
         backbone: The backbone model (may be wrapped in DDP or torch.compile)
@@ -196,19 +196,19 @@ def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
     # Only save on rank 0
     if rank != 0:
         return
-    
+
     # Create HuggingFace checkpoint directory
     hf_dir = os.path.join(output_dir, f"{global_step:08d}_hf")
     os.makedirs(hf_dir, exist_ok=True)
-    
+
     # Unwrap the model from DDP and torch.compile
     model = unwrap_module(backbone)
-    
+
     # Save using HuggingFace save_pretrained
     if hasattr(model, "save_pretrained"):
         model.save_pretrained(hf_dir)
         logger.info(f"Saved HuggingFace model to {hf_dir}")
-        
+
         # Save CLIPImageProcessor config
         processor = CLIPImageProcessor(
             size=image_size,
@@ -325,7 +325,7 @@ def main():
 
     if args.init_backbone != "NULL":
         assert os.path.exists(args.init_backbone)
-        
+
         # Check if init_backbone is a HuggingFace model directory
         if is_hf_model_dir(args.init_backbone):
             # Load from HuggingFace pretrained directory
@@ -613,7 +613,13 @@ def main():
                 visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
 
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding  = backbone_ddp_compiled(padded_videos, visible_index)["head_output"]
+
+                    output = backbone_ddp_compiled(padded_videos, visible_index)
+                    if hasattr(output, "pooler_output"):
+                        head_embedding = output.pooler_output
+                    else:
+                        head_embedding  = output["head_output"]
+
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)
 
@@ -621,8 +627,14 @@ def main():
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    head_embedding = backbone_ddp_compiled(head_input)["head_output"]
+
+                    output = backbone_ddp_compiled(head_input)
+                    if hasattr(output, "pooler_output"):
+                        head_embedding = output.pooler_output
+                    else:
+                        head_embedding  = output["head_output"]
                 head_embedding = head_embedding.float()
+
                 list_embedding.append(head_embedding)
             else:
                 raise ValueError(f"Unsupported DALI type: {dataset_config.dali_type}")
