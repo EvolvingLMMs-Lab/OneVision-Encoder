@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 import os
 import sys
@@ -19,7 +18,7 @@ from dataset import DATASET_REGISTRY, Property
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
 from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
-from model_factory.vit_preview_v0_packing_hf import LlavaViTPackingModel, LlavaViTPackingConfig
+from model_factory.vit_preview_v0_hf import LlavaViTModel
 
 torch._dynamo.config.optimize_ddp = True
 
@@ -76,14 +75,6 @@ parser.add_argument("--embedding_size", type=int, default=384, help="Embedding d
 parser.add_argument("--gradient_checkpoint", type=int, default=0, help="Enable gradient checkpointing (0/1) / 是否启用梯度检查点（节省显存）")
 parser.add_argument("--mask", type=int, default=0, help="Enable mask-related training (0/1) / 是否启用 mask 相关训练")
 parser.add_argument("--finetune_backbone", type=int, default=1, help="Finetune backbone parameters (0/1) / 是否微调主干网络")
-
-# ---------------------------
-# HuggingFace Model Support / HuggingFace 模型支持
-# ---------------------------
-parser.add_argument("--use_hf_model", type=int, default=0, help="Use HuggingFace transformers model format (0/1). When 1, loads/saves model using from_pretrained/save_pretrained / 是否使用 HuggingFace transformers 模型格式")
-parser.add_argument("--hf_model_path", default="NULL", help="Path to HuggingFace model directory for loading. Use 'NULL' to skip HF loading / HuggingFace 模型目录路径，用于加载模型。设为 'NULL' 跳过 HF 加载")
-parser.add_argument("--save_hf_model", type=int, default=1, help="Save model in HuggingFace format (0/1). Only works when use_hf_model=1 / 是否以 HuggingFace 格式保存模型")
-parser.add_argument("--hf_model_dtype", default="bfloat16", choices=["float32", "float16", "bfloat16"], help="Model dtype for HuggingFace model / HuggingFace 模型的数据类型")
 
 # ---------------------------
 # Optimization / 优化
@@ -172,7 +163,7 @@ else:
     logger.setLevel(logging.INFO)
 
 def unwrap_module(model):
-    """Unwraps a model from DistributedDataParallel if it is wrapped."""
+    """Unwraps a model from DistributedDataParallel or torch.compile if it is wrapped."""
     if hasattr(model, "module"):
         return model.module
     if hasattr(model, "_orig_mod"):
@@ -180,14 +171,21 @@ def unwrap_module(model):
     return model
 
 
-# CLIP Specific Constants
+# CLIP Specific Constants for image processor
 CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
 CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
 
 
+def is_hf_model_dir(path):
+    """Check if a path is a HuggingFace model directory (contains config.json)."""
+    if not os.path.isdir(path):
+        return False
+    return os.path.exists(os.path.join(path, "config.json"))
+
+
 def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
     """
-    Save model in HuggingFace transformers format.
+    Save model in HuggingFace transformers format using save_pretrained().
     
     Args:
         output_dir: Base output directory
@@ -206,9 +204,8 @@ def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
     # Unwrap the model from DDP and torch.compile
     model = unwrap_module(backbone)
     
-    # Check if model has save_pretrained method (HuggingFace model)
+    # Save using HuggingFace save_pretrained
     if hasattr(model, "save_pretrained"):
-        # Save the model using HuggingFace format
         model.save_pretrained(hf_dir)
         logger.info(f"Saved HuggingFace model to {hf_dir}")
         
@@ -227,41 +224,7 @@ def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
         processor.save_pretrained(hf_dir)
         logger.info(f"Saved CLIPImageProcessor to {hf_dir}")
     else:
-        # For non-HuggingFace models, save state dict and config
-        # This allows later conversion to HuggingFace format
-        state_dict = {k: v.cpu() for k, v in model.state_dict().items()}
-        torch.save(state_dict, os.path.join(hf_dir, "pytorch_model.bin"))
-        logger.info(f"Saved model state dict to {hf_dir}/pytorch_model.bin")
-        
-        # Try to save model config if available
-        if hasattr(model, "config"):
-            config_dict = model.config.__dict__ if hasattr(model.config, "__dict__") else {}
-            with open(os.path.join(hf_dir, "config.json"), "w") as f:
-                json.dump(config_dict, f, indent=2)
-            logger.info(f"Saved model config to {hf_dir}/config.json")
-
-
-def load_hf_checkpoint(hf_model_path, dtype=torch.bfloat16):
-    """
-    Load model from HuggingFace transformers format.
-    
-    Args:
-        hf_model_path: Path to HuggingFace model directory
-        dtype: Model dtype (default: bfloat16)
-    
-    Returns:
-        Loaded model
-    """
-    if not os.path.exists(hf_model_path):
-        raise FileNotFoundError(f"HuggingFace model path not found: {hf_model_path}")
-    
-    # Load using LlavaViTPackingModel.from_pretrained
-    model = LlavaViTPackingModel.from_pretrained(
-        hf_model_path,
-        torch_dtype=dtype
-    )
-    logger.info(f"Loaded HuggingFace model from {hf_model_path}")
-    return model
+        logger.warning(f"Model does not have save_pretrained method, skipping HF checkpoint save")
 
 
 def main():
@@ -356,44 +319,23 @@ def main():
         msg = f"{format(arg, '<30')}  {format(str(getattr(args, arg)))}"
         logger.info(msg)
 
-    # Get dtype for HuggingFace model
-    dtype_map = {
-        "float32": torch.float32,
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-    }
-    hf_dtype = dtype_map.get(args.hf_model_dtype, torch.bfloat16)
 
-    # Initialize models
-    if args.use_hf_model:
-        # Use HuggingFace transformers model format
-        if args.hf_model_path != "NULL" and os.path.exists(args.hf_model_path):
+    # Initialize models using timm's create_model
+    backbone = create_model(args.model_name).cuda().train()
+
+    if args.init_backbone != "NULL":
+        assert os.path.exists(args.init_backbone)
+        
+        # Check if init_backbone is a HuggingFace model directory
+        if is_hf_model_dir(args.init_backbone):
             # Load from HuggingFace pretrained directory
-            logger.info(f"Loading HuggingFace model from {args.hf_model_path}")
-            backbone = LlavaViTPackingModel.from_pretrained(
-                args.hf_model_path,
-                torch_dtype=hf_dtype
+            backbone = LlavaViTModel.from_pretrained(
+                args.init_backbone,
+                torch_dtype=torch.bfloat16
             ).cuda().train()
-            logger.info(f"Loaded HuggingFace backbone from {args.hf_model_path}")
+            logger.info(f"Loaded HuggingFace backbone from {args.init_backbone}")
         else:
-            # Create a new HuggingFace model from config based on model_name
-            logger.info(f"Creating new HuggingFace model based on {args.model_name}")
-            # Use timm to create the model first, then convert to HuggingFace format
-            backbone = create_model(args.model_name).cuda().train()
-            backbone = backbone.to(dtype=hf_dtype)
-            
-            if args.init_backbone != "NULL" and os.path.exists(args.init_backbone):
-                state_dict = torch.load(args.init_backbone, "cpu")
-                state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-                state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                backbone.load_state_dict(state_dict, strict=True)
-                logger.info(f"Loaded backbone weights from {args.init_backbone}")
-    else:
-        # Use traditional timm model format
-        backbone = create_model(args.model_name).cuda().train()
-
-        if args.init_backbone != "NULL":
-            assert os.path.exists(args.init_backbone)
+            # Load from .pt checkpoint file
             state_dict = torch.load(args.init_backbone, "cpu")
             state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
             state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -747,14 +689,13 @@ def main():
                 list_head_names=args.list_head_names,
                 keep_num=20,
             )
-            # Save in HuggingFace format if enabled
-            if args.use_hf_model and args.save_hf_model:
-                save_hf_checkpoint(
-                    args.output,
-                    backbone,
-                    global_step=global_step,
-                    image_size=args.image_size[0]
-                )
+            # Also save in HuggingFace format
+            save_hf_checkpoint(
+                args.output,
+                backbone,
+                global_step=global_step,
+                image_size=args.image_size[0]
+            )
 
         if global_step > args.total_steps:
             save_checkpoint(
@@ -767,14 +708,13 @@ def main():
                 list_head_names=args.list_head_names,
                 keep_num=20,
             )
-            # Save final model in HuggingFace format if enabled
-            if args.use_hf_model and args.save_hf_model:
-                save_hf_checkpoint(
-                    args.output,
-                    backbone,
-                    global_step=global_step,
-                    image_size=args.image_size[0]
-                )
+            # Also save final model in HuggingFace format
+            save_hf_checkpoint(
+                args.output,
+                backbone,
+                global_step=global_step,
+                image_size=args.image_size[0]
+            )
             logger.info(f"Training completed at step {global_step}")
             exit()
 
