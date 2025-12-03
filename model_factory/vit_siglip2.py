@@ -5,6 +5,9 @@ from timm.models.registry import register_model
 
 
 class Siglip2Base(nn.Module):
+    # Default patch size for Siglip2 models (can be overridden by model config)
+    DEFAULT_PATCH_SIZE = 16
+    
     def __init__(self, ckpt: str = "google/siglip2-base-patch16-224", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
         Initialize the Siglip2 Base model to retrieve hidden states.
@@ -68,12 +71,11 @@ class Siglip2Base(nn.Module):
             height = pixel_values.shape[2]
             width = pixel_values.shape[3]
             
-            # Get patch_size from model config if available, otherwise infer from model name
+            # Get patch_size from model config if available, otherwise use default
             if hasattr(self.model.config, 'patch_size'):
                 patch_size = self.model.config.patch_size
             else:
-                # Default to 16 for siglip2 models
-                patch_size = 16
+                patch_size = self.DEFAULT_PATCH_SIZE
             
             # Calculate spatial shapes (number of patches in height and width)
             num_patches_height = height // patch_size
@@ -81,11 +83,14 @@ class Siglip2Base(nn.Module):
             num_patches = num_patches_height * num_patches_width
             
             # Create spatial_shapes tensor: [batch_size, 2]
-            spatial_shapes = torch.tensor(
-                [[num_patches_height, num_patches_width]] * batch_size,
+            spatial_shapes = torch.full(
+                (batch_size, 2),
+                0,
                 dtype=torch.long,
                 device=pixel_values.device
             )
+            spatial_shapes[:, 0] = num_patches_height
+            spatial_shapes[:, 1] = num_patches_width
             
             # Create attention_mask: all ones for non-masked (no padding)
             # Shape: [batch_size, num_patches]
@@ -96,16 +101,15 @@ class Siglip2Base(nn.Module):
             )
             
             # Check if the model expects patchified input (naflex-style models)
-            # This is determined by checking if the embeddings layer has patch_embedding (Linear layer)
-            # instead of conv_projection (Conv2d layer)
+            # This is determined by checking if the embeddings layer uses Linear (patch_embedding)
+            # instead of Conv2d (patch_projection/conv_projection) for patch extraction
             needs_patchified_input = False
             if hasattr(self.model, 'embeddings'):
                 if hasattr(self.model.embeddings, 'patch_embedding'):
-                    # Linear layer expects pre-patchified input
-                    needs_patchified_input = True
-                elif hasattr(self.model.embeddings, 'patch_projection'):
-                    # Conv2d layer expects regular [B, C, H, W] input
-                    needs_patchified_input = False
+                    # Check if it's a Linear layer (expects pre-patchified input)
+                    import torch.nn as nn
+                    if isinstance(self.model.embeddings.patch_embedding, nn.Linear):
+                        needs_patchified_input = True
             
             # Prepare pixel_values in the appropriate format
             if needs_patchified_input:
@@ -119,7 +123,7 @@ class Siglip2Base(nn.Module):
                 spatial_shapes,
                 output_hidden_states=True
             )
-            # 获取最后一层的 hidden state
+            # Get the last layer's hidden state
             last_hidden_state = outputs.last_hidden_state  # [bs, seq_len, hidden_size]
 
         return last_hidden_state
