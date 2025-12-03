@@ -78,35 +78,39 @@ def draw_rounded_rectangle(
 
 
 def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Image:
-    """Create an introduction title frame."""
-    canvas = Image.new('RGB', canvas_size, color=(15, 20, 30))
+    """Create an introduction title frame with webpage-matching colors."""
+    # Light background matching webpage (#eff6ff to #ffffff)
+    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
     font_title = get_font(56, bold=True)
     font_subtitle = get_font(32, bold=False)
     font_text = get_font(24, bold=False)
     
-    # Gradient background
+    # Gradient background (light blue to white)
     for y in range(canvas_size[1]):
-        alpha = 1 - (y / canvas_size[1]) * 0.5
-        color = (int(15 * alpha), int(20 * alpha), int(30 + 20 * alpha))
-        draw.line([(0, y), (canvas_size[0], y)], fill=color)
+        alpha = y / canvas_size[1]
+        # From #eff6ff (239, 246, 255) to white (255, 255, 255)
+        r = int(239 + (255 - 239) * alpha)
+        g = int(246 + (255 - 246) * alpha)
+        b = int(255)
+        draw.line([(0, y), (canvas_size[0], y)], fill=(r, g, b))
     
-    # Title
-    title = "Contrastive Learning Comparison"
+    # Title with blue gradient (#2563eb to #4f46e5)
+    title = "Cluster Discrimination Visualization"
     title_w = len(title) * 35
     draw.text((canvas_size[0] // 2 - title_w // 2, 200), title, 
-              fill=(255, 255, 255), font=font_title)
+              fill=(37, 99, 235), font=font_title)  # #2563eb
     
     # Subtitle
     subtitle = "CLIP vs. Global Contrastive Learning"
     subtitle_w = len(subtitle) * 20
     draw.text((canvas_size[0] // 2 - subtitle_w // 2, 280), subtitle,
-              fill=(100, 200, 255), font=font_subtitle)
+              fill=(79, 70, 229), font=font_subtitle)  # #4f46e5
     
     # Divider line
     draw.line([(canvas_size[0] // 2 - 400, 350), (canvas_size[0] // 2 + 400, 350)],
-              fill=(80, 100, 120), width=2)
+              fill=(203, 213, 225), width=2)  # slate-300
     
     # Content boxes
     y_start = 420
@@ -114,12 +118,12 @@ def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Ima
     box_height = 500
     gap = 120
     
-    # CLIP box
+    # CLIP box with blue theme
     clip_x = canvas_size[0] // 2 - box_width - gap // 2
     draw_rounded_rectangle(draw, [clip_x, y_start, clip_x + box_width, y_start + box_height],
-                          radius=15, fill=(30, 40, 55), outline=(100, 150, 200), width=3)
+                          radius=15, fill=(248, 250, 252), outline=(148, 163, 184), width=3)  # slate-50, slate-400
     
-    draw.text((clip_x + 250, y_start + 30), "CLIP", fill=(100, 200, 255), font=font_subtitle)
+    draw.text((clip_x + 250, y_start + 30), "CLIP", fill=(37, 99, 235), font=font_subtitle)  # #2563eb
     
     clip_features = [
         "• Image-Text pairs",
@@ -135,15 +139,15 @@ def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Ima
     
     for i, feature in enumerate(clip_features):
         draw.text((clip_x + 50, y_start + 120 + i * 48), feature,
-                 fill=(200, 220, 240), font=font_text)
+                 fill=(71, 85, 105), font=font_text)  # slate-600
     
-    # Global box
+    # Global box with blue theme
     global_x = canvas_size[0] // 2 + gap // 2
     draw_rounded_rectangle(draw, [global_x, y_start, global_x + box_width, y_start + box_height],
-                          radius=15, fill=(40, 35, 30), outline=(255, 180, 100), width=3)
+                          radius=15, fill=(239, 246, 255), outline=(96, 165, 250), width=3)  # blue-50, blue-400
     
     draw.text((global_x + 150, y_start + 30), "Global Contrastive",
-              fill=(255, 180, 100), font=font_subtitle)
+              fill=(29, 78, 216), font=font_subtitle)  # blue-700
     
     global_features = [
         "• Image only (no text)",
@@ -158,7 +162,7 @@ def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Ima
     
     for i, feature in enumerate(global_features):
         draw.text((global_x + 50, y_start + 120 + i * 48), feature,
-                 fill=(255, 220, 180), font=font_text)
+                 fill=(30, 58, 138), font=font_text)  # blue-900
     
     return canvas
 
@@ -167,8 +171,8 @@ def create_clip_frame(
     canvas_size: Tuple[int, int] = (1920, 1080),
     animation_step: int = 0
 ) -> Image.Image:
-    """Create a frame showing CLIP's contrastive learning."""
-    canvas = Image.new('RGB', canvas_size, color=(15, 20, 30))
+    """Create a frame showing CLIP's contrastive learning with light theme."""
+    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
     font_title = get_font(40, bold=True)
@@ -177,12 +181,12 @@ def create_clip_frame(
     
     # Title
     draw.text((50, 40), "CLIP: Batch-Level Image-Text Contrastive Learning",
-              fill=(100, 200, 255), font=font_title)
+              fill=(37, 99, 235), font=font_title)  # #2563eb
     
     # Batch size indicator - Updated to mention 32K negatives
     batch_size = 8
     draw.text((50, 100), f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
-              fill=(150, 180, 200), font=font_label)
+              fill=(71, 85, 105), font=font_label)  # slate-600
     
     # Layout
     img_encoder_x = 200
@@ -315,8 +319,8 @@ def create_global_frame(
     canvas_size: Tuple[int, int] = (1920, 1080),
     animation_step: int = 0
 ) -> Image.Image:
-    """Create a frame showing Global Contrastive Learning with sampling animation."""
-    canvas = Image.new('RGB', canvas_size, color=(15, 20, 30))
+    """Create a frame showing Global Contrastive Learning with sampling animation and light theme."""
+    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
     font_title = get_font(40, bold=True)
@@ -324,9 +328,9 @@ def create_global_frame(
     font_small = get_font(18, bold=False)
     font_tiny = get_font(14, bold=False)
     
-    # Title with gradient effect
+    # Title with blue color
     draw.text((50, 40), "Global Contrastive Learning: 1M Concept Centers",
-              fill=(255, 200, 120), font=font_title)
+              fill=(29, 78, 216), font=font_title)  # blue-700
     
     # Layout
     batch_size = 8
@@ -335,7 +339,7 @@ def create_global_frame(
     num_positive_centers = 10
     
     draw.text((50, 100), f"Batch: {batch_size} images | Sampled Negatives: {sampled_negatives:,} | Total Concepts: {total_concepts:,}",
-              fill=(180, 200, 220), font=font_label)
+              fill=(71, 85, 105), font=font_label)  # slate-600
     
     # Left side: Images and encoder
     img_x = 150
@@ -601,8 +605,8 @@ def create_global_frame(
 def create_comparison_frame(
     canvas_size: Tuple[int, int] = (1920, 1080)
 ) -> Image.Image:
-    """Create a side-by-side comparison summary frame."""
-    canvas = Image.new('RGB', canvas_size, color=(15, 20, 30))
+    """Create a side-by-side comparison summary frame with light theme."""
+    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
     font_title = get_font(48, bold=True)
@@ -611,18 +615,18 @@ def create_comparison_frame(
     
     # Title
     draw.text((canvas_size[0] // 2 - 250, 50), "Key Differences",
-              fill=(255, 255, 255), font=font_title)
+              fill=(37, 99, 235), font=font_title)  # #2563eb
     
     # Divider
     draw.line([(canvas_size[0] // 2, 150), (canvas_size[0] // 2, canvas_size[1] - 100)],
-              fill=(80, 90, 110), width=4)
+              fill=(203, 213, 225), width=4)  # slate-300
     
     # CLIP side
     clip_x = 100
     y_start = 180
     
     draw.text((clip_x + 200, y_start), "CLIP Approach",
-              fill=(100, 200, 255), font=font_subtitle)
+              fill=(37, 99, 235), font=font_subtitle)  # #2563eb
     
     clip_points = [
         ("Architecture", "Dual encoders (Image + Text)"),
@@ -635,18 +639,18 @@ def create_comparison_frame(
     
     for i, (label, value) in enumerate(clip_points):
         y = y_start + 80 + i * 120
-        draw.text((clip_x, y), label + ":", fill=(150, 180, 220), font=font_text)
+        draw.text((clip_x, y), label + ":", fill=(71, 85, 105), font=font_text)  # slate-600
         
         # Value box
         draw_rounded_rectangle(draw, [clip_x, y + 35, clip_x + 750, y + 90],
-                              radius=8, fill=(35, 50, 70), outline=(100, 150, 200), width=2)
-        draw.text((clip_x + 20, y + 47), value, fill=(200, 220, 255), font=font_text)
+                              radius=8, fill=(248, 250, 252), outline=(148, 163, 184), width=2)  # slate-50, slate-400
+        draw.text((clip_x + 20, y + 47), value, fill=(30, 41, 59), font=font_text)  # slate-800
     
     # Global side
     global_x = canvas_size[0] // 2 + 100
     
     draw.text((global_x + 100, y_start), "Global Contrastive",
-              fill=(255, 180, 100), font=font_subtitle)
+              fill=(29, 78, 216), font=font_subtitle)  # blue-700
     
     global_points = [
         ("Architecture", "Single encoder (Image only)"),
@@ -659,12 +663,12 @@ def create_comparison_frame(
     
     for i, (label, value) in enumerate(global_points):
         y = y_start + 80 + i * 120
-        draw.text((global_x, y), label + ":", fill=(200, 160, 120), font=font_text)
+        draw.text((global_x, y), label + ":", fill=(71, 85, 105), font=font_text)  # slate-600
         
         # Value box
         draw_rounded_rectangle(draw, [global_x, y + 35, global_x + 750, y + 90],
-                              radius=8, fill=(45, 40, 35), outline=(255, 180, 100), width=2)
-        draw.text((global_x + 20, y + 47), value, fill=(255, 220, 180), font=font_text)
+                              radius=8, fill=(239, 246, 255), outline=(96, 165, 250), width=2)  # blue-50, blue-400
+        draw.text((global_x + 20, y + 47), value, fill=(30, 58, 138), font=font_text)  # blue-900
     
     return canvas
 
