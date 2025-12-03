@@ -83,17 +83,17 @@ def get_real_coco_image(size=448):
 def remap_state_dict_hf_to_packing(hf_state_dict):
     """
     Remap state dict from HF model format to packing model format.
-    
+
     The main differences:
     1. HF model uses separate q_proj, k_proj, v_proj
        Packing model uses combined qkv projection
     2. HF model has embeddings.patch_embedding
        Packing model has patch_embed.proj
     3. Attention projection names differ slightly
-    
+
     Args:
         hf_state_dict: State dict from vit_preview_v0_hf model
-        
+
     Returns:
         new_dict: Remapped state dict for vit_preview_v0_packing_hf model
     """
@@ -103,14 +103,14 @@ def remap_state_dict_hf_to_packing(hf_state_dict):
 
     for k, v in hf_state_dict.items():
         new_k = k
-        
+
         # Embeddings remapping
         if k.startswith("embeddings.patch_embedding."):
             new_k = k.replace("embeddings.patch_embedding.", "patch_embed.proj.")
-        
+
         # LayerNorm remapping - names stay the same
         # (no changes needed for layernorm_pre.* and layernorm_post.*)
-        
+
         # Encoder layers remapping
         # Most encoder layer names stay the same, except attention projections
         elif k.startswith("encoder.layers."):
@@ -120,31 +120,31 @@ def remap_state_dict_hf_to_packing(hf_state_dict):
                 layer_match = new_k.split("encoder.layers.")[1].split(".")[0]
                 param_type = new_k.split(".")[-1]  # weight or bias
                 prefix = f"encoder.layers.{layer_match}.self_attn"
-                
+
                 if prefix not in qkv_cache:
                     qkv_cache[prefix] = {}
-                
+
                 if ".q_proj." in new_k:
                     proj_type = "q"
                 elif ".k_proj." in new_k:
                     proj_type = "k"
                 elif ".v_proj." in new_k:
                     proj_type = "v"
-                
+
                 if param_type not in qkv_cache[prefix]:
                     qkv_cache[prefix][param_type] = {}
                 qkv_cache[prefix][param_type][proj_type] = v
                 continue  # Don't add to new_dict yet
-                
+
             elif ".self_attn.out_proj." in new_k:
                 new_k = new_k.replace(".self_attn.out_proj.", ".self_attn.proj.")
-        
+
         # Video RoPE remapping
         elif k.startswith("video_rope."):
             new_k = k.replace("video_rope.", "rotary_emb.")
-        
+
         # Head and other layers keep their names (no elif needed as new_k already = k)
-        
+
         new_dict[new_k] = v
 
     # Combine Q, K, V projections into QKV
@@ -168,7 +168,7 @@ def remap_state_dict_hf_to_packing(hf_state_dict):
 def verify_consistency_packing(hf_model, packing_model, real_image_tensor):
     """
     Verify consistency between the HF model and the packing model with grid_thw input.
-    
+
     This function tests that the packing model (which uses grid_thw input like Qwen2VL)
     produces consistent outputs with the original HF model.
     """
@@ -965,9 +965,9 @@ def convert_and_save_packing(hf_model_name, packing_model_name, weight_path, out
     hf_model = timm.create_model(hf_model_name, pretrained=False)
 
     print("--> Loading weights into HF model...")
-    checkpoint = torch.load(weight_path, map_location='cpu')
-    state_dict = checkpoint.get("model", checkpoint.get("state_dict", checkpoint))
-    hf_model.load_state_dict(state_dict, strict=False)
+    # checkpoint = torch.load(weight_path, map_location='cpu')
+    # state_dict = checkpoint.get("model", checkpoint.get("state_dict", checkpoint))
+    hf_model.from_pretrained(weight_path, torch_dtype=torch.bfloat16)
 
     # Create Packing model
     print("\n--> Creating Packing Model...")
