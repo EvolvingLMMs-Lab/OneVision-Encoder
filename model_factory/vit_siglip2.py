@@ -91,11 +91,9 @@ class Siglip2Base(nn.Module):
             num_patches = num_patches_height * num_patches_width
             
             # Create spatial_shapes tensor: [batch_size, 2]
-            spatial_shapes = torch.tensor(
-                [[num_patches_height, num_patches_width]] * batch_size,
-                dtype=torch.long,
-                device=pixel_values.device
-            )
+            # Use a temporary tensor for efficient broadcasting
+            single_shape = torch.tensor([num_patches_height, num_patches_width], dtype=torch.long, device=pixel_values.device)
+            spatial_shapes = single_shape.unsqueeze(0).expand(batch_size, -1).contiguous()
             
             # Create attention_mask: all ones for non-masked (no padding)
             # Shape: [batch_size, num_patches]
