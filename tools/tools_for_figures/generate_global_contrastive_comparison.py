@@ -17,7 +17,6 @@ import argparse
 import os
 from pathlib import Path
 from typing import Optional, Tuple, List
-import random
 import math
 
 import imageio
@@ -49,7 +48,7 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
                     return ImageFont.truetype(font_path, size)
                 except OSError:
                     continue
-            elif not bold and "Bold" not in font_path and "bd" not in font_path.lower():
+            elif not bold and ("Bold" not in font_path and "bd" not in font_path.lower()):
                 try:
                     return ImageFont.truetype(font_path, size)
                 except OSError:
@@ -387,16 +386,16 @@ def create_global_frame(
               fill=(180, 160, 120), font=font_small)
     
     # Draw concept centers as a cloud of dots
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     num_visible_concepts = 200
     
     # Animation: highlight sampled concepts
     highlight_step = animation_step % 30
-    sampled_indices = set(random.sample(range(num_visible_concepts), min(20, num_visible_concepts)))
+    sampled_indices = set(rng.choice(num_visible_concepts, size=min(20, num_visible_concepts), replace=False))
     
     for i in range(num_visible_concepts):
-        cx = bank_x + 50 + np.random.randint(0, bank_width - 100)
-        cy = bank_y + 100 + np.random.randint(0, bank_height - 150)
+        cx = bank_x + 50 + rng.integers(0, bank_width - 100)
+        cy = bank_y + 100 + rng.integers(0, bank_height - 150)
         
         # Different colors for different concept clusters
         cluster_id = i % 10
