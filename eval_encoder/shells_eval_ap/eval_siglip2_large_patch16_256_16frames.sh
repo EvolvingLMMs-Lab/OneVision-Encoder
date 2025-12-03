@@ -5,7 +5,7 @@ source "${SCRIPT_DIR}/common.sh"
 
 # Model configuration
 MODEL_FAMILY="siglip2"
-MODEL_NAME="siglip2_so400m_patch16_naflex"
+MODEL_NAME="siglip2_large_patch16_256"
 FRAMES_TOKEN_NUM=256
 EMBEDDING_SIZE=1024
 INPUT_SIZE=256
