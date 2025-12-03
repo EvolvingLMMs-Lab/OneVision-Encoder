@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn as nn_types
 from transformers import AutoModel
 from timm.models.registry import register_model
 
@@ -78,19 +79,23 @@ class Siglip2Base(nn.Module):
                 patch_size = self.DEFAULT_PATCH_SIZE
             
             # Calculate spatial shapes (number of patches in height and width)
+            # Validate that image dimensions are divisible by patch_size
+            if height % patch_size != 0 or width % patch_size != 0:
+                raise ValueError(
+                    f"Image dimensions ({height}x{width}) must be divisible by patch_size ({patch_size}). "
+                    f"Got remainders: height={height % patch_size}, width={width % patch_size}"
+                )
+            
             num_patches_height = height // patch_size
             num_patches_width = width // patch_size
             num_patches = num_patches_height * num_patches_width
             
             # Create spatial_shapes tensor: [batch_size, 2]
-            spatial_shapes = torch.full(
-                (batch_size, 2),
-                0,
+            spatial_shapes = torch.tensor(
+                [[num_patches_height, num_patches_width]] * batch_size,
                 dtype=torch.long,
                 device=pixel_values.device
             )
-            spatial_shapes[:, 0] = num_patches_height
-            spatial_shapes[:, 1] = num_patches_width
             
             # Create attention_mask: all ones for non-masked (no padding)
             # Shape: [batch_size, num_patches]
@@ -107,8 +112,7 @@ class Siglip2Base(nn.Module):
             if hasattr(self.model, 'embeddings'):
                 if hasattr(self.model.embeddings, 'patch_embedding'):
                     # Check if it's a Linear layer (expects pre-patchified input)
-                    import torch.nn as nn
-                    if isinstance(self.model.embeddings.patch_embedding, nn.Linear):
+                    if isinstance(self.model.embeddings.patch_embedding, nn_types.Linear):
                         needs_patchified_input = True
             
             # Prepare pixel_values in the appropriate format
@@ -116,11 +120,11 @@ class Siglip2Base(nn.Module):
                 pixel_values = self._convert_to_patches(pixel_values, patch_size)
             
             # Call model with required parameters
-            # Pass as positional arguments to match the required signature
+            # Use keyword arguments for clarity and robustness
             outputs = self.model(
-                pixel_values,
-                attention_mask,
-                spatial_shapes,
+                pixel_values=pixel_values,
+                attention_mask=attention_mask,
+                spatial_shapes=spatial_shapes,
                 output_hidden_states=True
             )
             # Get the last layer's hidden state
