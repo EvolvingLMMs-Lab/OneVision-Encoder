@@ -108,27 +108,12 @@ def remap_state_dict_hf_to_packing(hf_state_dict):
         if k.startswith("embeddings.patch_embedding."):
             new_k = k.replace("embeddings.patch_embedding.", "patch_embed.proj.")
         
-        # LayerNorm remapping
-        elif k.startswith("layernorm_pre."):
-            new_k = k.replace("layernorm_pre.", "layernorm_pre.")  # Same name
-        elif k.startswith("layernorm_post."):
-            new_k = k.replace("layernorm_post.", "layernorm_post.")  # Same name
+        # LayerNorm remapping - names stay the same
+        # (no changes needed for layernorm_pre.* and layernorm_post.*)
         
         # Encoder layers remapping
+        # Most encoder layer names stay the same, except attention projections
         elif k.startswith("encoder.layers."):
-            new_k = k.replace("encoder.layers.", "encoder.layers.")  # Same prefix
-            
-            # LayerNorm in encoder layers
-            if ".layer_norm1." in new_k:
-                new_k = new_k  # Keep as is
-            if ".layer_norm2." in new_k:
-                new_k = new_k  # Keep as is
-                
-            # MLP remapping
-            if ".mlp.fc1." in new_k:
-                new_k = new_k  # Keep as is
-            if ".mlp.fc2." in new_k:
-                new_k = new_k  # Keep as is
                 
             # Attention remapping - need to combine Q, K, V into QKV
             if ".self_attn.q_proj." in new_k or ".self_attn.k_proj." in new_k or ".self_attn.v_proj." in new_k:
@@ -155,13 +140,11 @@ def remap_state_dict_hf_to_packing(hf_state_dict):
             elif ".self_attn.out_proj." in new_k:
                 new_k = new_k.replace(".self_attn.out_proj.", ".self_attn.proj.")
         
-        # Head remapping (if present)
-        elif k.startswith("head."):
-            new_k = k  # Keep as is
-        
         # Video RoPE remapping
         elif k.startswith("video_rope."):
             new_k = k.replace("video_rope.", "rotary_emb.")
+        
+        # Head and other layers keep their names (no elif needed as new_k already = k)
         
         new_dict[new_k] = v
 
