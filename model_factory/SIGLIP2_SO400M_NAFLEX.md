@@ -15,6 +15,9 @@ This model is based on Google's SigLIP2 architecture and is registered with the 
 
 - **HuggingFace Model Hub**: `google/siglip2-so400m-patch16-naflex`
 - **Official Repository**: https://huggingface.co/google/siglip2-so400m-patch16-naflex
+- **Default Local Path**: `/video_vit/pretrain_models/siglip2-so400m-patch16-naflex`
+
+Note: The model defaults to a local checkpoint path. If you want to use the HuggingFace model directly, pass the `ckpt` parameter when creating the model.
 
 ## Usage
 
@@ -40,12 +43,20 @@ print(f"Last hidden state shape: {last_hidden_state.shape}")
 
 ### Custom Checkpoint Path
 
-You can specify a custom checkpoint path:
+You can specify a custom checkpoint path (e.g., to use HuggingFace directly):
 
 ```python
 import timm
 
-# Use a custom local checkpoint path
+# Use HuggingFace checkpoint directly
+model = timm.create_model(
+    "siglip2_so400m_patch16_naflex",
+    pretrained=False,
+    ckpt="google/siglip2-so400m-patch16-naflex",
+    device="cuda"
+)
+
+# Or use a different local checkpoint path
 model = timm.create_model(
     "siglip2_so400m_patch16_naflex",
     pretrained=False,
@@ -80,7 +91,8 @@ The model uses the `Siglip2Base` class which:
 
 - **Variable Resolution**: The naflex variant supports native resolution flexibility, allowing it to handle different input sizes efficiently
 - **Efficient Design**: The so400m variant is optimized for efficiency while maintaining strong performance
-- **Pre-trained Weights**: Loads from HuggingFace by default: `google/siglip2-so400m-patch16-naflex`
+- **Pre-trained Weights**: Loads from local checkpoint by default: `/video_vit/pretrain_models/siglip2-so400m-patch16-naflex`
+- **Flexible Checkpoint**: Can be configured to load from HuggingFace or other custom paths
 
 ## Integration with LLaVA-ViT
 
@@ -97,11 +109,11 @@ This model is registered in the `model_factory/vit_siglip2.py` file and can be u
 ## Example Training Script
 
 ```python
-import torch
+import timm
 from model_factory import vit_siglip2
 
-# The model is automatically registered when importing
-model = torch.hub.load('timm', 'siglip2_so400m_patch16_naflex', pretrained=False)
+# The model is automatically registered when importing the module
+model = timm.create_model('siglip2_so400m_patch16_naflex', pretrained=False)
 
 # Use in your training pipeline
 for batch in dataloader:
@@ -111,7 +123,8 @@ for batch in dataloader:
 
 ## Notes
 
-- The model defaults to using the HuggingFace checkpoint `google/siglip2-so400m-patch16-naflex`
+- The model defaults to using the local checkpoint `/video_vit/pretrain_models/siglip2-so400m-patch16-naflex`
+- To use HuggingFace checkpoint, pass `ckpt="google/siglip2-so400m-patch16-naflex"` when creating the model
 - Set `device="cpu"` for CPU-only environments
 - The model runs in evaluation mode with no gradient computation by default
 - For custom local checkpoints, pass `ckpt="/path/to/checkpoint"` when creating the model

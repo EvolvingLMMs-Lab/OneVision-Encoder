@@ -88,7 +88,7 @@ def siglip2_so400m_patch16_naflex(pretrained=False, **kwargs):
         Siglip2Base: An instance of Siglip2Base.
     """
     model = Siglip2Base(
-        ckpt=kwargs.get("ckpt", "google/siglip2-so400m-patch16-naflex"),
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-so400m-patch16-naflex"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
