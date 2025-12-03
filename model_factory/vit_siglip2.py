@@ -50,7 +50,7 @@ def siglip2_base(pretrained=False, **kwargs):
         Siglip2Base: An instance of Siglip2Base.
     """
     model = Siglip2Base(
-        ckpt="/video_vit/pretrain_models/siglip2-base-patch16-224",
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-base-patch16-224"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -69,7 +69,7 @@ def siglip2_large_patch16_256(pretrained=False, **kwargs):
         Siglip2Base: An instance of Siglip2Base.
     """
     model = Siglip2Base(
-        ckpt="/video_vit/pretrain_models/siglip2-large-patch16-256",
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-large-patch16-256"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
