@@ -4,7 +4,7 @@ from transformers import CLIPModel
 from timm.models.registry import register_model
 
 
-class CLIPBase(nn.Module):
+class CLIP(nn.Module):
     def __init__(
         self,
         ckpt: str = "openai/clip-vit-base-patch16",
@@ -18,7 +18,7 @@ class CLIPBase(nn.Module):
                         e.g. "openai/clip-vit-base-patch16"
             device (str): Device to map the model for inference.
         """
-        super(CLIPBase, self).__init__()
+        super(CLIP, self).__init__()
         self.device = torch.device(device)
         # 直接从 transformers 导入 CLIPModel，然后取 vision_model
         base_model = CLIPModel.from_pretrained(ckpt)
@@ -51,13 +51,13 @@ def clip_vit_base_patch16(pretrained: bool = False, **kwargs):
 
     Args:
         pretrained (bool): If True, load pretrained weights (from the HuggingFace ckpt path).
-                           这里的 pretrained 标志仅用于接口兼容，权重加载在 CLIPBase 中完成。
-        **kwargs: Additional arguments passed to CLIPBase.
+                           这里的 pretrained 标志仅用于接口兼容，权重加载在 CLIP 中完成。
+        **kwargs: Additional arguments passed to CLIP.
 
     Returns:
-        CLIPBase: An instance of CLIPBase.
+        CLIP: An instance of CLIP.
     """
-    model = CLIPBase(
+    model = CLIP(
         # 如需使用本地 ckpt，设置为本地路径；否则传入默认/自定义的 HF 路径
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/openai/clip-vit-base-patch16"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
@@ -72,13 +72,13 @@ def clip_vit_large_patch14(pretrained: bool = False, **kwargs):
 
     Args:
         pretrained (bool): If True, load pretrained weights (from the HuggingFace ckpt path).
-                           这里的 pretrained 标志仅用于接口兼容，权重加载在 CLIPBase 中完成。
-        **kwargs: Additional arguments passed to CLIPBase.
+                           这里的 pretrained 标志仅用于接口兼容，权重加载在 CLIP 中完成。
+        **kwargs: Additional arguments passed to CLIP.
 
     Returns:
-        CLIPBase: An instance of CLIPBase.
+        CLIP: An instance of CLIP.
     """
-    model = CLIPBase(
+    model = CLIP(
         # 如需使用本地 ckpt，设置为本地路径；否则传入默认/自定义的 HF 路径
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/openai/clip-vit-large-patch14"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),

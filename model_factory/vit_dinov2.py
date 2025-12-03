@@ -4,7 +4,7 @@ from transformers import Dinov2Model
 from timm.models.registry import register_model
 
 
-class DINOv2Base(nn.Module):
+class Dinov2(nn.Module):
     def __init__(
         self,
         ckpt: str = "/video_vit/pretrain_models/dinov2-base",
@@ -47,10 +47,10 @@ def dinov2_base(pretrained: bool = False, **kwargs):
     """
     timm 注册：DINOv2 Base（forward 返回去 CLS 的 patch tokens）
     Args:
-        pretrained (bool): 仅为接口兼容，实际加载在 DINOv2Base 内部完成
-        **kwargs: 透传给 DINOv2Base（ckpt, device, local_files_only）
+        pretrained (bool): 仅为接口兼容，实际加载在 Dinov2 内部完成
+        **kwargs: 透传给 Dinov2（ckpt, device, local_files_only）
     """
-    model = DINOv2Base(
+    model = Dinov2(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/dinov2-base"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
         local_files_only=kwargs.get("local_files_only", True),
@@ -59,7 +59,7 @@ def dinov2_base(pretrained: bool = False, **kwargs):
 
 @register_model
 def dinov2_large(pretrained: bool = False, **kwargs):
-    model = DINOv2Base(
+    model = Dinov2(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/dinov2-large"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
         local_files_only=kwargs.get("local_files_only", True),

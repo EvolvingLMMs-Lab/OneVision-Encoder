@@ -3,12 +3,12 @@ from torch import nn
 from transformers import AutoModel
 from timm.models.registry import register_model
 
-class SiglipBase(nn.Module):
+class Siglip(nn.Module):
     def __init__(self, ckpt: str = "google/siglip-base-patch16-224", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
-        Initialize Siglip Base model for hidden states (without CLS token).
+        Initialize Siglip model for hidden states (without CLS token).
         """
-        super(SiglipBase, self).__init__()
+        super(Siglip, self).__init__()
         self.device = torch.device(device)
         self.model = AutoModel.from_pretrained(ckpt).vision_model.to(self.device).eval()
 
@@ -30,9 +30,9 @@ class SiglipBase(nn.Module):
 @register_model
 def siglip_base(pretrained=False, **kwargs):
     """
-    Register Siglip Base without CLS token for timm.
+    Register Siglip without CLS token for timm.
     """
-    model = SiglipBase(
+    model = Siglip(
         ckpt="/video_vit/pretrain_models/siglip-base-patch16-224",
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -41,7 +41,7 @@ def siglip_base(pretrained=False, **kwargs):
 
 @register_model
 def siglip_large_patch16_256(pretrained=False, **kwargs):
-    model = SiglipBase(
+    model = Siglip(
         ckpt="/video_vit/pretrain_models/siglip-large-patch16-256",
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
