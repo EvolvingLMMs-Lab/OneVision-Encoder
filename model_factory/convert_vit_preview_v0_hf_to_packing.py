@@ -114,7 +114,6 @@ def remap_state_dict_hf_to_packing(hf_state_dict):
         # Encoder layers remapping
         # Most encoder layer names stay the same, except attention projections
         elif k.startswith("encoder.layers."):
-                
             # Attention remapping - need to combine Q, K, V into QKV
             if ".self_attn.q_proj." in new_k or ".self_attn.k_proj." in new_k or ".self_attn.v_proj." in new_k:
                 # Extract layer number and parameter type
@@ -980,6 +979,9 @@ def convert_and_save_packing(hf_model_name, packing_model_name, weight_path, out
     print("--> Loading weights into Packing model...")
     missing, unexpected = packing_model.load_state_dict(packing_state_dict, strict=False)
 
+    # Filter out non-critical missing keys
+    # Note: 'attn.bias' keys are internal PyTorch artifacts for attention masks
+    # and don't represent actual learnable parameters
     real_missing = [k for k in missing if "attn.bias" not in k]
     if len(real_missing) > 0:
         print(f"    [Warning] Missing keys ({len(real_missing)}):")
@@ -1047,7 +1049,14 @@ if __name__ == "__main__":
     tgt_name = args.target_model_name
     if tgt_name is None:
         # Convert name like hf_llava_vit_huge_ln to hf_llava_vit_packing_huge_ln
-        tgt_name = args.model_name.replace("llava_vit_", "llava_vit_packing_")
+        # This handles the standard naming convention for LLaVA ViT models
+        if "llava_vit_" in args.model_name:
+            # Find first occurrence and insert "packing_" after it
+            parts = args.model_name.split("llava_vit_", 1)
+            tgt_name = parts[0] + "llava_vit_packing_" + parts[1]
+        else:
+            # Fallback: just append "_packing" to the model name
+            tgt_name = args.model_name + "_packing"
 
     out_dir = args.output_dir
     if out_dir is None:
