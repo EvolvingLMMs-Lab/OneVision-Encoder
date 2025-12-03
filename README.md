@@ -450,6 +450,13 @@ Thanks so much to all of our amazing contributors!
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/manyuan97">
+                    <img src="https://avatars.githubusercontent.com/u/70136737?v=4" width="80;" alt="manyuan97"/>
+                    <br />
+                    <sub><b>manyuan97</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/wideyard">
                     <img src="https://avatars.githubusercontent.com/u/101321826?v=4" width="80;" alt="wideyard"/>
                     <br />
@@ -470,6 +477,8 @@ Thanks so much to all of our amazing contributors!
                     <sub><b>FeilongTangmonash</b></sub>
                 </a>
             </td>
+		</tr>
+		<tr>
             <td align="center">
                 <a href="https://github.com/wkzhang636">
                     <img src="https://avatars.githubusercontent.com/u/194186498?v=4" width="80;" alt="wkzhang636"/>
