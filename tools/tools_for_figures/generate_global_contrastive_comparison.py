@@ -17,7 +17,6 @@ import argparse
 import os
 from pathlib import Path
 from typing import Optional, Tuple, List
-import math
 
 import imageio
 import numpy as np
