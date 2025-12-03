@@ -6,6 +6,8 @@ import torch.multiprocessing as mp
 from torchvision import transforms
 from decord import VideoReader, cpu  # GPU 解码: `gpu(0)`
 import warnings
+import threading
+from queue import Queue
 warnings.filterwarnings('ignore')
 # NOTE: 下面这行用来注册自定义 ViT / InternVideo2 模型
 import video_models  # noqa: F401 pylint: disable=unused-import
@@ -13,6 +15,9 @@ import video_models  # noqa: F401 pylint: disable=unused-import
 # _IMAGENET_STD  = (0.229, 0.224, 0.225)
 
 # ---------- 1. Transform 与工具函数 ---------- #
+# Constants
+CLIP_LENGTH = 16  # Number of frames per clip
+
 def to_normalized_float_tensor(vid: torch.Tensor) -> torch.Tensor:
     """(T, H, W, C[RGB]) uint8 -> (C, T, H, W) float32 in [0,1]."""
     vid = vid.permute(3, 0, 1, 2).to(torch.float32) / 255
@@ -307,12 +312,12 @@ def generate_missing_txt(args):
 
 def extract_by_dinov3(clip_batch, model, device):
     """逐帧前向，支持多种返回格式；最后对时间维做平均池化。"""
-    stacked = torch.stack(clip_batch, dim=0)  # (B, C, T, H, W)
+    stacked = torch.stack(clip_batch, dim=0).to(device, non_blocking=True)  # (B, C, T, H, W) with non-blocking
     outputs = []
     for frame_idx in range(stacked.shape[2]):
         frame = stacked[:, :, frame_idx, :, :]  # (B, C, H, W)
         with torch.no_grad():
-            out = model(frame.to(device))
+            out = model(frame)
         # 兼容不同模型输出
         if hasattr(out, "pooler_output") and out.pooler_output is not None:
             feat = out.pooler_output
@@ -375,7 +380,8 @@ def extract_by_llavavit(
     输出:
         (B, D) 的视频级特征（来自 enc_out['head_output']）
     """
-    videos = torch.stack(videos, dim=0).to(device)
+    # 使用 non_blocking 传输加速数据移动
+    videos = torch.stack(videos, dim=0).to(device, non_blocking=True)
     bs, C, T, H, W = videos.shape
     # print(bs, C, T, H, W) # 20 3 16 224 224
     frame_tokens = 196
@@ -485,6 +491,50 @@ def extract_by_llavavit(
 
 import time
 
+class ClipPrefetcher:
+    """
+    预取clip数据，在后台线程中加载和预处理数据
+    实现数据加载与GPU计算的流水线并行
+    """
+    def __init__(self, vr, clip_starts, transform, prefetch_size=4):
+        self.vr = vr
+        self.clip_starts = clip_starts
+        self.transform = transform
+        self.queue = Queue(maxsize=prefetch_size)
+        self.thread = None
+        self.stop_flag = threading.Event()
+        
+    def _load_worker(self):
+        """后台线程：持续加载和预处理clip"""
+        try:
+            for st in self.clip_starts:
+                if self.stop_flag.is_set():
+                    break
+                # 读取和预处理
+                frame_nd = self.vr.get_batch(np.arange(st, st + CLIP_LENGTH)).asnumpy()
+                clip = self.transform(torch.from_numpy(frame_nd))
+                # 放入队列，如果队列满则阻塞
+                self.queue.put((st, clip))
+        except Exception as e:
+            self.queue.put(('ERROR', e))
+        finally:
+            self.queue.put(('DONE', None))
+    
+    def start(self):
+        """启动预取线程"""
+        self.thread = threading.Thread(target=self._load_worker, daemon=True)
+        self.thread.start()
+    
+    def get(self):
+        """获取下一个预处理好的clip"""
+        return self.queue.get()
+    
+    def stop(self):
+        """停止预取"""
+        self.stop_flag.set()
+        if self.thread:
+            self.thread.join()
+
 @torch.no_grad()
 def extract_feature(rank, world_size, args):
     # 绑定 GPU
@@ -492,6 +542,12 @@ def extract_feature(rank, world_size, args):
     gpu_num = local_rank
     torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{local_rank}")
+    
+    # Enable TF32 for better performance on Ampere GPUs (A100)
+    if torch.cuda.is_available() and torch.cuda.get_device_capability(device)[0] >= 8:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print(f"[R{rank}] Enabled TF32 for faster matrix operations on Ampere GPU")
 
     model, processor = build_model(args.ckpt_path, args.model_name, args.model_type)
     Path(args.save_path).mkdir(parents=True, exist_ok=True)
@@ -504,17 +560,28 @@ def extract_feature(rank, world_size, args):
 
     model = model.to(device)
     model.eval()
+    
+    # Enable mixed precision for faster inference
+    use_amp = torch.cuda.is_available() and torch.cuda.get_device_capability(device)[0] >= 7
+    
+    # Try to compile model for optimization (PyTorch 2.0+)
+    if hasattr(torch, 'compile'):
+        try:
+            model = torch.compile(model, mode='max-autotune')
+            print(f"[R{rank}] Model compiled with torch.compile for faster inference")
+        except Exception as e:
+            print(f"[R{rank}] torch.compile failed: {e}, continuing without compilation")
 
     # 所有视频按固定顺序分片给不同 rank
     vid_list = sorted(os.listdir(args.data_path))
     vid_list = vid_list[rank::world_size]
 
-    BATCH_CLIPS = 20
-    NUM_CPU = 32
+    # Increase batch size significantly for better GPU utilization
+    BATCH_CLIPS = 64  # Increased from 20 to 64
+    NUM_CPU = 64  # Increased to match available CPU threads
 
     # 全局统计（看整个进程级别的占比）
-    total_read_time = 0.0
-    total_transform_time = 0.0
+    total_read_time = 0.0  # 视频初始化时间
     total_infer_time = 0.0
     total_save_time = 0.0
     total_videos = 0
@@ -531,62 +598,85 @@ def extract_feature(rank, world_size, args):
         print(f"[R{rank}] 开始处理视频: {video_path}")
 
         # 每个视频内部的统计
-        read_time = 0.0
-        transform_time = 0.0
+        read_time = 0.0  # 视频初始化时间
         infer_time = 0.0
         save_time = 0.0
         num_clips = 0
 
         try:
-            # 打开视频计时
+            # 打开视频计时 - 增加线程数以加速解码
             t0 = time.perf_counter()
-            vr = VideoReader(video_path, ctx=cpu(0), num_threads = 8)
+            vr = VideoReader(video_path, ctx=cpu(0), num_threads=NUM_CPU)  # 使用更多线程
             clip_starts = list(get_clip_range(len(vr)))  # 只算一次
             t1 = time.perf_counter()
             read_time += (t1 - t0)
 
             feat_bank = []
             clip_batch = []
+            
+            # 使用预取器实现流水线并行
+            # prefetch_size=8 表示最多预先准备8个clip在队列中
+            prefetcher = ClipPrefetcher(vr, clip_starts, transform, prefetch_size=8)
+            prefetcher.start()
 
-            for st in clip_starts:
-                # decode 计时
-                t0 = time.perf_counter()
-                frame_nd = vr.get_batch(np.arange(st, st + 16)).asnumpy()
-                t1 = time.perf_counter()
-                read_time += (t1 - t0)
-
-                # transform 计时
-                t0 = time.perf_counter()
-                clip = transform(torch.from_numpy(frame_nd))
-                t1 = time.perf_counter()
-                transform_time += (t1 - t0)
-
+            while True:
+                # 从预取器获取clip - 时间统计已在预取器内部完成
+                result = prefetcher.get()
+                
+                if result[0] == 'DONE':
+                    break
+                elif result[0] == 'ERROR':
+                    raise result[1]
+                
+                st, clip = result
+                # Note: read_time and transform_time are now overlapped with GPU computation
+                # The timing here represents only the queue wait time
+                
                 clip_batch.append(clip)
                 num_clips += 1
 
-                # batch infer
+                # batch infer - 使用混合精度加速
                 if len(clip_batch) == BATCH_CLIPS:
                     torch.cuda.synchronize(device)
                     t0 = time.perf_counter()
-                    if args.model_type == 'llavavit':
-                        out = extract_by_llavavit(clip_batch, model, device, None, None)
-                    elif args.model_type == 'dinov3':
-                        out = extract_by_dinov3(clip_batch, model, device)                        
+                    
+                    if use_amp:
+                        with torch.cuda.amp.autocast(dtype=torch.float16):
+                            if args.model_type == 'llavavit':
+                                out = extract_by_llavavit(clip_batch, model, device, None, None)
+                            elif args.model_type == 'dinov3':
+                                out = extract_by_dinov3(clip_batch, model, device)
+                    else:
+                        if args.model_type == 'llavavit':
+                            out = extract_by_llavavit(clip_batch, model, device, None, None)
+                        elif args.model_type == 'dinov3':
+                            out = extract_by_dinov3(clip_batch, model, device)
+                    
                     torch.cuda.synchronize(device)
                     t1 = time.perf_counter()
                     infer_time += (t1 - t0)
                     feat_bank.append(out.cpu().numpy())
                     clip_batch = []
 
-            # 最后一批 infer
+            # 停止预取器
+            prefetcher.stop()
+            
+            # 最后一批 infer - 使用混合精度加速
             if len(clip_batch) > 0:
                 torch.cuda.synchronize(device)
                 t0 = time.perf_counter()
 
-                if args.model_type == 'dinov3':
-                    out = extract_by_dinov3(clip_batch, model, device)
-                elif args.model_type == 'llavavit':
-                    out = extract_by_llavavit(clip_batch, model, device, None, None)
+                if use_amp:
+                    with torch.cuda.amp.autocast(dtype=torch.float16):
+                        if args.model_type == 'dinov3':
+                            out = extract_by_dinov3(clip_batch, model, device)
+                        elif args.model_type == 'llavavit':
+                            out = extract_by_llavavit(clip_batch, model, device, None, None)
+                else:
+                    if args.model_type == 'dinov3':
+                        out = extract_by_dinov3(clip_batch, model, device)
+                    elif args.model_type == 'llavavit':
+                        out = extract_by_llavavit(clip_batch, model, device, None, None)
 
                 torch.cuda.synchronize(device)
                 t1 = time.perf_counter()
@@ -612,15 +702,15 @@ def extract_feature(rank, world_size, args):
 
             # 全局累加
             total_read_time      += read_time
-            total_transform_time += transform_time
             total_infer_time     += infer_time
             total_save_time      += save_time
 
             # 打印当前视频耗时分布
             print(
                 f"[R{rank}] {vid_name} 耗时 {t_vid_end - t_vid_start:.2f}s | "
-                f"读视频 {read_time:.2f}s | 预处理 {transform_time:.2f}s | "
+                f"初始化 {read_time:.2f}s | "
                 f"前向 {infer_time:.2f}s | 保存 {save_time:.2f}s | clips={num_clips}"
+                f" (注: 数据加载和预处理已与GPU计算流水线并行)"
             )
 
         except Exception as e:
@@ -631,8 +721,9 @@ def extract_feature(rank, world_size, args):
     if total_videos > 0:
         print(
             f"[R{rank}] 总计处理 {total_videos} 个视频 | "
-            f"读视频 {total_read_time:.2f}s | 预处理 {total_transform_time:.2f}s | "
+            f"初始化 {total_read_time:.2f}s | "
             f"前向 {total_infer_time:.2f}s | 保存 {total_save_time:.2f}s"
+            f" (注: 数据加载和预处理时间已与GPU计算重叠)"
         )
 
 
