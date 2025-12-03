@@ -6,9 +6,11 @@ from timm.models.registry import register_model
 
 
 class Siglip2(nn.Module):
-    # Default patch size for Siglip2 models (can be overridden by model config)
-    DEFAULT_PATCH_SIZE = 16
-
+    """
+    Standard Siglip2 model for base and large variants.
+    These models use Conv2d for patch projection and don't require
+    pre-patchified input, spatial_shapes, or attention_mask.
+    """
     def __init__(self, ckpt: str = "google/siglip2-base-patch16-224", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
         Initialize the Siglip2 model to retrieve hidden states.
@@ -18,6 +20,52 @@ class Siglip2(nn.Module):
             device (str): Device to map the model for inference.
         """
         super(Siglip2, self).__init__()
+        self.device = torch.device(device)
+        # Load the model (only vision model)
+        self.model = AutoModel.from_pretrained(ckpt).vision_model.to(self.device).eval()
+
+    def forward(self, pixel_values):
+        """
+        Forward pass to get the last hidden state.
+
+        Args:
+            pixel_values (torch.Tensor): Input tensor of shape [bs, 3, h, w]
+
+        Returns:
+            torch.Tensor: Last hidden state of shape [bs, seq_len, hidden_size]
+        """
+        # pixel_values: [bs, 3, h, w]
+        with torch.no_grad():
+            # Standard siglip2 models (base, large) work with regular image input
+            # They don't need attention_mask or spatial_shapes
+            outputs = self.model(
+                pixel_values=pixel_values,
+                output_hidden_states=True
+            )
+            # Get the last layer's hidden state
+            last_hidden_state = outputs.last_hidden_state  # [bs, seq_len, hidden_size]
+
+        return last_hidden_state
+
+
+class Siglip2Naflex(nn.Module):
+    """
+    Siglip2 Naflex variant for so400m-patch16-naflex model.
+    This model uses Linear layer for patch embedding and requires
+    pre-patchified input, spatial_shapes, and attention_mask.
+    """
+    # Default patch size for Siglip2 models (can be overridden by model config)
+    DEFAULT_PATCH_SIZE = 16
+
+    def __init__(self, ckpt: str = "google/siglip2-so400m-patch16-naflex", device="cuda" if torch.cuda.is_available() else "cpu"):
+        """
+        Initialize the Siglip2 Naflex model to retrieve hidden states.
+
+        Args:
+            ckpt (str): HuggingFace checkpoint for the pre-trained model.
+            device (str): Device to map the model for inference.
+        """
+        super(Siglip2Naflex, self).__init__()
         self.device = torch.device(device)
         # Load the model (only vision model)
         self.model = AutoModel.from_pretrained(ckpt).vision_model.to(self.device).eval()
@@ -103,19 +151,8 @@ class Siglip2(nn.Module):
                 device=pixel_values.device
             )
 
-            # Check if the model expects patchified input (naflex-style models)
-            # This is determined by checking if the embeddings layer uses Linear (patch_embedding)
-            # instead of Conv2d (patch_projection/conv_projection) for patch extraction
-            needs_patchified_input = False
-            if hasattr(self.model, 'embeddings'):
-                if hasattr(self.model.embeddings, 'patch_embedding'):
-                    # Check if it's a Linear layer (expects pre-patchified input)
-                    if isinstance(self.model.embeddings.patch_embedding, nn_types.Linear):
-                        needs_patchified_input = True
-
-            # Prepare pixel_values in the appropriate format
-            if needs_patchified_input:
-                pixel_values = self._convert_to_patches(pixel_values, patch_size)
+            # Naflex models expect pre-patchified input
+            pixel_values = self._convert_to_patches(pixel_values, patch_size)
 
             # Call model with required parameters
             # Use keyword arguments for clarity and robustness
@@ -134,7 +171,8 @@ class Siglip2(nn.Module):
 @register_model
 def siglip2_base(pretrained=False, **kwargs):
     """
-    Register the Siglip2 model for timm.
+    Register the Siglip2 base model for timm.
+    Uses standard Siglip2 class (no naflex).
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
@@ -153,7 +191,8 @@ def siglip2_base(pretrained=False, **kwargs):
 @register_model
 def siglip2_large_patch16_256(pretrained=False, **kwargs):
     """
-    Register the Siglip2 Large model for timm.
+    Register the Siglip2 large model for timm.
+    Uses standard Siglip2 class (no naflex).
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
@@ -173,15 +212,16 @@ def siglip2_large_patch16_256(pretrained=False, **kwargs):
 def siglip2_so400m_patch16_naflex(pretrained=False, **kwargs):
     """
     Register the Siglip2 so400m-patch16-naflex model for timm.
+    Uses Siglip2Naflex class with special naflex handling.
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
-        **kwargs: Additional arguments passed to Siglip2.
+        **kwargs: Additional arguments passed to Siglip2Naflex.
 
     Returns:
-        Siglip2: An instance of Siglip2.
+        Siglip2Naflex: An instance of Siglip2Naflex.
     """
-    model = Siglip2(
+    model = Siglip2Naflex(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-so400m-patch16-naflex"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
