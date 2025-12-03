@@ -59,7 +59,7 @@ def siglip2_base(pretrained=False, **kwargs):
 @register_model
 def siglip2_large_patch16_256(pretrained=False, **kwargs):
     """
-    Register the Siglip2 Base model for timm.
+    Register the Siglip2 Large model for timm.
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
