@@ -445,17 +445,30 @@ def create_global_frame(
     negative_centers = set()
     
     if sample_phase >= 3:
-        # Select 10 positive centers for current sample
+        # Select 10 positive centers for current sample - clustered together
         sample_seed = current_sample * 1000
         pos_rng = np.random.default_rng(sample_seed)
-        positive_indices = pos_rng.choice(num_visible_concepts, size=min(num_positive_centers, num_visible_concepts), replace=False)
+        
+        # Pick a random center point for the positive cluster
+        cluster_center_idx = pos_rng.integers(0, num_visible_concepts)
+        cluster_cx, cluster_cy, _ = concept_positions[cluster_center_idx]
+        
+        # Find the 10 closest centers to the cluster center
+        distances = []
+        for i, (cx, cy, idx) in enumerate(concept_positions):
+            dist = (cx - cluster_cx)**2 + (cy - cluster_cy)**2
+            distances.append((dist, i))
+        
+        # Sort by distance and take the 10 closest
+        distances.sort()
+        positive_indices = [distances[i][1] for i in range(min(num_positive_centers, num_visible_concepts))]
         positive_centers = set(positive_indices)
         
-        # Select random negative centers
+        # Select random negative centers - 20% of all visible concepts, scattered
         neg_rng = np.random.default_rng(sample_seed + 1)
         available = [i for i in range(num_visible_concepts) if i not in positive_centers]
-        num_visible_negatives = min(25, len(available))
-        negative_indices = neg_rng.choice(len(available), size=num_visible_negatives, replace=False)
+        num_visible_negatives = int(num_visible_concepts * 0.2)  # 20% of all visible concepts
+        negative_indices = neg_rng.choice(len(available), size=min(num_visible_negatives, len(available)), replace=False)
         negative_centers = set(available[i] for i in negative_indices)
     
     # Draw concept centers with enhanced styling
@@ -540,10 +553,11 @@ def create_global_frame(
                           radius=10, fill=(20, 25, 35), outline=(255, 180, 100), width=3)
     
     # Legend items with visual indicators
+    num_visible_negatives = int(num_visible_concepts * 0.2)  # Calculate 20%
     legend_items = [
         ("Selected Sample", (255, 255, 100), "circle"),
-        (f"{num_positive_centers} Positive Centers", (100, 255, 100), "circle"),
-        (f"~{len(negative_centers)} Sampled Negatives", (255, 100, 50), "circle"),
+        (f"{num_positive_centers} Positive Centers (Clustered)", (100, 255, 100), "circle"),
+        (f"{num_visible_negatives} Sampled Negatives (20%)", (255, 100, 50), "circle"),
         ("Other Concepts", (180, 180, 200), "circle")
     ]
     
@@ -573,8 +587,8 @@ def create_global_frame(
     
     info_lines = [
         "✓ No text encoder - pure visual representation learning",
-        f"✓ Each sample matched with {num_positive_centers} positive class centers + {sampled_negatives:,} sampled negatives",
-        f"✓ Negatives randomly sampled from {total_concepts:,} concept centers per batch",
+        f"✓ Each sample matched with {num_positive_centers} clustered positive centers + {sampled_negatives:,} sampled negatives",
+        f"✓ Positive centers clustered together; negatives scattered (20% of visible concepts)",
         "✓ Concept centers from offline clustering (e.g., K-means on large-scale dataset)"
     ]
     
