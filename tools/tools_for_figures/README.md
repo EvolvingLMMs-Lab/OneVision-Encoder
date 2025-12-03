@@ -48,9 +48,14 @@ Generates animations comparing CLIP's batch-level contrastive learning with glob
 
 **Features:**
 - Side-by-side comparison of CLIP vs Global Contrastive Learning
-- Animated similarity computations
-- Visual representation of concept banks and sampling
-- Clear explanation of key differences
+- Animated sampling process showing how samples are selected
+- Highlights 10 positive class centers for each selected sample
+- Displays randomly sampled negative centers with visual emphasis
+- Multiple samples processed in sequence (similar to CLIP's approach)
+- Enhanced visual aesthetics with glow effects and smooth animations
+- Shows connection lines from samples to positive/negative centers
+- Legend box explaining different types of centers
+- CLIP section updated to mention 32K negative samples capability
 
 **Usage:**
 ```bash
@@ -73,15 +78,27 @@ python generate_global_contrastive_comparison.py \
 - `--width`: Canvas width (default: 1920)
 - `--height`: Canvas height (default: 1080)
 
+**Animation Phases:**
+1. **Title Frame (3s):** Introduction and overview
+2. **CLIP Animation (8s):** Shows batch-level contrastive learning with similarity matrix
+3. **Global Contrastive Animation (12s):** Enhanced sampling animation showing:
+   - Sequential sample selection with highlight effects
+   - 10 positive centers highlighted in green with glow
+   - ~25 sampled negative centers highlighted in red/orange with glow
+   - Animated connection lines from samples to centers
+   - Multiple samples processed to demonstrate the process
+4. **Comparison Summary (4s):** Side-by-side key differences
+
 **Key Differences Visualized:**
 
 | Aspect | CLIP | Global Contrastive |
 |--------|------|-------------------|
 | Architecture | Dual encoders (Image + Text) | Single encoder (Image only) |
 | Input | Image-Text pairs | Images only |
-| Negatives | Within batch (32-1024) | Sampled from 1M concept centers |
+| Negatives | Within batch (32-1024, max ~32K) | Sampled from 1M concept centers |
 | Negative Pool | Limited by batch size | Massive (1M concepts) |
 | Training | Cross-modal alignment | Pure visual representation |
+| Positive Matching | Image-Text pairs | Image + 10 positive class centers |
 
 ## Requirements
 
