@@ -15,6 +15,9 @@ import video_models  # noqa: F401 pylint: disable=unused-import
 # _IMAGENET_STD  = (0.229, 0.224, 0.225)
 
 # ---------- 1. Transform 与工具函数 ---------- #
+# Constants
+CLIP_LENGTH = 16  # Number of frames per clip
+
 def to_normalized_float_tensor(vid: torch.Tensor) -> torch.Tensor:
     """(T, H, W, C[RGB]) uint8 -> (C, T, H, W) float32 in [0,1]."""
     vid = vid.permute(3, 0, 1, 2).to(torch.float32) / 255
@@ -508,7 +511,7 @@ class ClipPrefetcher:
                 if self.stop_flag.is_set():
                     break
                 # 读取和预处理
-                frame_nd = self.vr.get_batch(np.arange(st, st + 16)).asnumpy()
+                frame_nd = self.vr.get_batch(np.arange(st, st + CLIP_LENGTH)).asnumpy()
                 clip = self.transform(torch.from_numpy(frame_nd))
                 # 放入队列，如果队列满则阻塞
                 self.queue.put((st, clip))
@@ -578,8 +581,7 @@ def extract_feature(rank, world_size, args):
     NUM_CPU = 64  # Increased to match available CPU threads
 
     # 全局统计（看整个进程级别的占比）
-    total_read_time = 0.0
-    total_transform_time = 0.0
+    total_read_time = 0.0  # 视频初始化时间
     total_infer_time = 0.0
     total_save_time = 0.0
     total_videos = 0
@@ -596,8 +598,7 @@ def extract_feature(rank, world_size, args):
         print(f"[R{rank}] 开始处理视频: {video_path}")
 
         # 每个视频内部的统计
-        read_time = 0.0
-        transform_time = 0.0
+        read_time = 0.0  # 视频初始化时间
         infer_time = 0.0
         save_time = 0.0
         num_clips = 0
@@ -613,19 +614,14 @@ def extract_feature(rank, world_size, args):
             feat_bank = []
             clip_batch = []
             
-            # Pin memory for faster CPU-GPU transfer
-            pin_memory = torch.cuda.is_available()
-            
             # 使用预取器实现流水线并行
             # prefetch_size=8 表示最多预先准备8个clip在队列中
             prefetcher = ClipPrefetcher(vr, clip_starts, transform, prefetch_size=8)
             prefetcher.start()
 
             while True:
-                # 从预取器获取clip
-                t0 = time.perf_counter()
+                # 从预取器获取clip - 时间统计已在预取器内部完成
                 result = prefetcher.get()
-                t1 = time.perf_counter()
                 
                 if result[0] == 'DONE':
                     break
@@ -633,9 +629,8 @@ def extract_feature(rank, world_size, args):
                     raise result[1]
                 
                 st, clip = result
-                # 预取器已经完成了读取和transform，这里只计入等待时间
-                read_time += (t1 - t0) * 0.5  # 粗略估计读取时间
-                transform_time += (t1 - t0) * 0.5  # 粗略估计transform时间
+                # Note: read_time and transform_time are now overlapped with GPU computation
+                # The timing here represents only the queue wait time
                 
                 clip_batch.append(clip)
                 num_clips += 1
@@ -707,15 +702,15 @@ def extract_feature(rank, world_size, args):
 
             # 全局累加
             total_read_time      += read_time
-            total_transform_time += transform_time
             total_infer_time     += infer_time
             total_save_time      += save_time
 
             # 打印当前视频耗时分布
             print(
                 f"[R{rank}] {vid_name} 耗时 {t_vid_end - t_vid_start:.2f}s | "
-                f"读视频 {read_time:.2f}s | 预处理 {transform_time:.2f}s | "
+                f"初始化 {read_time:.2f}s | "
                 f"前向 {infer_time:.2f}s | 保存 {save_time:.2f}s | clips={num_clips}"
+                f" (注: 数据加载和预处理已与GPU计算流水线并行)"
             )
 
         except Exception as e:
@@ -726,8 +721,9 @@ def extract_feature(rank, world_size, args):
     if total_videos > 0:
         print(
             f"[R{rank}] 总计处理 {total_videos} 个视频 | "
-            f"读视频 {total_read_time:.2f}s | 预处理 {total_transform_time:.2f}s | "
+            f"初始化 {total_read_time:.2f}s | "
             f"前向 {total_infer_time:.2f}s | 保存 {total_save_time:.2f}s"
+            f" (注: 数据加载和预处理时间已与GPU计算重叠)"
         )
 
 
