@@ -16,7 +16,7 @@ This directory contains DeepSpeed ZeRO configuration files for distributed train
 ImportError: /root/.cache/torch_extensions/py310_cu124/fused_adam/fused_adam.so: cannot open shared object file: No such file or directory
 ```
 
-**Root Cause:** DeepSpeed by default tries to use its optimized FusedAdam optimizer, which requires a compiled CUDA extension. In distributed environments or when the extension is not properly compiled, this can fail.
+**Root Cause:** DeepSpeed by default tries to use its optimized FusedAdam optimizer, which requires a compiled CUDA extension. In distributed environments or when the extension is not properly compiled, this will fail.
 
 **Solution:** Both `zero2.json` and `zero3.json` have been configured to:
 1. Explicitly use PyTorch's native `AdamW` optimizer instead of FusedAdam
