@@ -74,6 +74,25 @@ def siglip2_large_patch16_256(pretrained=False, **kwargs):
     )
     return model
 
+
+@register_model
+def siglip2_so400m_patch16_naflex(pretrained=False, **kwargs):
+    """
+    Register the Siglip2 so400m-patch16-naflex model for timm.
+
+    Args:
+        pretrained (bool): If True, load pretrained weights (default: False).
+        **kwargs: Additional arguments passed to Siglip2Base.
+
+    Returns:
+        Siglip2Base: An instance of Siglip2Base.
+    """
+    model = Siglip2Base(
+        ckpt=kwargs.get("ckpt", "google/siglip2-so400m-patch16-naflex"),
+        device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
+    )
+    return model
+
 if __name__ == "__main__":
     # Test the registered model with timm
     import timm
