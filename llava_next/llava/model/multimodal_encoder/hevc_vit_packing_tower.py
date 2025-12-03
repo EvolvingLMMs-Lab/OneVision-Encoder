@@ -35,10 +35,10 @@ class HEVCViTPackingVisionTower(nn.Module):
             rank0_print("{} is already loaded, `load_model` called again, skipping.".format(self.vision_tower_name))
             return
 
-        # 加载 CLIPImageProcessor (我们在转换脚本里保存了这个配置)
+        # Load CLIPImageProcessor (saved in conversion script)
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
 
-        # 加载 HEVCViTPackingModel
+        # Load HEVCViTPackingModel
         self.vision_tower = HEVCViTPackingModel.from_pretrained(self.vision_tower_name, device_map=device_map)
         self.vision_tower.requires_grad_(False)
 
@@ -130,6 +130,10 @@ class HEVCViTPackingVisionTower(nn.Module):
             # ============================================================
             # 【END OUTPUT CONVERSION】
             # ============================================================
+            
+            # For list processing, use the first image's dimensions for spatial dims
+            # (Note: in list mode, all images should ideally have the same size)
+            # height and width already set from sample_image at line 80
         else:
             # Extract height and width from batch of images
             if images.ndim == 5:  # (B, C, T, H, W) - video batch
@@ -258,11 +262,15 @@ class HEVCViTPackingVisionTower(nn.Module):
         hidden_states = patches.view(batch_size * seq_len_per_image, patch_dim)
         
         # Create grid_thw for each image in batch
-        grid_thw = torch.tensor(
-            [[t_frames, h_patches, w_patches]] * batch_size,
+        grid_thw = torch.full(
+            (batch_size, 3),
+            0,
             dtype=torch.long,
             device=images.device
         )
+        grid_thw[:, 0] = t_frames
+        grid_thw[:, 1] = h_patches
+        grid_thw[:, 2] = w_patches
         
         return hidden_states, grid_thw
 
@@ -272,11 +280,17 @@ class HEVCViTPackingVisionTower(nn.Module):
 
     @property
     def dtype(self):
-        return self.vision_tower.dtype
+        if self.is_loaded:
+            return self.vision_tower.dtype
+        else:
+            return torch.float32  # Default dtype when not loaded
 
     @property
     def device(self):
-        return self.vision_tower.device
+        if self.is_loaded:
+            return self.vision_tower.device
+        else:
+            return torch.device("cpu")  # Default device when not loaded
 
     @property
     def config(self):

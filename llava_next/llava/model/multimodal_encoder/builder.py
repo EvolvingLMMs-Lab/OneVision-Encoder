@@ -14,7 +14,7 @@ def build_vision_tower(vision_tower_cfg, **kwargs):
     vision_tower = getattr(vision_tower_cfg, "mm_vision_tower", getattr(vision_tower_cfg, "vision_tower", None))
     use_s2 = getattr(vision_tower_cfg, "s2", False)
 
-    # 1. HEVC-ViT (Your New Model) - 优先匹配
+    # 1. HEVC-ViT (Your New Model) - priority match
     # Check for packing mode first (more specific match)
     if "hevc_vit_packing" in vision_tower.lower() or "packing" in vision_tower.lower():
         return HEVCViTPackingVisionTower(vision_tower, args=vision_tower_cfg, **kwargs)
