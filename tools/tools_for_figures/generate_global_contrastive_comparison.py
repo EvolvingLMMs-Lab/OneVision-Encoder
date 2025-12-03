@@ -125,7 +125,8 @@ def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Ima
         "• Image-Text pairs",
         "• Batch-level contrastive",
         "• Limited negative samples",
-        "  (batch size: 32-1024)",
+        "  (batch size: 32-1024,",
+        "   max ~32K negatives)",
         "• Dual encoders:",
         "  - Image Encoder",
         "  - Text Encoder",
@@ -178,9 +179,9 @@ def create_clip_frame(
     draw.text((50, 40), "CLIP: Batch-Level Image-Text Contrastive Learning",
               fill=(100, 200, 255), font=font_title)
     
-    # Batch size indicator
+    # Batch size indicator - Updated to mention 32K negatives
     batch_size = 8
-    draw.text((50, 100), f"Batch Size: {batch_size} pairs",
+    draw.text((50, 100), f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
               fill=(150, 180, 200), font=font_label)
     
     # Layout
@@ -301,7 +302,7 @@ def create_clip_frame(
         f"• Positive pairs: {batch_size} (diagonal elements)",
         f"• Negative pairs: {batch_size * (batch_size - 1)} (off-diagonal elements)",
         f"• Total comparisons: {batch_size * batch_size}",
-        "• Challenge: Limited negative samples scale with batch size"
+        "• Challenge: Limited negative samples scale with batch size (max ~32K in large batches)"
     ]
     
     for i, line in enumerate(info_lines):
@@ -314,7 +315,7 @@ def create_global_frame(
     canvas_size: Tuple[int, int] = (1920, 1080),
     animation_step: int = 0
 ) -> Image.Image:
-    """Create a frame showing Global Contrastive Learning."""
+    """Create a frame showing Global Contrastive Learning with sampling animation."""
     canvas = Image.new('RGB', canvas_size, color=(15, 20, 30))
     draw = ImageDraw.Draw(canvas)
     
@@ -323,142 +324,262 @@ def create_global_frame(
     font_small = get_font(18, bold=False)
     font_tiny = get_font(14, bold=False)
     
-    # Title
+    # Title with gradient effect
     draw.text((50, 40), "Global Contrastive Learning: 1M Concept Centers",
-              fill=(255, 180, 100), font=font_title)
+              fill=(255, 200, 120), font=font_title)
     
     # Layout
     batch_size = 8
     sampled_negatives = 1024
     total_concepts = 1000000
+    num_positive_centers = 10
     
     draw.text((50, 100), f"Batch: {batch_size} images | Sampled Negatives: {sampled_negatives:,} | Total Concepts: {total_concepts:,}",
-              fill=(150, 180, 200), font=font_label)
+              fill=(180, 200, 220), font=font_label)
     
     # Left side: Images and encoder
     img_x = 150
     y_start = 200
-    item_height = 80
-    gap = 15
+    item_height = 70
+    gap = 18
     
-    draw.text((img_x - 50, 160), "Images", fill=(255, 180, 100), font=font_label)
+    draw.text((img_x - 50, 160), "Images", fill=(255, 200, 120), font=font_label)
     
     image_colors = [
         (255, 100, 100), (100, 255, 100), (100, 100, 255), (255, 255, 100),
         (255, 100, 255), (100, 255, 255), (200, 150, 100), (150, 100, 200)
     ]
     
+    # Animation: cycle through samples
+    current_sample = (animation_step // 6) % batch_size
+    sample_phase = (animation_step % 6)
+    
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
+        
+        # Highlight current sample being processed
+        if i == current_sample and sample_phase >= 2:
+            outline_color = (255, 255, 100)
+            outline_width = 4
+            glow = True
+        else:
+            outline_color = (180, 180, 180)
+            outline_width = 2
+            glow = False
+        
+        # Draw glow effect for selected sample
+        if glow:
+            for offset in range(3, 0, -1):
+                alpha = 80 - offset * 20
+                glow_color = tuple(int(c * alpha / 255) for c in outline_color)
+                draw_rounded_rectangle(draw, 
+                    [img_x - 60 - offset*2, y - offset*2, 
+                     img_x + 40 + offset*2, y + item_height + offset*2],
+                    radius=10, fill=None, outline=glow_color, width=1)
+        
         draw_rounded_rectangle(draw, [img_x - 60, y, img_x + 40, y + item_height],
-                              radius=8, fill=image_colors[i], outline=(200, 200, 200), width=2)
-        draw.text((img_x - 45, y + 25), f"I{i+1}", fill=(255, 255, 255), font=font_label)
+                              radius=8, fill=image_colors[i], outline=outline_color, width=outline_width)
+        draw.text((img_x - 45, y + 20), f"I{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # Image Encoder (no text encoder!)
+    # Image Encoder with enhanced styling
     encoder_x = img_x + 180
     encoder_width = 180
     encoder_height = batch_size * (item_height + gap) - gap
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=10, fill=(60, 50, 40), outline=(255, 180, 100), width=3)
-    draw.text((encoder_x + 30, y_start + encoder_height // 2 - 20), "Image\nEncoder",
-              fill=(255, 220, 180), font=font_label)
+                          radius=12, fill=(50, 45, 40), outline=(255, 200, 120), width=3)
     
-    # Image embeddings
+    # Add encoder details
+    draw.text((encoder_x + 35, y_start + encoder_height // 2 - 30), "Image",
+              fill=(255, 230, 200), font=font_label)
+    draw.text((encoder_x + 25, y_start + encoder_height // 2 - 5), "Encoder",
+              fill=(255, 230, 200), font=font_label)
+    draw.text((encoder_x + 15, y_start + encoder_height // 2 + 25), "(ViT-L/14)",
+              fill=(180, 160, 140), font=font_small)
+    
+    # Image embeddings with animation
     emb_x = encoder_x + encoder_width + 80
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
-        draw.ellipse([emb_x, y + 20, emb_x + 40, y + 60],
-                    fill=image_colors[i], outline=(200, 200, 200), width=2)
+        
+        # Pulse effect for current sample
+        if i == current_sample and sample_phase >= 2:
+            pulse = 1.0 + 0.2 * np.sin(animation_step * 0.5)
+            size = int(20 * pulse)
+            draw.ellipse([emb_x + 20 - size, y + 15, emb_x + 20 + size, y + 55],
+                        fill=image_colors[i], outline=(255, 255, 100), width=3)
+        else:
+            draw.ellipse([emb_x, y + 15, emb_x + 40, y + 55],
+                        fill=image_colors[i], outline=(180, 180, 180), width=2)
     
-    # Concept Bank visualization (right side)
-    bank_x = 1100
-    bank_y = 180
-    bank_width = 700
-    bank_height = 650
+    # Concept Bank visualization (right side) - Enhanced
+    bank_x = 1000
+    bank_y = 160
+    bank_width = 800
+    bank_height = 700
+    
+    # Bank background with gradient
+    for i in range(bank_height):
+        alpha = 0.3 + 0.7 * (i / bank_height)
+        color = tuple(int(25 + 15 * alpha) for _ in range(3))
+        draw.line([(bank_x, bank_y + i), (bank_x + bank_width, bank_y + i)], fill=color)
     
     draw_rounded_rectangle(draw, [bank_x, bank_y, bank_x + bank_width, bank_y + bank_height],
-                          radius=12, fill=(25, 30, 40), outline=(150, 120, 80), width=3)
+                          radius=15, fill=None, outline=(200, 160, 100), width=4)
     
-    draw.text((bank_x + 200, bank_y + 20), "Concept Centers Bank",
-              fill=(255, 200, 120), font=font_label)
-    draw.text((bank_x + 220, bank_y + 50), f"({total_concepts:,} centers from offline clustering)",
-              fill=(180, 160, 120), font=font_small)
+    draw.text((bank_x + 220, bank_y + 20), "Concept Centers Bank",
+              fill=(255, 220, 140), font=font_label)
+    draw.text((bank_x + 180, bank_y + 55), f"({total_concepts:,} centers from offline clustering)",
+              fill=(200, 180, 140), font=font_small)
     
-    # Draw concept centers as a cloud of dots
+    # Create stable random positions for concept centers
     rng = np.random.default_rng(42)
-    num_visible_concepts = 200
-    
-    # Animation: highlight sampled concepts
-    highlight_step = animation_step % 30
-    sampled_indices = set(rng.choice(num_visible_concepts, size=min(20, num_visible_concepts), replace=False))
-    
+    num_visible_concepts = 300
+    concept_positions = []
     for i in range(num_visible_concepts):
-        cx = bank_x + 50 + rng.integers(0, bank_width - 100)
-        cy = bank_y + 100 + rng.integers(0, bank_height - 150)
+        cx = bank_x + 80 + rng.integers(0, bank_width - 160)
+        cy = bank_y + 120 + rng.integers(0, bank_height - 200)
+        concept_positions.append((cx, cy, i))
+    
+    # Determine which concepts to highlight based on current sample
+    positive_centers = set()
+    negative_centers = set()
+    
+    if sample_phase >= 3:
+        # Select 10 positive centers for current sample
+        sample_seed = current_sample * 1000
+        pos_rng = np.random.default_rng(sample_seed)
+        positive_indices = pos_rng.choice(num_visible_concepts, size=min(num_positive_centers, num_visible_concepts), replace=False)
+        positive_centers = set(positive_indices)
         
+        # Select random negative centers
+        neg_rng = np.random.default_rng(sample_seed + 1)
+        available = [i for i in range(num_visible_concepts) if i not in positive_centers]
+        num_visible_negatives = min(25, len(available))
+        negative_indices = neg_rng.choice(len(available), size=num_visible_negatives, replace=False)
+        negative_centers = set(available[i] for i in negative_indices)
+    
+    # Draw concept centers with enhanced styling
+    for cx, cy, i in concept_positions:
         # Different colors for different concept clusters
         cluster_id = i % 10
         base_colors = [
-            (255, 150, 150), (150, 255, 150), (150, 150, 255),
-            (255, 255, 150), (255, 150, 255), (150, 255, 255),
-            (200, 180, 150), (180, 150, 200), (150, 200, 180),
-            (220, 180, 200)
+            (255, 180, 180), (180, 255, 180), (180, 180, 255),
+            (255, 255, 180), (255, 180, 255), (180, 255, 255),
+            (220, 200, 180), (200, 180, 220), (180, 220, 200),
+            (240, 200, 220)
         ]
         
-        if i in sampled_indices and highlight_step > 15:
-            # Highlighted sampled negative
-            color = (255, 100, 0)
+        if i in positive_centers:
+            # Positive centers - green with glow
+            color = (100, 255, 100)
+            size = 9
+            glow_color = (150, 255, 150)
+            # Draw glow
+            for offset in range(2, 0, -1):
+                draw.ellipse([cx - size - offset*2, cy - size - offset*2, 
+                            cx + size + offset*2, cy + size + offset*2],
+                           fill=None, outline=glow_color, width=1)
+            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
+                        fill=color, outline=(50, 200, 50), width=2)
+        elif i in negative_centers:
+            # Negative centers - red/orange with glow
+            color = (255, 100, 50)
             size = 8
+            glow_color = (255, 150, 100)
+            # Draw glow
+            for offset in range(2, 0, -1):
+                draw.ellipse([cx - size - offset*2, cy - size - offset*2, 
+                            cx + size + offset*2, cy + size + offset*2],
+                           fill=None, outline=glow_color, width=1)
+            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
+                        fill=color, outline=(200, 50, 0), width=2)
         else:
+            # Regular centers
             color = base_colors[cluster_id]
             size = 4
+            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
+                        fill=color, outline=(120, 120, 120), width=1)
+    
+    # Draw connection lines from current sample to positive/negative centers
+    if sample_phase >= 4 and current_sample < batch_size:
+        start_x = emb_x + 40
+        start_y = y_start + current_sample * (item_height + gap) + 35
         
-        draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                    fill=color, outline=(100, 100, 100), width=1)
-    
-    # Sampling annotation
-    sample_box_y = bank_y + bank_height - 100
-    draw_rounded_rectangle(draw, [bank_x + 50, sample_box_y, bank_x + bank_width - 50, sample_box_y + 80],
-                          radius=8, fill=(40, 35, 30), outline=(255, 150, 50), width=2)
-    
-    draw.text((bank_x + 100, sample_box_y + 15),
-              f"✓ Each batch samples {sampled_negatives:,} negatives",
-              fill=(255, 200, 100), font=font_small)
-    draw.text((bank_x + 100, sample_box_y + 45),
-              "✓ Concept centers updated via offline clustering",
-              fill=(255, 200, 100), font=font_small)
-    
-    # Connection lines (showing similarity computation)
-    if highlight_step > 10:
-        for i in range(min(3, batch_size)):
-            start_x = emb_x + 40
-            start_y = y_start + i * (item_height + gap) + 40
-            
-            # Draw a few lines to sampled concepts
-            for j, concept_idx in enumerate(list(sampled_indices)[:5]):
-                end_x = bank_x + 50
-                end_y = bank_y + 150 + concept_idx * 2
+        # Lines to positive centers (green)
+        for cx, cy, i in concept_positions:
+            if i in positive_centers:
+                # Draw animated dashed line
+                dash_length = 10
+                gap_length = 5
+                total_length = np.sqrt((cx - start_x)**2 + (cy - start_y)**2)
+                num_dashes = int(total_length / (dash_length + gap_length))
                 
-                # Draw dotted line
-                line_color = (100, 150, 200) if j == 0 else (80, 100, 120)
-                draw.line([(start_x, start_y), (end_x, end_y)],
-                         fill=line_color, width=1)
+                for d in range(num_dashes):
+                    t1 = d * (dash_length + gap_length) / total_length
+                    t2 = (d * (dash_length + gap_length) + dash_length) / total_length
+                    x1 = int(start_x + t1 * (cx - start_x))
+                    y1 = int(start_y + t1 * (cy - start_y))
+                    x2 = int(start_x + t2 * (cx - start_x))
+                    y2 = int(start_y + t2 * (cy - start_y))
+                    draw.line([(x1, y1), (x2, y2)], fill=(100, 255, 100), width=2)
+        
+        # Lines to negative centers (red/orange)
+        if sample_phase >= 5:
+            for cx, cy, i in concept_positions[:50]:  # Limit to avoid clutter
+                if i in negative_centers:
+                    draw.line([(start_x, start_y), (cx, cy)], 
+                            fill=(255, 100, 50), width=1)
     
-    # Info box at bottom
-    info_y = y_start + encoder_height + 100
-    draw_rounded_rectangle(draw, [100, info_y, canvas_size[0] - 100, info_y + 170],
-                          radius=10, fill=(30, 35, 45), outline=(150, 120, 80), width=2)
+    # Legend box - Enhanced
+    legend_x = bank_x + 50
+    legend_y = bank_y + bank_height - 130
+    legend_width = bank_width - 100
+    legend_height = 110
+    
+    draw_rounded_rectangle(draw, [legend_x, legend_y, legend_x + legend_width, legend_y + legend_height],
+                          radius=10, fill=(20, 25, 35), outline=(255, 180, 100), width=3)
+    
+    # Legend items with visual indicators
+    legend_items = [
+        ("Selected Sample", (255, 255, 100), "circle"),
+        (f"{num_positive_centers} Positive Centers", (100, 255, 100), "circle"),
+        (f"~{len(negative_centers)} Sampled Negatives", (255, 100, 50), "circle"),
+        ("Other Concepts", (180, 180, 200), "circle")
+    ]
+    
+    item_x = legend_x + 30
+    item_width = legend_width // 2 - 20
+    
+    for idx, (label, color, shape) in enumerate(legend_items):
+        row = idx // 2
+        col = idx % 2
+        x = item_x + col * item_width
+        y = legend_y + 20 + row * 40
+        
+        # Draw indicator
+        if shape == "circle":
+            size = 8
+            draw.ellipse([x, y + 5, x + size*2, y + 5 + size*2],
+                        fill=color, outline=(200, 200, 200), width=1)
+        
+        # Draw label
+        draw.text((x + 25, y + 3), label, fill=(220, 220, 240), font=font_small)
+    
+    # Info box at bottom - Enhanced
+    info_y = y_start + encoder_height + 120
+    info_height = 130
+    draw_rounded_rectangle(draw, [80, info_y, canvas_size[0] - 80, info_y + info_height],
+                          radius=12, fill=(25, 30, 40), outline=(200, 160, 100), width=3)
     
     info_lines = [
-        "• No text encoder - pure visual representation learning",
-        f"• Positive: Current image embedding vs. itself",
-        f"• Negatives: {sampled_negatives:,} sampled from {total_concepts:,} concept centers per batch",
-        "• Concept centers from offline clustering (e.g., K-means on large dataset)",
-        "• Advantages: Much larger negative pool, better separability, no text dependency"
+        "✓ No text encoder - pure visual representation learning",
+        f"✓ Each sample matched with {num_positive_centers} positive class centers + {sampled_negatives:,} sampled negatives",
+        f"✓ Negatives randomly sampled from {total_concepts:,} concept centers per batch",
+        "✓ Concept centers from offline clustering (e.g., K-means on large-scale dataset)"
     ]
     
     for i, line in enumerate(info_lines):
-        draw.text((130, info_y + 15 + i * 30), line, fill=(200, 220, 240), font=font_small)
+        draw.text((110, info_y + 20 + i * 28), line, fill=(220, 230, 240), font=font_small)
     
     return canvas
 
@@ -558,9 +679,9 @@ def generate_animation(
         frame = create_clip_frame(canvas_size, i)
         frames.append(np.array(frame))
     
-    # 3. Global frames with animation (8 seconds)
+    # 3. Global frames with enhanced sampling animation (12 seconds - longer to show sampling)
     print("  - Global contrastive animation frames")
-    global_frames = fps * 8
+    global_frames = fps * 12
     for i in range(global_frames):
         frame = create_global_frame(canvas_size, i)
         frames.append(np.array(frame))
