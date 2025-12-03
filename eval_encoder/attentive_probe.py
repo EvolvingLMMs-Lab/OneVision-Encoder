@@ -214,8 +214,12 @@ def get_feature(
                     visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
-                    enc_out = model(padded_videos, visible_index, mask_ratio=None)
-                    outputs = enc_out["visible_embeddings"]
+                    enc_out = model(padded_videos, visible_index)
+                    if hasattr(enc_out, "last_hidden_state"):
+                        outputs = enc_out.last_hidden_state
+                    else:
+                        outputs = enc_out["visible_embeddings"]
+
                 else:
                     raise
 

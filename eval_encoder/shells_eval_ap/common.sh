@@ -42,6 +42,8 @@ get_epochs() {
     local dataset="$1"
     if [[ "$dataset" == "hmdb51" ]]; then
         echo 30
+    elif [[ "$dataset" == "diving48" ]]; then
+        echo 30
     else
         echo 10
     fi
