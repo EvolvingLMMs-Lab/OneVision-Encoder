@@ -5,19 +5,19 @@ from transformers import AutoModel
 from timm.models.registry import register_model
 
 
-class Siglip2Base(nn.Module):
+class Siglip2(nn.Module):
     # Default patch size for Siglip2 models (can be overridden by model config)
     DEFAULT_PATCH_SIZE = 16
 
     def __init__(self, ckpt: str = "google/siglip2-base-patch16-224", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
-        Initialize the Siglip2 Base model to retrieve hidden states.
+        Initialize the Siglip2 model to retrieve hidden states.
 
         Args:
             ckpt (str): HuggingFace checkpoint for the pre-trained model.
             device (str): Device to map the model for inference.
         """
-        super(Siglip2Base, self).__init__()
+        super(Siglip2, self).__init__()
         self.device = torch.device(device)
         # Load the model (only vision model)
         self.model = AutoModel.from_pretrained(ckpt).vision_model.to(self.device).eval()
@@ -134,16 +134,16 @@ class Siglip2Base(nn.Module):
 @register_model
 def siglip2_base(pretrained=False, **kwargs):
     """
-    Register the Siglip2 Base model for timm.
+    Register the Siglip2 model for timm.
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
-        **kwargs: Additional arguments passed to Siglip2Base.
+        **kwargs: Additional arguments passed to Siglip2.
 
     Returns:
-        Siglip2Base: An instance of Siglip2Base.
+        Siglip2: An instance of Siglip2.
     """
-    model = Siglip2Base(
+    model = Siglip2(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-base-patch16-224"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -157,12 +157,12 @@ def siglip2_large_patch16_256(pretrained=False, **kwargs):
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
-        **kwargs: Additional arguments passed to Siglip2Base.
+        **kwargs: Additional arguments passed to Siglip2.
 
     Returns:
-        Siglip2Base: An instance of Siglip2Base.
+        Siglip2: An instance of Siglip2.
     """
-    model = Siglip2Base(
+    model = Siglip2(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-large-patch16-256"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -176,12 +176,12 @@ def siglip2_so400m_patch16_naflex(pretrained=False, **kwargs):
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
-        **kwargs: Additional arguments passed to Siglip2Base.
+        **kwargs: Additional arguments passed to Siglip2.
 
     Returns:
-        Siglip2Base: An instance of Siglip2Base.
+        Siglip2: An instance of Siglip2.
     """
-    model = Siglip2Base(
+    model = Siglip2(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-so400m-patch16-naflex"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )

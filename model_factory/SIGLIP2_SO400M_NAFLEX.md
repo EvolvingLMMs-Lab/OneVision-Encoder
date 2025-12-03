@@ -81,7 +81,7 @@ model = timm.create_model(
 
 ## Model Architecture
 
-The model uses the `Siglip2Base` class which:
+The model uses the `Siglip2` class which:
 1. Loads the pre-trained model from HuggingFace
 2. Uses only the vision model component (`.vision_model`)
 3. Extracts the last hidden state from the model
