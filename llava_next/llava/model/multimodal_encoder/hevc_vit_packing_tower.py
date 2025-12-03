@@ -136,10 +136,7 @@ class HEVCViTPackingVisionTower(nn.Module):
             # height and width already set from sample_image at line 80
         else:
             # Extract height and width from batch of images
-            if images.ndim == 5:  # (B, C, T, H, W) - video batch
-                height, width = images.shape[-2:]
-            else:  # (B, C, H, W) - image batch
-                height, width = images.shape[-2:]
+            height, width = images.shape[-2:]
             
             # ============================================================
             # 【INPUT CONVERSION】: Convert batch images to packing format
@@ -262,15 +259,12 @@ class HEVCViTPackingVisionTower(nn.Module):
         hidden_states = patches.view(batch_size * seq_len_per_image, patch_dim)
         
         # Create grid_thw for each image in batch
-        grid_thw = torch.full(
-            (batch_size, 3),
-            0,
+        grid_thw_values = torch.tensor(
+            [t_frames, h_patches, w_patches],
             dtype=torch.long,
             device=images.device
         )
-        grid_thw[:, 0] = t_frames
-        grid_thw[:, 1] = h_patches
-        grid_thw[:, 2] = w_patches
+        grid_thw = grid_thw_values.unsqueeze(0).expand(batch_size, 3).contiguous()
         
         return hidden_states, grid_thw
 
