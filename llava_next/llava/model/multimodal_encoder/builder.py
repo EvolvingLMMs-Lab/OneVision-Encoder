@@ -8,13 +8,17 @@ from .mlcd_encoder import MLCDVisionTower, MLCDVisionTowerS2
 from .internViT_300M_448px_encoder import InternViT_300M_448px_VisionTower, InternViT_300M_448px_VisionTowerS2
 from .eva_8b_448px_encoder import EVA_8B_448px_VisionTower, EVA_8B_448px_VisionTowerS2
 from .hevc_vit_tower import HEVCViTVisionTower
+from .hevc_vit_packing_tower import HEVCViTPackingVisionTower
 
 def build_vision_tower(vision_tower_cfg, **kwargs):
     vision_tower = getattr(vision_tower_cfg, "mm_vision_tower", getattr(vision_tower_cfg, "vision_tower", None))
     use_s2 = getattr(vision_tower_cfg, "s2", False)
 
     # 1. HEVC-ViT (Your New Model) - 优先匹配
-    if "hevc_vit" in vision_tower.lower():
+    # Check for packing mode first (more specific match)
+    if "hevc_vit_packing" in vision_tower.lower() or "packing" in vision_tower.lower():
+        return HEVCViTPackingVisionTower(vision_tower, args=vision_tower_cfg, **kwargs)
+    elif "hevc_vit" in vision_tower.lower():
         return HEVCViTVisionTower(vision_tower, args=vision_tower_cfg, **kwargs)
 
     # 2. MLCD Vision Towers
