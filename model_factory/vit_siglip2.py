@@ -50,7 +50,7 @@ def siglip2_base(pretrained=False, **kwargs):
         Siglip2Base: An instance of Siglip2Base.
     """
     model = Siglip2Base(
-        ckpt="/video_vit/pretrain_models/siglip2-base-patch16-224",
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-base-patch16-224"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -59,7 +59,7 @@ def siglip2_base(pretrained=False, **kwargs):
 @register_model
 def siglip2_large_patch16_256(pretrained=False, **kwargs):
     """
-    Register the Siglip2 Base model for timm.
+    Register the Siglip2 Large model for timm.
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
@@ -69,7 +69,26 @@ def siglip2_large_patch16_256(pretrained=False, **kwargs):
         Siglip2Base: An instance of Siglip2Base.
     """
     model = Siglip2Base(
-        ckpt="/video_vit/pretrain_models/siglip2-large-patch16-256",
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-large-patch16-256"),
+        device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
+    )
+    return model
+
+
+@register_model
+def siglip2_so400m_patch16_naflex(pretrained=False, **kwargs):
+    """
+    Register the Siglip2 so400m-patch16-naflex model for timm.
+
+    Args:
+        pretrained (bool): If True, load pretrained weights (default: False).
+        **kwargs: Additional arguments passed to Siglip2Base.
+
+    Returns:
+        Siglip2Base: An instance of Siglip2Base.
+    """
+    model = Siglip2Base(
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-so400m-patch16-naflex"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
