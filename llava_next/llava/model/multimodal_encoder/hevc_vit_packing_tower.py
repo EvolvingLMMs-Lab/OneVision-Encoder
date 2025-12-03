@@ -5,6 +5,7 @@ from transformers import CLIPImageProcessor
 
 from model_factory.vit_preview_v0_packing_hf import LlavaViTPackingConfig as HEVCViTPackingConfig
 from model_factory.vit_preview_v0_packing_hf import LlavaViTPackingModel as HEVCViTPackingModel
+from model_factory.vit_preview_v0_packing_hf import compute_patch_positions_from_grid_thw
 
 
 class HEVCViTPackingVisionTower(nn.Module):
@@ -103,10 +104,14 @@ class HEVCViTPackingVisionTower(nn.Module):
             # 【END INPUT CONVERSION】
             # ============================================================
             
+            # Generate patch_positions from grid_thw for RoPE calculation
+            patch_positions = compute_patch_positions_from_grid_thw(packed_grid_thw)
+            
             # Forward pass through packing model
             image_forward_outs = self.vision_tower(
                 hidden_states=packed_hidden_states,
                 grid_thw=packed_grid_thw,
+                patch_positions=patch_positions,
                 output_hidden_states=True
             )
             
@@ -154,10 +159,14 @@ class HEVCViTPackingVisionTower(nn.Module):
             # 【END INPUT CONVERSION】
             # ============================================================
             
+            # Generate patch_positions from grid_thw for RoPE calculation
+            patch_positions = compute_patch_positions_from_grid_thw(packed_grid_thw)
+            
             # Forward pass through packing model
             image_forward_outs = self.vision_tower(
                 hidden_states=packed_hidden_states,
                 grid_thw=packed_grid_thw,
+                patch_positions=patch_positions,
                 output_hidden_states=True
             )
             
