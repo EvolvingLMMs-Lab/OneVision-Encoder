@@ -8,7 +8,7 @@ from timm.models.registry import register_model
 class Siglip2Base(nn.Module):
     # Default patch size for Siglip2 models (can be overridden by model config)
     DEFAULT_PATCH_SIZE = 16
-    
+
     def __init__(self, ckpt: str = "google/siglip2-base-patch16-224", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
         Initialize the Siglip2 Base model to retrieve hidden states.
@@ -25,37 +25,37 @@ class Siglip2Base(nn.Module):
     def _convert_to_patches(self, pixel_values, patch_size):
         """
         Convert image tensor to patches.
-        
+
         Args:
             pixel_values (torch.Tensor): Input tensor of shape [bs, channels, height, width]
             patch_size (int): Size of each patch
-            
+
         Returns:
             torch.Tensor: Patches of shape [bs, num_patches, channels * patch_size * patch_size]
         """
         batch_size, channels, height, width = pixel_values.shape
         num_patches_height = height // patch_size
         num_patches_width = width // patch_size
-        
+
         # Reshape to patches: [bs, channels, num_patches_h, patch_size, num_patches_w, patch_size]
         patches = pixel_values.reshape(
             batch_size, channels,
             num_patches_height, patch_size,
             num_patches_width, patch_size
         )
-        
+
         # Rearrange to: [bs, num_patches_h, num_patches_w, patch_size, patch_size, channels]
         patches = patches.permute(0, 2, 4, 3, 5, 1)
-        
+
         # Flatten patches: [bs, num_patches_h * num_patches_w, patch_size * patch_size * channels]
         patches = patches.reshape(
             batch_size,
             num_patches_height * num_patches_width,
             patch_size * patch_size * channels
         )
-        
+
         return patches
-    
+
     def forward(self, pixel_values):
         """
         Forward pass to get the last hidden state.
@@ -71,13 +71,13 @@ class Siglip2Base(nn.Module):
             batch_size = pixel_values.shape[0]
             height = pixel_values.shape[2]
             width = pixel_values.shape[3]
-            
+
             # Get patch_size from model config if available, otherwise use default
             if hasattr(self.model.config, 'patch_size'):
                 patch_size = self.model.config.patch_size
             else:
                 patch_size = self.DEFAULT_PATCH_SIZE
-            
+
             # Calculate spatial shapes (number of patches in height and width)
             # Validate that image dimensions are divisible by patch_size
             if height % patch_size != 0 or width % patch_size != 0:
@@ -85,16 +85,16 @@ class Siglip2Base(nn.Module):
                     f"Image dimensions ({height}x{width}) must be divisible by patch_size ({patch_size}). "
                     f"Got remainders: height={height % patch_size}, width={width % patch_size}"
                 )
-            
+
             num_patches_height = height // patch_size
             num_patches_width = width // patch_size
             num_patches = num_patches_height * num_patches_width
-            
+
             # Create spatial_shapes tensor: [batch_size, 2]
             # Use a temporary tensor for efficient broadcasting
             single_shape = torch.tensor([num_patches_height, num_patches_width], dtype=torch.long, device=pixel_values.device)
             spatial_shapes = single_shape.unsqueeze(0).expand(batch_size, -1).contiguous()
-            
+
             # Create attention_mask: all ones for non-masked (no padding)
             # Shape: [batch_size, num_patches]
             attention_mask = torch.ones(
@@ -102,7 +102,7 @@ class Siglip2Base(nn.Module):
                 dtype=torch.long,
                 device=pixel_values.device
             )
-            
+
             # Check if the model expects patchified input (naflex-style models)
             # This is determined by checking if the embeddings layer uses Linear (patch_embedding)
             # instead of Conv2d (patch_projection/conv_projection) for patch extraction
@@ -112,11 +112,11 @@ class Siglip2Base(nn.Module):
                     # Check if it's a Linear layer (expects pre-patchified input)
                     if isinstance(self.model.embeddings.patch_embedding, nn_types.Linear):
                         needs_patchified_input = True
-            
+
             # Prepare pixel_values in the appropriate format
             if needs_patchified_input:
                 pixel_values = self._convert_to_patches(pixel_values, patch_size)
-            
+
             # Call model with required parameters
             # Use keyword arguments for clarity and robustness
             outputs = self.model(
