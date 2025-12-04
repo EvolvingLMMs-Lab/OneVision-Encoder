@@ -24,7 +24,7 @@ PROMPT_VERSION="qwen_1_5"
 BASE_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-mlp2x_gelu-pretrain_blip558k-finetune_llavanext780k-select_layer_m2"
 echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
-deepspeed --hostfile host_8 \
+deepspeed --hostfile host_80 \
     --master_port 65534 \
     llava/train/train_mem.py \
     --deepspeed scripts/zero3.json \
