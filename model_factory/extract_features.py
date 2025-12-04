@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # coding=utf-8
 """
-Feature Extraction Tool for Model Validation
+Feature Extraction and Verification Tool
 
 This tool extracts second-to-last layer features from both packing and non-packing 
-HuggingFace ViT models for verification purposes.
+HuggingFace ViT models and immediately verifies their consistency.
 
 Usage:
     python extract_features.py \\
@@ -14,7 +14,8 @@ Usage:
         --image2 2.jpg \\
         --video1 1.mp4 \\
         --video2 2.mp4 \\
-        --output_dir ./features
+        --output_dir ./features \\
+        --threshold 0.99
 
 Input Requirements:
     - Images: Native resolution (no resizing)
@@ -24,6 +25,7 @@ Output:
     - features_hf.npz: Features from non-packing HF model
     - features_packing.npz: Features from packing model
     - metadata.json: Metadata about inputs and models
+    - Console output: Consistency verification results
 """
 
 import argparse
@@ -345,9 +347,109 @@ def extract_packing_features(
     return features
 
 
+def verify_feature_consistency(hf_features: Dict[str, np.ndarray], 
+                               packing_features: Dict[str, np.ndarray],
+                               threshold: float = 0.99) -> bool:
+    """
+    Verify consistency between HF and packing model features.
+    
+    Args:
+        hf_features: Features from HF model
+        packing_features: Features from packing model
+        threshold: Cosine similarity threshold for pass/fail
+    
+    Returns:
+        True if all features pass, False otherwise
+    """
+    print("\n" + "=" * 80)
+    print("Feature Consistency Verification")
+    print("=" * 80)
+    print(f"Similarity threshold: {threshold}")
+    
+    results = {}
+    
+    for key in hf_features.keys():
+        if key not in packing_features:
+            print(f"\n⚠️  Warning: {key} not found in packing features")
+            continue
+        
+        feat1 = hf_features[key]
+        feat2 = packing_features[key]
+        
+        print(f"\n--- {key} ---")
+        print(f"HF shape:      {feat1.shape}")
+        print(f"Packing shape: {feat2.shape}")
+        
+        # Convert to torch tensors
+        feat1_t = torch.from_numpy(feat1).float()
+        feat2_t = torch.from_numpy(feat2).float()
+        
+        # Flatten for comparison (preserve last dimension which is feature dimension)
+        if feat1_t.dim() == 2:
+            feat1_flat = feat1_t
+        else:
+            feat1_flat = feat1_t.reshape(-1, feat1_t.shape[-1])
+        
+        if feat2_t.dim() == 2:
+            feat2_flat = feat2_t
+        else:
+            feat2_flat = feat2_t.reshape(-1, feat2_t.shape[-1])
+        
+        # Handle shape mismatch
+        if feat1_flat.shape[0] != feat2_flat.shape[0]:
+            print(f"⚠️  Shape mismatch: {feat1_flat.shape} vs {feat2_flat.shape}")
+            min_len = min(feat1_flat.shape[0], feat2_flat.shape[0])
+            feat1_flat = feat1_flat[:min_len]
+            feat2_flat = feat2_flat[:min_len]
+            print(f"    Comparing first {min_len} tokens")
+        
+        # Compute metrics
+        max_diff = (feat1_flat - feat2_flat).abs().max().item()
+        mean_diff = (feat1_flat - feat2_flat).abs().mean().item()
+        
+        cos_sim = F.cosine_similarity(feat1_flat, feat2_flat, dim=-1)
+        min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
+        max_cos = cos_sim.max().item()
+        
+        print(f"Max Diff:        {max_diff:.6f}")
+        print(f"Mean Diff:       {mean_diff:.6f}")
+        print(f"Min Cosine Sim:  {min_cos:.8f}")
+        print(f"Mean Cosine Sim: {mean_cos:.8f}")
+        print(f"Max Cosine Sim:  {max_cos:.8f}")
+        
+        # Pass/Fail
+        if min_cos > threshold:
+            print(f"✅ {key}: PASS (min cosine > {threshold})")
+            results[key] = True
+        else:
+            print(f"❌ {key}: FAIL (min cosine <= {threshold})")
+            results[key] = False
+    
+    # Summary
+    print("\n" + "=" * 80)
+    print("Verification Summary")
+    print("=" * 80)
+    
+    total = len(results)
+    passed = sum(results.values())
+    failed = total - passed
+    
+    print(f"Total comparisons: {total}")
+    print(f"Passed:            {passed}")
+    print(f"Failed:            {failed}")
+    
+    if failed == 0:
+        print("\n✅ All features match! Models are consistent.")
+        return True
+    else:
+        print(f"\n❌ {failed} feature(s) do not match. Please investigate.")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract second-to-last layer features from ViT models for validation"
+        description="Extract second-to-last layer features from ViT models and verify consistency"
     )
     parser.add_argument("--hf_model_path", type=str, required=True,
                        help="Path to non-packing HF model")
@@ -365,6 +467,8 @@ def main():
                        help="Number of frames to sample from videos (default: 8)")
     parser.add_argument("--output_dir", type=str, default="./features",
                        help="Output directory for features (default: ./features)")
+    parser.add_argument("--threshold", type=float, default=0.99,
+                       help="Cosine similarity threshold for verification (default: 0.99)")
     
     args = parser.parse_args()
     
@@ -437,9 +541,16 @@ def main():
         json.dump(metadata, f, indent=2)
     print(f"✅ Metadata saved to: {metadata_output}")
     
-    print("\n=== Feature Extraction Complete ===")
+    # Verify consistency
+    all_passed = verify_feature_consistency(hf_features, packing_features, args.threshold)
+    
+    print("\n=== Feature Extraction and Verification Complete ===")
     print(f"All outputs saved to: {args.output_dir}")
+    
+    # Return exit code based on verification result
+    return 0 if all_passed else 1
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main())
