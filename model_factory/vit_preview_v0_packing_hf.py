@@ -232,17 +232,17 @@ class VisionRotaryEmbedding(nn.Module):
         inv_w = self.inv_freq_w.to(device=device)
 
         # Vectorized implementation to avoid .item() calls and CUDA synchronization
-        # Extract t, h, w as tensors instead of scalars
-        t_vals = grid_thw[:, 0]  # [num_images]
-        h_vals = grid_thw[:, 1]  # [num_images]
-        w_vals = grid_thw[:, 2]  # [num_images]
+        # Extract t, h, w as tensors and move to CPU once to avoid repeated sync
+        t_vals = grid_thw[:, 0].cpu()  # [num_images] on CPU
+        h_vals = grid_thw[:, 1].cpu()  # [num_images] on CPU
+        w_vals = grid_thw[:, 2].cpu()  # [num_images] on CPU
         
         # Process all images at once using vectorized operations
         pos_ids = []
         for i in range(grid_thw.shape[0]):
-            t = t_vals[i]
-            h = h_vals[i]
-            w = w_vals[i]
+            t = t_vals[i].item()
+            h = h_vals[i].item()
+            w = w_vals[i].item()
             patches_per_frame = h * w
 
             # Compute position ids for each axis
@@ -803,15 +803,15 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
     positions = []
 
     # Vectorized implementation to avoid .item() calls and CUDA synchronization
-    # Extract t, h, w as tensors instead of scalars
-    t_vals = grid_thw[:, 0]  # [num_images]
-    h_vals = grid_thw[:, 1]  # [num_images]
-    w_vals = grid_thw[:, 2]  # [num_images]
+    # Extract t, h, w as tensors and move to CPU once to avoid repeated sync
+    t_vals = grid_thw[:, 0].cpu()  # [num_images] on CPU
+    h_vals = grid_thw[:, 1].cpu()  # [num_images] on CPU
+    w_vals = grid_thw[:, 2].cpu()  # [num_images] on CPU
 
     for i in range(grid_thw.shape[0]):
-        t = t_vals[i]
-        h = h_vals[i]
-        w = w_vals[i]
+        t = t_vals[i].item()
+        h = h_vals[i].item()
+        w = w_vals[i].item()
         patches_per_frame = h * w
 
         # Compute position for each axis
