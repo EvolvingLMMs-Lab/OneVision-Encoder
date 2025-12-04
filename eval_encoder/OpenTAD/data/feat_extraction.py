@@ -33,7 +33,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_family", default="llava_vit_sampling")
     parser.add_argument("--model_name", default="llava_vit_base_ln")
     parser.add_argument("--model_weight", default="/video_vit/xiangan/checkpoint_llava_vit/continue_with_mlcd_1536_tokens_b16_mix_three_input_residual_mv_new_b16/00056000/backbone.pt")
-    parser.add_argument("--num_frames", type=int, default=8)
+    parser.add_argument("--num_frames", type=int, default=8,
+                        help="Number of frames per chunk for model input (model processes this many frames at a time)")
+    parser.add_argument("--sequence_length", type=int, default=None,
+                        help="Total number of frames to load from each video. If None, uses num_frames. Set to 512 for long video processing.")
     parser.add_argument("--num_tokens", type=int, default=1568)
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--tubelet_size", type=int, default=1)
@@ -317,25 +320,75 @@ def extract_features_from_dali(
         
         # Extract features for each video in the batch
         for i in range(batch_size):
-            video = videos[i:i+1]  # Keep batch dimension
+            video = videos[i:i+1]  # Keep batch dimension [1, C, T, H, W]
             video_indices = indices[i:i+1]
             video_total_frames = total_frames[i:i+1]
-            # print("video_total_frames", video_total_frames, "video_indices", video_indices)
-            # Extract features
             
-            feats = get_feature(args, video, model, frame_indices=video_indices, total_frames=video_total_frames)
+            # Get video dimensions
+            _, C, T, H, W = video.shape
             
-            # Apply pooling method
-            if feats.dim() == 3:
-                if args.pooling_method == "mean":
-                    feats = feats.mean(dim=1)  # [1, D]
-                elif args.pooling_method == "cls":
-                    feats = feats[:, 0, :]  # [1, D]
-                elif args.pooling_method == "all":
-                    pass  # Keep [1, seq_len, D]
+            # Model expects args.num_frames (default 8) frames at a time, so split T frames into chunks
+            chunk_size = args.num_frames
+            num_chunks = (T + chunk_size - 1) // chunk_size  # Ceiling division
             
-            # Remove batch dimension and convert to numpy
-            feats = feats.squeeze(0).float().cpu().numpy()
+            # List to collect features from all chunks
+            chunk_features = []
+            
+            # Process each chunk of args.num_frames (typically 8) frames
+            for chunk_idx in range(num_chunks):
+                start_idx = chunk_idx * chunk_size
+                end_idx = min(start_idx + chunk_size, T)
+                
+                # Extract chunk [1, C, chunk_size, H, W]
+                video_chunk = video[:, :, start_idx:end_idx, :, :]
+                
+                # Pad if necessary (last chunk might have fewer than chunk_size frames)
+                actual_frames = end_idx - start_idx
+                if actual_frames < chunk_size:
+                    # Repeat last frame to make it chunk_size frames
+                    padding_needed = chunk_size - actual_frames
+                    last_frame = video_chunk[:, :, -1:, :, :]  # [1, C, 1, H, W]
+                    padding = last_frame.repeat(1, 1, padding_needed, 1, 1)  # [1, C, padding_needed, H, W]
+                    video_chunk = torch.cat([video_chunk, padding], dim=2)  # [1, C, chunk_size, H, W]
+                
+                # Extract corresponding indices for this chunk
+                chunk_indices = video_indices[:, start_idx:end_idx]
+                if actual_frames < chunk_size:
+                    # Repeat last index for padding
+                    last_index = chunk_indices[:, -1:]
+                    padding_indices = last_index.repeat(1, padding_needed)
+                    chunk_indices = torch.cat([chunk_indices, padding_indices], dim=1)
+                
+                # Extract features for this chunk
+                chunk_feat = get_feature(
+                    args, 
+                    video_chunk, 
+                    model, 
+                    frame_indices=chunk_indices, 
+                    total_frames=video_total_frames
+                )
+                
+                # Apply pooling method per chunk
+                if chunk_feat.dim() == 3:
+                    if args.pooling_method == "mean":
+                        chunk_feat = chunk_feat.mean(dim=1)  # [1, D]
+                    elif args.pooling_method == "cls":
+                        chunk_feat = chunk_feat[:, 0, :]  # [1, D]
+                    elif args.pooling_method == "all":
+                        pass  # Keep [1, seq_len, D]
+                
+                chunk_features.append(chunk_feat)
+            
+            # Stack all chunk features: [num_chunks, D] or [num_chunks, seq_len, D]
+            if chunk_features[0].dim() == 2:
+                # Pooled features: [num_chunks, D]
+                feats = torch.cat(chunk_features, dim=0)  # [num_chunks, D]
+            else:
+                # All token features: [num_chunks, seq_len, D]
+                feats = torch.cat(chunk_features, dim=0)  # [num_chunks, seq_len, D]
+            
+            # Convert to numpy
+            feats = feats.float().cpu().numpy()
             
             # Get video name
             video_idx = batch_count * args.batch_size + i
@@ -344,7 +397,7 @@ def extract_features_from_dali(
             else:
                 video_name = f"video_{total_processed}"
             
-            # Save features
+            # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
             feature_file = output_dir / f"{video_name}.npy"
             np.save(feature_file, feats)
             
@@ -390,8 +443,13 @@ def main() -> None:
     # Load model
     model = get_model(args)
 
+    # Set sequence_length default if not provided
+    if args.sequence_length is None:
+        args.sequence_length = args.num_frames
+    
     if args.rank == 0:
         print("Using DALI dataloader for standard frame sampling")
+        print(f"Loading {args.sequence_length} frames per video, processing in chunks of {args.num_frames}")
     
     # Create DALI dataloader
     dataloader = get_dali_dataloader(
@@ -399,7 +457,7 @@ def main() -> None:
         data_csv_path=os.path.join(args.data_root, args.data_csv_path) if not os.path.isabs(args.data_csv_path) else args.data_csv_path,
         mode="val",
         batch_size=args.batch_size,
-        sequence_length=args.num_frames,
+        sequence_length=args.sequence_length,
         input_size=args.input_size,
         short_side_size=args.short_side_size,
         mean=args.mean,
