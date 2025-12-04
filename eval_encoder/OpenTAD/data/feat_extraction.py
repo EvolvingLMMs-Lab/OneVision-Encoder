@@ -28,13 +28,13 @@ def parse_args() -> argparse.Namespace:
     # Data
     parser.add_argument("--data_root", default="/video_vit/feilong/TAD-Dataset/charades", help="Root directory of video data")
     parser.add_argument("--data_csv_path", default="charades_videos.csv", help="CSV file with video paths and labels")
-    parser.add_argument("--output_dir", default="/video_vit/feilong/TAD-Dataset/charades/features/llava_vit_base_cls2/", help="Output directory for .npy feature files")
+    parser.add_argument("--output_dir", default="/video_vit/feilong/TAD-Dataset/charades/features/llava_vit_base_cls_s4f16/", help="Output directory for .npy feature files")
 
     # Model
     parser.add_argument("--model_family", default="llava_vit_sampling")
     parser.add_argument("--model_name", default="llava_vit_base_ln")
     parser.add_argument("--model_weight", default="/video_vit/xiangan/checkpoint_llava_vit/continue_with_mlcd_1536_tokens_b16_mix_three_input_residual_mv_new_b16/00056000/backbone.pt")
-    parser.add_argument("--num_frames", type=int, default=8,
+    parser.add_argument("--num_frames", type=int, default=16,
                         help="Number of frames per chunk for model input (model processes this many frames at a time)")
     parser.add_argument("--sequence_length", type=int, default=None,
                         help="Total number of frames to load from each video. If None, uses num_frames. Set to 512 for long video processing.")
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
 
     # Clip processing
 
-    parser.add_argument("--clip_stride", type=int, default=None,
+    parser.add_argument("--clip_stride", type=int, default=4,
                         help="Stride between clips when splitting long videos. If None, uses num_frames (non-overlapping clips). "
                              "Set to 4 for 8-frame sliding window with stride=4 (50%% overlap)")
 
@@ -221,7 +221,7 @@ def get_model(args: argparse.Namespace) -> nn.Module:
     if args.model_family in ["llava_vit_sampling"]:
         state_dict = torch.load(args.model_weight, map_location="cpu")
         state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
-        model.load_state_dict(state_dict, strict=True)
+        model.load_state_dict(state_dict, strict=False)
     return model
 
 
@@ -275,7 +275,7 @@ def extract_features_from_dali(
     model.to(device).eval()
     
     # Batch size for processing chunks (larger = better GPU utilization but more memory)
-    CHUNK_BATCH_SIZE = 64
+    CHUNK_BATCH_SIZE = 32
     
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -422,15 +422,13 @@ def extract_features_from_dali(
             # if "001YG" in str(feature_file):
             #     print(f"[R{args.rank}] ⚠ 检测到文件名包含 '001YG'，停止处理后续视频！文件是：{feature_file}")
             #     print(feature_file, feats.shape, total_frames)
+            #     print(f"   features.dtype = {feats.dtype}")
             #     sys.exit(1)
       
-            # print(feature_file, feats.shape)
             # Convert to numpy
             feats = feats.float().cpu().numpy()
             # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
             np.save(feature_file, feats)
-            # print("finish:", feature_file)
-            
             total_processed += 1
         
         batch_count += 1
