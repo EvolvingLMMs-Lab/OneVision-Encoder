@@ -33,7 +33,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_family", default="llava_vit_sampling")
     parser.add_argument("--model_name", default="llava_vit_base_ln")
     parser.add_argument("--model_weight", default="/video_vit/xiangan/checkpoint_llava_vit/continue_with_mlcd_1536_tokens_b16_mix_three_input_residual_mv_new_b16/00056000/backbone.pt")
-    parser.add_argument("--num_frames", type=int, default=8)
+    parser.add_argument("--num_frames", type=int, default=8,
+                        help="Number of frames per chunk for model input (model processes this many frames at a time)")
+    parser.add_argument("--sequence_length", type=int, default=None,
+                        help="Total number of frames to load from each video. If None, uses num_frames. Set to 512 for long video processing.")
     parser.add_argument("--num_tokens", type=int, default=1568)
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--tubelet_size", type=int, default=1)
@@ -440,8 +443,13 @@ def main() -> None:
     # Load model
     model = get_model(args)
 
+    # Set sequence_length default if not provided
+    if args.sequence_length is None:
+        args.sequence_length = args.num_frames
+    
     if args.rank == 0:
         print("Using DALI dataloader for standard frame sampling")
+        print(f"Loading {args.sequence_length} frames per video, processing in chunks of {args.num_frames}")
     
     # Create DALI dataloader
     dataloader = get_dali_dataloader(
@@ -449,7 +457,7 @@ def main() -> None:
         data_csv_path=os.path.join(args.data_root, args.data_csv_path) if not os.path.isabs(args.data_csv_path) else args.data_csv_path,
         mode="val",
         batch_size=args.batch_size,
-        sequence_length=args.num_frames,
+        sequence_length=args.sequence_length,
         input_size=args.input_size,
         short_side_size=args.short_side_size,
         mean=args.mean,
