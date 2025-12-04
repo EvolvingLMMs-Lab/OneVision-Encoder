@@ -274,6 +274,9 @@ def extract_features_from_dali(
     """Extract features from videos using DALI dataloader"""
     model.to(device).eval()
     
+    # Batch size for processing chunks (larger = better GPU utilization but more memory)
+    CHUNK_BATCH_SIZE = 8
+    
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -325,7 +328,8 @@ def extract_features_from_dali(
             if video_idx < len(video_names):
                 video_name = video_names[video_idx]
             else:
-                video_name = f"video_{total_processed}"
+                # Use deterministic naming based on video index
+                video_name = f"video_{video_idx}"
             
             # Check if feature file already exists
             feature_file = output_dir / f"{video_name}.npy"
@@ -347,10 +351,6 @@ def extract_features_from_dali(
             
             # List to collect features from all chunks
             chunk_features = []
-            
-            # Process chunks in batches for speedup (configurable batch size)
-            # Larger batch sizes improve GPU utilization but require more memory
-            CHUNK_BATCH_SIZE = 8
             
             for batch_start in range(0, num_chunks, CHUNK_BATCH_SIZE):
                 batch_end = min(batch_start + CHUNK_BATCH_SIZE, num_chunks)
