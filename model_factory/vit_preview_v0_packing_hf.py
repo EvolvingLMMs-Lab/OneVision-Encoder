@@ -238,7 +238,7 @@ class VisionRotaryEmbedding(nn.Module):
         for i in range(grid_thw.shape[0]):
             # Extract values as GPU tensors (no sync)
             thw = grid_thw[i]
-            t, h, w = thw[0], thw[1], thw[2]
+            t, h, w = thw[0].item(), thw[1].item(), thw[2].item()
             patches_per_frame = h * w
 
             # Compute position ids for each axis
@@ -804,7 +804,7 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
     for i in range(grid_thw.shape[0]):
         # Extract values as GPU tensors (no sync)
         thw = grid_thw[i]
-        t, h, w = thw[0], thw[1], thw[2]
+        t, h, w = thw[0].item(), thw[1].item(), thw[2].item()
         patches_per_frame = h * w
 
         # Compute position for each axis
