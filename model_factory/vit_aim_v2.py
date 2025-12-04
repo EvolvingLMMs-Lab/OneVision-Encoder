@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from model_factory.aimv2.modeling_aimv2 import AIMv2Config, AIMv2Model
 from timm.models.registry import register_model
+
 from transformers import AutoImageProcessor, AutoModel
 class AIMv2(nn.Module):
     def __init__(
