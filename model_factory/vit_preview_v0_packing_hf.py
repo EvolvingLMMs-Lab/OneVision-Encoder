@@ -273,7 +273,7 @@ class VisionRotaryEmbedding(nn.Module):
         match the default scaling behavior.
 
         Args:
-            patch_positions: Tensor of shape (num_patches, 3) containing [t, h, w] 
+            patch_positions: Tensor of shape (num_patches, 3) containing [t, h, w]
                 positions for each patch in the sequence. For consistency with
                 the default forward() behavior, temporal positions should be
                 pre-scaled (e.g., [0, 8, 16, 24, ...] for 8 frames instead of
@@ -335,10 +335,10 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
 
 class LlavaViTPackingPatchEmbed(nn.Module):
     """Patch embedding layer for packing model (Qwen2VL style).
-    
+
     Input: (seq_len, patch_size * patch_size * in_channels)
     Output: (seq_len, hidden_size)
-    
+
     Note: Uses Conv2d for compatibility with vit_preview_v0_hf weights.
     """
 
@@ -361,7 +361,7 @@ class LlavaViTPackingPatchEmbed(nn.Module):
         """Embed patches from flattened pixel values.
 
         Args:
-            hidden_states: Flattened pixel values of shape 
+            hidden_states: Flattened pixel values of shape
                 (seq_len, patch_size * patch_size * in_channels)
 
         Returns:
@@ -544,7 +544,7 @@ class LlavaViTPackingPreTrainedModel(PreTrainedModel):
 class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
     """Llava ViT Model with packing support using grid_thw (Qwen2VL style).
 
-    This model requires FlashAttention and accepts input in 
+    This model requires FlashAttention and accepts input in
     [seq_len, patch_dim] format where patch_dim = patch_size * patch_size * in_channels,
     similar to Qwen2VL approach.
     """
@@ -585,7 +585,7 @@ class LlavaViTPackingModel(LlavaViTPackingPreTrainedModel):
                 and patch_dim = patch_size * patch_size * in_channels.
             grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image,
                 where h and w are the number of patches (not pixels).
-            patch_positions: Optional tensor of shape (seq_len, 3) containing [t, h, w] 
+            patch_positions: Optional tensor of shape (seq_len, 3) containing [t, h, w]
                 positions for each patch in the sequence. When provided, this overrides
                 the default position calculation based on grid_thw for RoPE computation.
                 This is useful when patches come from different images/videos with
@@ -777,27 +777,27 @@ def hf_llava_vit_packing_giant_ln(pretrained: bool = False, ckpt_path=None, **kw
 
 def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tensor:
     """Compute patch positions from grid_thw tensor.
-    
+
     This utility function generates patch_positions tensor from grid_thw,
     which can be used to explicitly specify the RoPE positions for each patch.
-    
+
     Note: The temporal positions are the frame index (0, 1, 2, ..., t-1), repeated
     for each patch in that frame, matching the source model's behavior.
-    
+
     Args:
         grid_thw: Tensor of shape (num_images, 3) with [t, h, w] for each image
-    
+
     Returns:
         patch_positions: Tensor of shape (total_seq_len, 3) with [t, h, w] positions
             for each patch in the sequence.
     """
     device = grid_thw.device
     positions = []
-    
+
     for t, h, w in grid_thw:
         t, h, w = t.item(), h.item(), w.item()
         patches_per_frame = h * w
-        
+
         # Compute position for each axis
         # Temporal positions are the frame index, matching the source model
         t_ids = torch.arange(t, device=device).repeat_interleave(patches_per_frame)
@@ -805,11 +805,11 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
         h_ids = h_base.repeat(t)
         w_base = torch.arange(w, device=device).repeat(h)
         w_ids = w_base.repeat(t)
-        
+
         # Stack positions as (L, 3) tensor
         pos = torch.stack([t_ids, h_ids, w_ids], dim=-1)
         positions.append(pos)
-    
+
     return torch.cat(positions, dim=0)
 
 
@@ -830,7 +830,7 @@ if __name__ == "__main__":
     in_channels = 3
     patch_dim = patch_size * patch_size * in_channels  # 16*16*3 = 768
     seq_len = 14 * 14  # 196 patches for a single image
-    
+
     grid_thw = torch.tensor([[1, 14, 14]], dtype=torch.long)
     hidden_states = torch.randn(seq_len, patch_dim)  # (seq_len, patch_dim)
 
@@ -843,7 +843,7 @@ if __name__ == "__main__":
         model = model.cuda()
         hidden_states = hidden_states.cuda()
         grid_thw = grid_thw.cuda()
-        
+
         with torch.no_grad():
             outputs = model(hidden_states=hidden_states, grid_thw=grid_thw)
 
