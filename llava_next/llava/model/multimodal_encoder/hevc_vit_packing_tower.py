@@ -42,6 +42,8 @@ class HEVCViTPackingVisionTower(nn.Module):
         # Load HEVCViTPackingModel
         self.vision_tower = HEVCViTPackingModel.from_pretrained(self.vision_tower_name, device_map=device_map)
         self.vision_tower.requires_grad_(False)
+        self.vision_tower.head = None
+
 
         self.is_loaded = True
 
@@ -79,16 +81,16 @@ class HEVCViTPackingVisionTower(nn.Module):
             # For list of images, process each separately and combine
             sample_image = images[0]
             height, width = sample_image.shape[-2:]
-            
+
             # ============================================================
             # 【INPUT CONVERSION】: Convert list of images to packing format
             # Standard format: List of [C, H, W] tensors
-            # Packing format: [total_num_patches, patch_dim] where 
+            # Packing format: [total_num_patches, patch_dim] where
             #                 patch_dim = patch_size * patch_size * in_channels
             # ============================================================
             all_hidden_states = []
             all_grid_thw = []
-            
+
             for image in images:
                 # Convert single image [C, H, W] to packing format
                 hidden_states, grid_thw = self._image_to_packing_input(
@@ -96,17 +98,17 @@ class HEVCViTPackingVisionTower(nn.Module):
                 )
                 all_hidden_states.append(hidden_states)
                 all_grid_thw.append(grid_thw)
-            
+
             # Concatenate all patches along sequence dimension
             packed_hidden_states = torch.cat(all_hidden_states, dim=0)  # [total_seq_len, patch_dim]
             packed_grid_thw = torch.cat(all_grid_thw, dim=0)  # [num_images, 3]
             # ============================================================
             # 【END INPUT CONVERSION】
             # ============================================================
-            
+
             # Generate patch_positions from grid_thw for RoPE calculation
             patch_positions = compute_patch_positions_from_grid_thw(packed_grid_thw)
-            
+
             # Forward pass through packing model
             image_forward_outs = self.vision_tower(
                 hidden_states=packed_hidden_states,
@@ -114,35 +116,38 @@ class HEVCViTPackingVisionTower(nn.Module):
                 patch_positions=patch_positions,
                 output_hidden_states=True
             )
-            
+
             # ============================================================
             # 【OUTPUT CONVERSION】: Convert packing output back to feature format
             # Packing output: [total_seq_len, hidden_size] - all patches concatenated
             # Target format: List of [num_patches, hidden_size] per image
             # ============================================================
             image_features = self.feature_select(image_forward_outs)
-            
+
             # Split the packed output back to individual images
             image_features_list = []
             start_idx = 0
-            for grid in packed_grid_thw:
-                t, h, w = grid[0].item(), grid[1].item(), grid[2].item()
+            # Optimized for distributed training - extract scalars efficiently
+            for i in range(packed_grid_thw.shape[0]):
+                # Extract values with minimal synchronization (single sync per row)
+                thw = packed_grid_thw[i]
+                t, h, w = thw.tolist()
                 seq_len = t * h * w
                 image_features_list.append(image_features[start_idx:start_idx + seq_len])
                 start_idx += seq_len
-            
+
             image_features = image_features_list
             # ============================================================
             # 【END OUTPUT CONVERSION】
             # ============================================================
-            
+
             # For list processing, use the first image's dimensions for spatial dims
             # (Note: in list mode, all images should ideally have the same size)
             # height and width already set from sample_image at line 80
         else:
             # Extract height and width from batch of images
             height, width = images.shape[-2:]
-            
+
             # ============================================================
             # 【INPUT CONVERSION】: Convert batch images to packing format
             # Standard format: [B, C, H, W]
@@ -150,18 +155,17 @@ class HEVCViTPackingVisionTower(nn.Module):
             #                 total_num_patches = B * h_patches * w_patches
             #                 patch_dim = patch_size * patch_size * in_channels
             # ============================================================
-            images = images.to(device=self.device, dtype=self.dtype)
             batch_size = images.shape[0]
-            
+
             # Convert batch to packing format
             packed_hidden_states, packed_grid_thw = self._batch_images_to_packing_input(images)
             # ============================================================
             # 【END INPUT CONVERSION】
             # ============================================================
-            
+
             # Generate patch_positions from grid_thw for RoPE calculation
             patch_positions = compute_patch_positions_from_grid_thw(packed_grid_thw)
-            
+
             # Forward pass through packing model
             image_forward_outs = self.vision_tower(
                 hidden_states=packed_hidden_states,
@@ -169,21 +173,23 @@ class HEVCViTPackingVisionTower(nn.Module):
                 patch_positions=patch_positions,
                 output_hidden_states=True
             )
-            
+
             # ============================================================
             # 【OUTPUT CONVERSION】: Convert packing output back to feature format
             # Packing output: [total_seq_len, hidden_size] - all patches from all images concatenated
             # Target format: [B, num_patches, hidden_size]
             # ============================================================
             raw_features = self.feature_select(image_forward_outs)
-            
             # Split the packed output back to batch format
             # Calculate num_patches per image
-            t, h_patches, w_patches = packed_grid_thw[0][0].item(), packed_grid_thw[0][1].item(), packed_grid_thw[0][2].item()
+            # Optimized for distributed training - extract scalars efficiently
+            thw = packed_grid_thw[0]
+            t, h_patches, w_patches = thw.tolist()
             num_patches_per_image = t * h_patches * w_patches
-            
+
             # Reshape from [total_seq_len, hidden_size] to [B, num_patches, hidden_size]
             image_features = raw_features.view(batch_size, num_patches_per_image, -1)
+            # print(image_features.size())
             # ============================================================
             # 【END OUTPUT CONVERSION】
             # ============================================================
@@ -191,7 +197,7 @@ class HEVCViTPackingVisionTower(nn.Module):
         # Calculate h and w in patch coordinates
         h = height // self.config.patch_size
         w = width // self.config.patch_size
-        
+
         if return_spatial_dims:
             return image_features, h, w
         return image_features
@@ -199,61 +205,61 @@ class HEVCViTPackingVisionTower(nn.Module):
     def _image_to_packing_input(self, image_tensor):
         """
         Convert a single image tensor to packing model input format.
-        
+
         Args:
             image_tensor: [C, H, W] tensor
-            
+
         Returns:
             hidden_states: [seq_len, patch_dim] tensor
             grid_thw: [1, 3] tensor with [t, h, w] patches
         """
         patch_size = self.config.patch_size
         channels, height, width = image_tensor.shape
-        
+
         # Calculate patch dimensions
         h_patches = height // patch_size
         w_patches = width // patch_size
         t_frames = 1  # Images have t=1
-        
+
         # Reshape to patches: (C, H, W) -> (h_patches, w_patches, C, patch_size, patch_size)
         patches = image_tensor.view(
             channels, h_patches, patch_size, w_patches, patch_size
         )
         patches = patches.permute(1, 3, 0, 2, 4).contiguous()  # (h, w, C, pH, pW)
-        
+
         # Flatten to (seq_len, patch_dim)
         seq_len = t_frames * h_patches * w_patches
         patch_dim = patch_size * patch_size * channels
         hidden_states = patches.view(seq_len, patch_dim)
-        
+
         # Create grid_thw: [t, h, w]
         grid_thw = torch.tensor(
-            [[t_frames, h_patches, w_patches]], 
-            dtype=torch.long, 
+            [[t_frames, h_patches, w_patches]],
+            dtype=torch.long,
             device=image_tensor.device
         )
-        
+
         return hidden_states, grid_thw
 
     def _batch_images_to_packing_input(self, images):
         """
         Convert a batch of images to packing model input format.
-        
+
         Args:
             images: [B, C, H, W] tensor
-            
+
         Returns:
             hidden_states: [total_seq_len, patch_dim] tensor
             grid_thw: [B, 3] tensor with [t, h, w] patches for each image
         """
         batch_size, channels, height, width = images.shape
         patch_size = self.config.patch_size
-        
+
         # Calculate patch dimensions
         h_patches = height // patch_size
         w_patches = width // patch_size
         t_frames = 1  # Images have t=1
-        
+
         # Reshape batch to patches
         # [B, C, H, W] -> [B, C, h_patches, patch_size, w_patches, patch_size]
         patches = images.view(
@@ -261,12 +267,12 @@ class HEVCViTPackingVisionTower(nn.Module):
         )
         # [B, C, h_patches, patch_size, w_patches, patch_size] -> [B, h_patches, w_patches, C, patch_size, patch_size]
         patches = patches.permute(0, 2, 4, 1, 3, 5).contiguous()
-        
+
         # Flatten to (total_seq_len, patch_dim)
         seq_len_per_image = t_frames * h_patches * w_patches
         patch_dim = patch_size * patch_size * channels
         hidden_states = patches.view(batch_size * seq_len_per_image, patch_dim)
-        
+
         # Create grid_thw for each image in batch
         grid_thw_values = torch.tensor(
             [t_frames, h_patches, w_patches],
@@ -274,7 +280,7 @@ class HEVCViTPackingVisionTower(nn.Module):
             device=images.device
         )
         grid_thw = grid_thw_values.unsqueeze(0).expand(batch_size, 3).contiguous()
-        
+
         return hidden_states, grid_thw
 
     @property

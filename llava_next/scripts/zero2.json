@@ -30,8 +30,7 @@
         "overlap_comm": false,
         "reduce_scatter": true,
         "reduce_bucket_size": 2e8,
-        "contiguous_gradients": true,
-        "zero_allow_untested_optimizer": true
+        "contiguous_gradients": true
     },
     "gradient_accumulation_steps": "auto",
     "gradient_clipping": "auto",

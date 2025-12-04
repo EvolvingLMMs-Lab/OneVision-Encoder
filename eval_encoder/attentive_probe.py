@@ -411,6 +411,13 @@ def evaluate(
 
 
 def get_model(args: argparse.Namespace) -> nn.Module:
+
+    if args.model_name == "hf_llava_vit_large_ln":
+        from model_factory.vit_preview_v0_hf import LlavaViTModel
+        model = LlavaViTModel.from_pretrained(args.model_weight, dtype=torch.bfloat16)
+        model = torch.compile(model)
+        return model
+
     model = create_model(args.model_name, pretrained=False)
     if args.model_family in ["llava_vit_sampling"]:
         state_dict = torch.load(args.model_weight, map_location="cpu")

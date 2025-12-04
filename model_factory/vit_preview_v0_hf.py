@@ -30,8 +30,8 @@ from transformers.utils import (add_start_docstrings,
                                 add_start_docstrings_to_model_forward, logging,
                                 replace_return_docstrings, is_flash_attn_2_available)
 
-if is_flash_attn_2_available():
-    from flash_attn import flash_attn_func
+
+from flash_attn import flash_attn_func
 
 logger = logging.get_logger(__name__)
 
@@ -469,7 +469,7 @@ class LlavaViTFlashAttention2(nn.Module):
 
 
 LLAVA_VIT_ATTENTION_CLASSES = {
-    "eager": LlavaViTAttention,
+    # "eager": LlavaViTAttention,
     "flash_attention_2": LlavaViTFlashAttention2,
 }
 
@@ -478,14 +478,14 @@ class LlavaViTEncoderLayer(nn.Module):
     def __init__(self, config: LlavaViTConfig):
         super().__init__()
         self.embed_dim = config.hidden_size
-        # Get attention implementation from config, default to "eager"
-        attn_implementation = getattr(config, "_attn_implementation", "eager")
-        if attn_implementation not in LLAVA_VIT_ATTENTION_CLASSES:
-            raise ValueError(
-                f"Unknown attention implementation: {attn_implementation}. "
-                f"Available implementations: {list(LLAVA_VIT_ATTENTION_CLASSES.keys())}"
-            )
-        self.self_attn = LLAVA_VIT_ATTENTION_CLASSES[attn_implementation](config)
+        # Get attention implementation from config, default to "flash_attention_2"
+        # attn_implementation = getattr(config, "_attn_implementation", "flash_attention_2")
+        # if attn_implementation not in LLAVA_VIT_ATTENTION_CLASSES:
+        #     raise ValueError(
+        #         f"Unknown attention implementation: {attn_implementation}. "
+        #         f"Available implementations: {list(LLAVA_VIT_ATTENTION_CLASSES.keys())}"
+        #     )
+        self.self_attn = LLAVA_VIT_ATTENTION_CLASSES["flash_attention_2"](config)
         self.layer_norm1 = get_norm_layer(config)
         self.mlp = SiglipMLP(config)
         self.layer_norm2 = get_norm_layer(config)

@@ -889,12 +889,7 @@ def convert_and_save_packing(hf_model_name, packing_model_name, weight_path, out
 
     # Create HF model
     print("\n--> Creating HF Model...")
-    hf_model = timm.create_model(hf_model_name, pretrained=False)
-
-    print("--> Loading weights into HF model...")
-    # checkpoint = torch.load(weight_path, map_location='cpu')
-    # state_dict = checkpoint.get("model", checkpoint.get("state_dict", checkpoint))
-    hf_model.from_pretrained(weight_path, torch_dtype=torch.bfloat16)
+    hf_model = LlavaViTModel.from_pretrained(weight_path, torch_dtype=torch.bfloat16)
 
     # Create Packing model
     print("\n--> Creating Packing Model...")

@@ -12,7 +12,7 @@ export PYTHONPATH=$(pwd)
 
 LLM_VERSION="/vlm/pretrain_models/Qwen/Qwen2.5-7B-Instruct"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
-VISION_MODEL_VERSION="/video_vit/pretrain_models/deepglint/hevc/hevc_vit_packing_12_03_00158000_l14_flash_attn"
+VISION_MODEL_VERSION="/video_vit/pretrain_models/deepglint/hevc/hevc_vit_packing_12_04_00210000_l14_flash_attn_freeze"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 DATA_ROOT="/vlm/data/pretrain_data"
 
@@ -25,7 +25,7 @@ echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
 deepspeed --hostfile host_80 \
     llava/train/train_mem.py \
-    --deepspeed scripts/zero2.json \
+    --deepspeed scripts/zero3.json \
     --model_name_or_path ${LLM_VERSION} \
     --version ${PROMPT_VERSION} \
     --data_path ${DATA_ROOT}/blip_laion_cc_sbu_558k.json \
@@ -39,7 +39,7 @@ deepspeed --hostfile host_80 \
     --bf16 True \
     --output_dir /video_vit/xiangan/checkpoint_llava_next/projectors/${BASE_RUN_NAME} \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --save_strategy "no" \

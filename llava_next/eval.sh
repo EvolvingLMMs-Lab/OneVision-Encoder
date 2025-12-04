@@ -7,6 +7,7 @@ model_path="/video_vit/xiangan/checkpoint_llava_next/llavanext-_video_vit_xianga
 model_path="/video_vit/xiangan/checkpoint_llava_next/llavanext-_video_vit_pretrain_models_deepglint_hevc_backbone_hevc_vit_flash_attn_hf-_vlm_pretrain_models_Qwen_Qwen2.5-7B-Instruct-mlp2x_gelu-pretrain_blip558k-finetune_llavanext780k-10nodes"
 # model_path="/video_vit/xiangan/checkpoint_llava_next/llavanext-_video_vit_pretrain_models_deepglint_hevc_backbone_hevc_vit_flash_attn_hf-_vlm_pretrain_models_Qwen_Qwen2.5-7B-Instruct-mlp2x_gelu-pretrain_blip558k-finetune_llavanext780k-10nodes_v2"
 model_path="/video_vit/xiangan/checkpoint_llava_next/llavanext-_video_vit_pretrain_models_deepglint_hevc_backbone_hevc_vit_hf_version_12_01_version_00192000-_vlm_pretrain_models_Qwen_Qwen2.5-7B-Instruct-mlp2x_gelu-pretrain_blip558k-finetune_llavanext780k-select_layer_m2"
+model_path="/video_vit/xiangan/checkpoint_llava_next/llavanext-_video_vit_pretrain_models_deepglint_hevc_hevc_vit_packing_12_04_00210000_l14_flash_attn_freeze-_vlm_pretrain_models_Qwen_Qwen2.5-7B-Instruct-mlp2x_gelu-pretrain_blip558k-finetune_llavanext780k-select_layer_m2/checkpoint-1000"
 conv_template='qwen_1_5'
 run_port=12444
 model_name='llava_vit'
@@ -24,7 +25,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m accelerate.commands.launch \
     --model llava \
     --model_args pretrained=$model_path,conv_template=$conv_template \
     --batch_size 1 \
-    --tasks textvqa \
+    --tasks mme,ocrbench \
     --log_samples \
     --log_samples_suffix $model_name \
     --output_path ./eval_log/ 
