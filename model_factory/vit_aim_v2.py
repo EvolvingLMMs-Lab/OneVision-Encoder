@@ -1,26 +1,24 @@
 import torch
 from torch import nn
-from transformers import AutoModel
+from model_factory.aimv2.modeling_aimv2 import AIMv2Config, AIMv2Model
 from timm.models.registry import register_model
-
+from transformers import AutoImageProcessor, AutoModel
 class AIMv2(nn.Module):
     def __init__(
         self,
         ckpt: str = "apple/aimv2-large-patch14-224",
-        revision: str = None,
-        trust_remote_code: bool = True,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         super(AIMv2, self).__init__()
         self.device = torch.device(device)
 
-        # 加载 Hugging Face 模型
-        # trust_remote_code=True 是必须的，因为 AIMv2 可能包含自定义代码
-        self.model = AutoModel.from_pretrained(
-            ckpt,
-            revision=revision,
-            trust_remote_code=trust_remote_code
-        ).to(self.device).eval()
+
+        model = AutoModel.from_pretrained(
+            "apple/aimv2-large-patch14-224",
+            revision="ac764a25c832c7dc5e11871daa588e98e3cdbfb7",
+            trust_remote_code=True,
+        )
+        self.model = model.to(self.device)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         pixel_values = pixel_values.to(self.device)
@@ -40,11 +38,7 @@ class AIMv2(nn.Module):
 
 @register_model
 def aimv2_large_patch14_224(pretrained: bool = False, **kwargs):
-    model = AIMv2(
-    "apple/aimv2-large-patch14-224",
-    revision="ac764a25c832c7dc5e11871daa588e98e3cdbfb7",
-    trust_remote_code=True,
-    )
+    model = AIMv2("/video_vit/pretrain_models/aimv2-large-patch14-224")
     return model
 
 if __name__ == "__main__":

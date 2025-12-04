@@ -21,7 +21,7 @@ from training.lr_scheduler import PolynomialLRWarmup
 from model_factory.vit_preview_v0_hf import LlavaViTModel
 
 torch._dynamo.config.optimize_ddp = True
-
+torch._dynamo.config.optimize_ddp = False
 
 parser = argparse.ArgumentParser(description="Multi-dataset video training")
 
