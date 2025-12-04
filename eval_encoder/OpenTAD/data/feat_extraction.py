@@ -330,8 +330,7 @@ def extract_features_from_dali(
             # Check if feature file already exists
             feature_file = output_dir / f"{video_name}.npy"
             if feature_file.exists():
-                if args.rank == 0:
-                    print(f"Skipping {video_name}: feature file already exists at {feature_file}")
+                print(f"Rank {args.rank}: Skipping {video_name}: feature file already exists at {feature_file}")
                 total_processed += 1
                 continue
             
@@ -349,11 +348,12 @@ def extract_features_from_dali(
             # List to collect features from all chunks
             chunk_features = []
             
-            # Process chunks in batches of 8 for speedup
-            batch_chunk_size = 8
+            # Process chunks in batches for speedup (configurable batch size)
+            # Larger batch sizes improve GPU utilization but require more memory
+            CHUNK_BATCH_SIZE = 8
             
-            for batch_start in range(0, num_chunks, batch_chunk_size):
-                batch_end = min(batch_start + batch_chunk_size, num_chunks)
+            for batch_start in range(0, num_chunks, CHUNK_BATCH_SIZE):
+                batch_end = min(batch_start + CHUNK_BATCH_SIZE, num_chunks)
                 batch_num_chunks = batch_end - batch_start
                 
                 # Collect chunks for this batch
@@ -414,10 +414,7 @@ def extract_features_from_dali(
                 
                 # Split batch results back into individual chunks
                 for j in range(batch_num_chunks):
-                    if batch_chunk_feat.dim() == 2:
-                        chunk_features.append(batch_chunk_feat[j:j+1])
-                    else:
-                        chunk_features.append(batch_chunk_feat[j:j+1])
+                    chunk_features.append(batch_chunk_feat[j:j+1])
             
             # Stack all chunk features: [num_chunks, D] or [num_chunks, seq_len, D]
             if chunk_features[0].dim() == 2:
