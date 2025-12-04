@@ -1,334 +1,81 @@
-import argparse, os,tqdm, json,random, numpy as np, torch
-from pathlib import Path
-import torch.nn.functional as F
-from collections import OrderedDict
-import torch.multiprocessing as mp
-from torchvision import transforms
-from decord import VideoReader, cpu  # GPU 解码: `gpu(0)`
+import argparse
+import math
+import os
 import warnings
-import threading
-from queue import Queue
-warnings.filterwarnings('ignore')
-# NOTE: 下面这行用来注册自定义 ViT / InternVideo2 模型
-import video_models  # noqa: F401 pylint: disable=unused-import
-# _IMAGENET_MEAN = (0.485, 0.456, 0.406)
-# _IMAGENET_STD  = (0.229, 0.224, 0.225)
+from pathlib import Path
+from typing import List, Tuple,  Dict
+import time  # <--- 引入 time 模块
+import numpy as np
+import torch
+import torch.nn.functional as F
+import torchmetrics
+from dataloader.ap_dataloader_dali import get_dali_dataloader
+from timm.loss import LabelSmoothingCrossEntropy
+from timm.models import create_model
+from timm.models.layers import trunc_normal_
+from torch import distributed, nn
+from torch.nn.utils import clip_grad_norm_
+from torch.optim.lr_scheduler import LinearLR
 
-# ---------- 1. Transform 与工具函数 ---------- #
-# Constants
-CLIP_LENGTH = 16  # Number of frames per clip
+# Ensure custom models and layers are registered
+import model_factory
+warnings.filterwarnings("ignore")
 
-def to_normalized_float_tensor(vid: torch.Tensor) -> torch.Tensor:
-    """(T, H, W, C[RGB]) uint8 -> (C, T, H, W) float32 in [0,1]."""
-    vid = vid.permute(3, 0, 1, 2).to(torch.float32) / 255
-    # if normalize:
-    #     mean_t = torch.tensor(mean, device=vid.device).view(-1, 1, 1, 1)
-    #     std_t  = torch.tensor(std,  device=vid.device).view(-1, 1, 1, 1)
-    #     vid = (vid - mean_t) / std_t
-    return vid
-    
-def resize(vid: torch.Tensor, size):
-    """仅在空间维度做双线性 Resize."""
-    scale = None
-    if isinstance(size, int):
-        scale = float(size) / min(vid.shape[-2:])
-        size = None
-    return torch.nn.functional.interpolate(
-        vid, size=size, scale_factor=scale,
-        
-        mode='bilinear', align_corners=False
-    )
 
-class ToFloatTensorInZeroOne:  # 与官方脚本保持同名
-    def __call__(self, vid): 
-        return to_normalized_float_tensor(vid)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser("Feature extraction from videos with clip-based processing")
+    # Data
+    parser.add_argument("--data_root", default="/data_3/data_attentive_probe/ssv2", help="Root directory of video data")
+    parser.add_argument("--data_csv_path", default="ssv2_val_new.csv", help="CSV file with video paths and labels")
+    parser.add_argument("--output_dir", default="/video_vit/feilong/LLaVA-ViT/eval_encoder/feature/", help="Output directory for .npy feature files")
 
-class Resize:
-    def __init__(self, size): self.size = size
-    def __call__(self, vid):  return resize(vid, self.size)
+    # Model
+    parser.add_argument("--model_family", default="llava_vit_sampling")
+    parser.add_argument("--model_name", default="llava_vit_base_ln")
+    parser.add_argument("--model_weight", default="/video_vit/xiangan/checkpoint_llava_vit/continue_with_mlcd_1536_tokens_b16_mix_three_input_residual_mv_new_b16/00056000/backbone.pt")
+    parser.add_argument("--num_frames", type=int, default=8,
+                        help="Number of frames per chunk for model input (model processes this many frames at a time)")
+    parser.add_argument("--sequence_length", type=int, default=None,
+                        help="Total number of frames to load from each video. If None, uses num_frames. Set to 512 for long video processing.")
+    parser.add_argument("--num_tokens", type=int, default=1568)
+    parser.add_argument("--input_size", type=int, default=224)
+    parser.add_argument("--tubelet_size", type=int, default=1)
+    parser.add_argument("--embedding_size", type=int, default=768)
+    parser.add_argument("--target_frames", type=int, default=64,
+                        help="Target number of frames to interpolate to (default: 64)")
 
-# ---------- 2. CLI ---------- #
-def get_args():
-    p = argparse.ArgumentParser("Extract TAD features with LLaVA-ViT")
-    p.add_argument('--data_set',  default='charades',
-                   choices=['thumos', 'fineaction', "charades", "hacs"])
-    p.add_argument('--data_path', default="/video_vit/feilong/TAD-Dataset/charades/raw_data/video",)
-    p.add_argument('--save_path', default="/video_vit/feilong/TAD-Dataset/charades/features/llavavitllavavit_test", )
-    p.add_argument('--model_name',     default="llavavit",)
-    p.add_argument('--model_type', default='llavavit')
-    p.add_argument('--ckpt_path', default="/video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone.pt",)
-    # p.add_argument('--device',    default='cuda:0')
-    p.add_argument('--world_size', default=8)
+    # Dataloader
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="Batch size for DALI dataloader (use 1 for per-video processing)")
+    parser.add_argument("--dali_num_threads", type=int, default=2)
+    parser.add_argument("--dali_py_num_workers", type=int, default=4)
+    parser.add_argument("--decord_num_threads", type=int, default=2,
+                        help="Number of threads for decord video reader.")
+    parser.add_argument("--short_side_size", type=int, default=256)
+    parser.add_argument("--frames_token_num", type=int, default=196)
 
-    p.add_argument("--anno_file", default="/video_vit/OpenTAD/data/data/charades/annotations/charades.json" ,type=str, help="path to annotation")
-    # p.add_argument("--data_dir", default="/vlm/monash/feilong/OpenTAD-main/data/charades/raw_data/Charades_v1_480_30fps" , type=str, help="path to data folder")
-    p.add_argument("--prefix", type=str, default="")
-    p.add_argument('--model_key', default='model|module', type=str)
-    p.add_argument("--suffix", type=str, default="")
-    p.add_argument("--ext", type=str, default="npy")
-    return p.parse_args()
+    parser.add_argument("--mean", nargs=3, type=float, default=[0.48145466, 0.4578275, 0.40821073])
+    parser.add_argument("--std", nargs=3, type=float, default=[0.26862954, 0.26130258, 0.27577711])
 
-def load_state_dict(model,
-                    state_dict,
-                    prefix='',
-                    ignore_missing="relative_position_index"):
-    missing_keys = []
-    unexpected_keys = []
-    error_msgs = []
-    # copy state_dict so _load_from_state_dict can modify it
-    metadata = getattr(state_dict, '_metadata', None)
-    state_dict = state_dict.copy()
-    if metadata is not None:
-        state_dict._metadata = metadata
+    # Clip processing
 
-    def load(module, prefix=''):
-        local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
-        module._load_from_state_dict(state_dict, prefix, local_metadata, True,
-                                     missing_keys, unexpected_keys, error_msgs)
-        for name, child in module._modules.items():
-            if child is not None:
-                load(child, prefix + name + '.')
+    parser.add_argument("--clip_stride", type=int, default=None,
+                        help="Stride between clips when splitting long videos. If None, uses num_frames (non-overlapping clips)")
 
-    load(model, prefix=prefix)
+    # Misc
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--pooling_method", type=str, default="mean", 
+                        choices=["mean", "cls", "all"],
+                        help="Feature pooling method: 'mean' for mean pooling over tokens, 'cls' for first token only, 'all' to save all tokens")
 
-    warn_missing_keys = []
-    ignore_missing_keys = []
-    for key in missing_keys:
-        keep_flag = True
-        for ignore_key in ignore_missing.split('|'):
-            if ignore_key in key:
-                keep_flag = False
-                break
-        if keep_flag:
-            warn_missing_keys.append(key)
-        else:
-            ignore_missing_keys.append(key)
+    # 分布式相关参数
+    parser.add_argument("--rank", type=int, default=0)
+    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument("--world_size", type=int, default=1)
+    parser.add_argument("--global_rank", type=int, default=0)
 
-    missing_keys = warn_missing_keys
+    return parser.parse_args()
 
-    if len(missing_keys) > 0:
-        print("Weights of {} not initialized from pretrained model: {}".format(
-            model.__class__.__name__, missing_keys))
-    if len(unexpected_keys) > 0:
-        print("Weights from pretrained model not used in {}: {}".format(
-            model.__class__.__name__, unexpected_keys))
-    if len(ignore_missing_keys) > 0:
-        print(
-            "Ignored weights of {} not initialized from pretrained model: {}".
-            format(model.__class__.__name__, ignore_missing_keys))
-    if len(error_msgs) > 0:
-        print('\n'.join(error_msgs))
-
-# def load_finetune_checkpoint(args, video_model):
-    if args.model_type == 'internvideo_v1':
-        checkpoint = torch.load(args.ckpt_path, map_location='cpu')
-        if 'state_dict' in checkpoint.keys():
-            checkpoint = checkpoint['state_dict']
-
-        print("\nLoad ckpt from %s" % args.ckpt_path)
-        checkpoint_model = None
-        for model_key in args.model_key.split('|'):
-            if model_key in checkpoint:
-                checkpoint_model = checkpoint[model_key]
-                print("Load state_dict by model_key = %s" % model_key)
-                break
-        if checkpoint_model is None:
-            checkpoint_model = checkpoint
-        state_dict = video_model.state_dict()
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[
-                    k].shape != state_dict[k].shape:
-                if checkpoint_model[k].shape[0] == 710:
-                    if args.data_set == 'k400':
-                        print('Convert to k400 class head')
-                        checkpoint_model[k] = checkpoint_model[k][:400]
-                    elif args.data_set == 'k600':
-                        print('Convert to k600 class head')
-                        label_map_path = '/mnt/petrelfs/huangbingkun/data/mix_kinetics/label_mixto600.json'
-                        label_map = json.load(open(label_map_path))
-                        checkpoint_model[k] = checkpoint_model[k][label_map]
-                    elif args.data_set == 'k700':
-                        print('Convert to k700 class head')
-                        label_map_path = '/mnt/petrelfs/huangbingkun/data/mix_kinetics/label_mixto700.json'
-                        label_map = json.load(open(label_map_path))
-                        checkpoint_model[k] = checkpoint_model[k][label_map]
-                    else:
-                        print(f"Removing key {k} from pretrained checkpoint")
-                        del checkpoint_model[k]
-                else:
-                    print(f"Removing key {k} from pretrained checkpoint")
-                    del checkpoint_model[k]
-
-        all_keys = list(checkpoint_model.keys())
-        new_dict = OrderedDict()
-        for key in all_keys:
-            if key.startswith('backbone.'):
-                new_dict[key[9:]] = checkpoint_model[key]
-            elif key.startswith('encoder.'):
-                new_dict[key[8:]] = checkpoint_model[key]
-            else:
-                new_dict[key] = checkpoint_model[key]
-        checkpoint_model = new_dict
-
-        # interpolate position embedding
-        if 'pos_embed' in checkpoint_model:
-            pos_embed_checkpoint = checkpoint_model['pos_embed']
-            embedding_size = pos_embed_checkpoint.shape[-1]  # channel dim
-            num_patches = video_model.patch_embed.num_patches  #
-            num_extra_tokens = video_model.pos_embed.shape[-2] - num_patches  # 0/1
-
-            # height (== width) for the checkpoint position embedding
-            orig_size = int(
-                ((pos_embed_checkpoint.shape[-2] - num_extra_tokens) //
-                (args.num_frames // video_model.patch_embed.tubelet_size))**0.5)
-            # height (== width) for the new position embedding
-            new_size = int(
-                (num_patches //
-                (args.num_frames // video_model.patch_embed.tubelet_size))**0.5)
-            # class_token and dist_token are kept unchanged
-            if orig_size != new_size:
-                print("Position interpolate from %dx%d to %dx%d" %
-                    (orig_size, orig_size, new_size, new_size))
-                extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-                # only the position tokens are interpolated
-                pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-                # B, L, C -> BT, H, W, C -> BT, C, H, W
-                pos_tokens = pos_tokens.reshape(
-                    -1, args.num_frames // video_model.patch_embed.tubelet_size,
-                    orig_size, orig_size, embedding_size)
-                pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size,
-                                                embedding_size).permute(
-                                                    0, 3, 1, 2)
-                pos_tokens = torch.nn.functional.interpolate(
-                    pos_tokens,
-                    size=(new_size, new_size),
-                    mode='bicubic',
-                    align_corners=False)
-                # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
-                pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(
-                    -1, args.num_frames // video_model.patch_embed.tubelet_size,
-                    new_size, new_size, embedding_size)
-                pos_tokens = pos_tokens.flatten(1, 3)  # B, L, C
-                new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-                checkpoint_model['pos_embed'] = new_pos_embed
-        model_dict = video_model.state_dict()
-        
-        load_state_dict(video_model,
-                            checkpoint_model)
-    elif args.model_type == 'videomae':
-        checkpoint_model = torch.load(args.ckpt_path, map_location='cpu')
-        print("Load ckpt from %s" % args.ckpt_path)
-        for key in ['state_dict', 'model', 'module']:      # 兼容各种保存方式
-            if key in checkpoint_model:
-                checkpoint_model = checkpoint_model[key]
-                break
-        # print(checkpoint_model.keys())
-        checkpoint_model = {
-        k.replace("module.", ""): v for k, v in checkpoint_model.items()
-    } 
-        load_state_dict(video_model, checkpoint_model)
-        # video_model.load_state_dict(checkpoint_model, strict=True)
-    
-    return video_model
- 
-# ---------- 3. 数据集特定滑窗 ---------- #
-def get_start_idx_range(name):
-    if name.upper() == 'THUMOS':
-        return lambda n_frames: range(0, n_frames - 15, 4)   # 16×4
-    if name.upper() == 'FINEACTION':
-        return lambda n_frames: range(0, n_frames - 15, 16)  # 16×16
-    if name.upper() == 'HACS':
-        return lambda n_frames: range(0, n_frames - 15, 16)  # 16×16    
-    if name.upper() == 'CHARADES':                           # ★ 新增 ★
-        # 30 fps, clip_len=16, stride=4, interval=1
-        return lambda n_frames: range(0, n_frames - 15, 4)
-    raise NotImplementedError(name)
-
-def safe_get_batch(path, indices):
-    try:
-        vr = VideoReader(path, ctx=cpu(0), num_threads=1)  # 单线程
-        return vr.get_batch(indices)  # (N, H, W, 3), uint8
-    except Exception as e:
-        # Fallback: OpenCV
-        import cv2
-        cap = cv2.VideoCapture(path)
-        frames = []
-        for idx in indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-            ok, frame = cap.read()
-            if not ok:
-                raise RuntimeError(f"Fallback failed on frame {idx} for {path}: {e}")
-            frame = frame[:, :, ::-1]  # BGR->RGB
-            frames.append(frame)
-        cap.release()
-        arr = np.stack(frames, axis=0)
-        return torch.from_numpy(arr)
-
-def build_model(weight_path: str, model_name: str, model_type: str):
-
-    if model_type == 'dinov3':
-        from transformers import AutoModel
-        import torch
-        processor = None
-        model = AutoModel.from_pretrained(
-            weight_path,
-            trust_remote_code=True,
-            local_files_only=True,   # 只用本地权重，避免联网
-            torch_dtype=torch.float32
-        )
-    elif model_type == 'llavavit':
-        from timm.models import create_model
-        import model_factory
-        # from model_factory.vit_preview_v0 import llava_vit_base_ln
-        import torch
-        model = create_model("llava_vit_base_ln", pretrained=False)
-        # model = llava_vit_base_ln()
-        state_dict = torch.load(weight_path, map_location="cpu")
-        state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
-        model.load_state_dict(state_dict, strict=False)
-        processor = None
-
-    return model, processor
-
-def generate_missing_txt(args):
-    missing_list = []
-
-    anno_database = json.load(open(args.anno_file))["database"]
-    for video_name in tqdm.tqdm(list(anno_database.keys())):
-        file_path = os.path.join(args.save_path, f"{args.prefix}{video_name}{args.suffix}.{args.ext}")
-
-        if not os.path.exists(file_path):
-            missing_list.append(video_name)
-
-    saved_path = os.path.join(f"{args.save_path}", "missing_files.txt")
-    with open(saved_path, "w") as f:
-        f.write("\n".join(missing_list))
-
-    print(
-        f"Total {len(anno_database.keys())} videos/features in dataset, "
-        f"missing {len(missing_list)} videos/features."
-    )
-    print(f"Missing file has been saved in {saved_path}")
-
-def extract_by_dinov3(clip_batch, model, device):
-    """逐帧前向，支持多种返回格式；最后对时间维做平均池化。"""
-    stacked = torch.stack(clip_batch, dim=0).to(device, non_blocking=True)  # (B, C, T, H, W) with non-blocking
-    outputs = []
-    for frame_idx in range(stacked.shape[2]):
-        frame = stacked[:, :, frame_idx, :, :]  # (B, C, H, W)
-        with torch.no_grad():
-            out = model(frame)
-        # 兼容不同模型输出
-        if hasattr(out, "pooler_output") and out.pooler_output is not None:
-            feat = out.pooler_output
-        elif hasattr(out, "last_hidden_state"):
-            feat = out.last_hidden_state.mean(1)  # CLS 不一定有，取 token 平均
-        elif isinstance(out, (tuple, list)) and len(out) > 0 and torch.is_tensor(out[0]):
-            feat = out[0]
-        else:
-            raise RuntimeError("Unexpected DINOv3 model output; cannot extract features.")
-        outputs.append(feat)
-    return torch.stack(outputs, dim=1).mean(1)  # (B, D)
 
 def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
     """
@@ -350,7 +97,7 @@ def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.T
     frame_indices_float = frame_indices.float()  # [B, seq_len]
 
     # 插值公式: new_idx = (old_idx / (total_frames - 1)) * (target_frames - 1)
-    # 处理 total_frames = 1 的情况files.trimTrailingWhitespace: truefiles.trimTrailingWhitespace: tru
+    # 处理 total_frames = 1 的情况
     total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
     interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
 
@@ -362,373 +109,374 @@ def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.T
 
     return interpolated_indices
 
-def extract_by_llavavit(
-    videos,
-    model,
-    device,
-    frame_indices=None,
-    total_frames=None,
-):
+
+def get_feature(
+    args: argparse.Namespace,
+    videos: torch.Tensor,
+    model: nn.Module,
+    frame_indices: torch.Tensor = None,
+    total_frames: torch.Tensor = None,
+) -> torch.Tensor:
     """
-    使用 llavavit 提取视频特征。
-    输入:
-        videos: (B, C, T, H, W)
-        frame_indices: (B, seq_len)，可选
-        total_frames: (B,)，可选
-        args.frames_token_num: 每帧 token 数
-        args.target_frames: 目标帧数（例如 64）
-    输出:
-        (B, D) 的视频级特征（来自 enc_out['head_output']）
+    获取特征，支持视频及图片输入。
+
+    Args:
+        args: 参数配置
+        videos: 视频数据 [B, C, T, H, W] 或图片数据 [B, C, H, W]
+        model: 模型
+        frame_indices: 视频帧索引 [B, seq_len]，用于 llava_vit_sampling
+        total_frames: 每个视频的总帧数 [B]
     """
-    # 使用 non_blocking 传输加速数据移动
-    videos = torch.stack(videos, dim=0).to(device, non_blocking=True)
-    bs, C, T, H, W = videos.shape
-    # print(bs, C, T, H, W) # 20 3 16 224 224
-    frame_tokens = 196
-    target_frames = 64
+    def video_to_images(videos: torch.Tensor) -> torch.Tensor:
+        """
+        将视频 [B, C, T, H, W] 展开为图片序列 [B*T, C, H, W]
+        """
+        B, C, T, H, W = videos.shape
+        images = videos.permute(0, 2, 1, 3, 4).reshape(-1, C, H, W)  # [B*T, C, H, W]
+        return images
 
-    # # ========================
-    # # 1. 构造 padded_videos 和 visible_index
-    # # ========================
-    # if frame_indices is not None and total_frames is not None:
-    #     # ---- 有外部传入的 frame_indices 情况：用你原来的插值逻辑 ----
-    #     interpolated_indices = interpolate_frame_indices(
-    #         frame_indices,
-    #         total_frames.view(-1),
-    #         target_frames
-    #     )  # [B, seq_len]
+    list_vit_single_image = [
+        "clip",
+        "siglip",
+        "siglip2",
+        "dinov2",
+        "dinov3",
+        "metaclip",
+        "llava_vit_si",
+        "aimv2"
+    ]
+    if args.model_family in list_vit_single_image:
+        # ===> 专门图片分支 <===
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                # 如果是视频输入，将其转化为图片
+                B, C, T, H, W = videos.shape
+                if videos.dim() == 5:  # 视频分支 [B, C, T, H, W]
+                    videos = video_to_images(videos)
 
-    #     padded_videos = torch.zeros(
-    #         bs, C, target_frames, H, W,
-    #         device=device,
-    #         dtype=videos.dtype,
-    #     )
-    #     seq_len = frame_indices.shape[1]
-    #     frame_idx_expanded = (
-    #         interpolated_indices.view(bs, 1, seq_len, 1, 1)
-    #         .expand(bs, C, seq_len, H, W)
-    #     )
-    #     padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
+                if videos.dim() == 4:  # 检测为图片分支 [B, C, H, W]
+                    hidden_states = model(videos)
+                    if isinstance(hidden_states, dict) and "visible_embeddings" in hidden_states:
+                        hidden_states = hidden_states["visible_embeddings"]
 
-    #     per = torch.arange(frame_tokens, device=device)
-    #     visible_index = (
-    #         interpolated_indices.unsqueeze(-1) * frame_tokens + per
-    #     ).reshape(bs, -1)
-    #     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
-
-    # else:
-    #     # ---- 没有 frame_indices / total_frames：在 T 维均匀取 target_frames 帧 ----
-    #     # linspace 在 [0, T-1] 上均匀取 target_frames 个点，然后四舍五入到最近的帧索引
-    #     # 即使 T < target_frames 也没关系，只是会有重复索引
-    #     base = torch.linspace(
-    #         0, max(T - 1, 0),
-    #         steps=target_frames,
-    #         device=device
-    #     )  # (target_frames,)
-    #     sampled_indices = base.round().long()  # (target_frames,)
-    #     # 扩展到 batch 维度：(B, target_frames)
-    #     sampled_indices = sampled_indices.unsqueeze(0).expand(bs, target_frames)
-
-    #     # 构造 padded_videos
-    #     padded_videos = torch.zeros(
-    #         bs, C, target_frames, H, W,
-    #         device=device,
-    #         dtype=videos.dtype,
-    #     )
-
-    #     # scatter 用的 index：(B, C, target_frames, H, W)
-    #     frame_idx_expanded = (
-    #         sampled_indices.view(bs, 1, target_frames, 1, 1)
-    #         .expand(bs, C, target_frames, H, W)
-    #     )
-    #     # 源视频只到 T，所以从原 videos 按 sampled_indices 取
-    #     # 先 gather 出 (B, C, target_frames, H, W) 的对齐帧
-    #     gathered = videos.gather(
-    #         dim=2,
-    #         index=frame_idx_expanded.clamp_max(T - 1)
-    #     )
-    #     # 直接赋值即可（不需要 scatter 一次）
-    #     padded_videos = gathered
-
-    #     # 计算 visible_index
-    #     per = torch.arange(frame_tokens, device=device)  # (frame_tokens,)
-    #     visible_index = (
-    #         sampled_indices.unsqueeze(-1) * frame_tokens + per
-    #     ).reshape(bs, -1)
-    #     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
-
-    # ========================
-    # 2. 前向：用 head_output 而不是 visible_embeddings
-    # ========================
-    # with torch.no_grad():
-    #     enc_out = model(padded_videos, visible_index, mask_ratio=None)
-
-    with torch.no_grad():
-        enc_out = model(videos, None, None)
-
-    # 优先用 head_output
-    if "head_output" in enc_out:
-        outputs = enc_out["head_output"]
-    else:
-        # 兜底：如果没有 head_output，就退回原来的 visible_embeddings
-        if "visible_embeddings" not in enc_out:
-            raise RuntimeError(
-                f"Unexpected llavavit enc_out keys: {list(enc_out.keys())}"
-            )
-        outputs = enc_out["visible_embeddings"]
-
-    # ========================
-    # 3. 池化成 (B, D)
-    # ========================
-    if outputs.dim() == 3:
-        feats = outputs.mean(1)  # (B, D)
-    else:
-        feats = outputs  # 已经是 (B, D)
-
-    return feats
-
-
-
-import time
-
-class ClipPrefetcher:
-    """
-    预取clip数据，在后台线程中加载和预处理数据
-    实现数据加载与GPU计算的流水线并行
-    """
-    def __init__(self, vr, clip_starts, transform, prefetch_size=4):
-        self.vr = vr
-        self.clip_starts = clip_starts
-        self.transform = transform
-        self.queue = Queue(maxsize=prefetch_size)
-        self.thread = None
-        self.stop_flag = threading.Event()
-        
-    def _load_worker(self):
-        """后台线程：持续加载和预处理clip"""
-        try:
-            for st in self.clip_starts:
-                if self.stop_flag.is_set():
-                    break
-                # 读取和预处理
-                frame_nd = self.vr.get_batch(np.arange(st, st + CLIP_LENGTH)).asnumpy()
-                clip = self.transform(torch.from_numpy(frame_nd))
-                # 放入队列，如果队列满则阻塞
-                self.queue.put((st, clip))
-        except Exception as e:
-            self.queue.put(('ERROR', e))
-        finally:
-            self.queue.put(('DONE', None))
-    
-    def start(self):
-        """启动预取线程"""
-        self.thread = threading.Thread(target=self._load_worker, daemon=True)
-        self.thread.start()
-    
-    def get(self):
-        """获取下一个预处理好的clip"""
-        return self.queue.get()
-    
-    def stop(self):
-        """停止预取"""
-        self.stop_flag.set()
-        if self.thread:
-            self.thread.join()
-
-@torch.no_grad()
-def extract_feature(rank, world_size, args):
-    # 绑定 GPU
-    local_rank = rank
-    gpu_num = local_rank
-    torch.cuda.set_device(local_rank)
-    device = torch.device(f"cuda:{local_rank}")
-    
-    # Enable TF32 for better performance on Ampere GPUs (A100)
-    if torch.cuda.is_available() and torch.cuda.get_device_capability(device)[0] >= 8:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        print(f"[R{rank}] Enabled TF32 for faster matrix operations on Ampere GPU")
-
-    model, processor = build_model(args.ckpt_path, args.model_name, args.model_type)
-    Path(args.save_path).mkdir(parents=True, exist_ok=True)
-    get_clip_range = get_start_idx_range(args.data_set)
-
-    transform = transforms.Compose([
-        ToFloatTensorInZeroOne(),
-        Resize((224, 224)),
-    ])
-
-    model = model.to(device)
-    model.eval()
-    
-    # Enable mixed precision for faster inference
-    use_amp = torch.cuda.is_available() and torch.cuda.get_device_capability(device)[0] >= 7
-    
-    # Try to compile model for optimization (PyTorch 2.0+)
-    if hasattr(torch, 'compile'):
-        try:
-            model = torch.compile(model, mode='max-autotune')
-            print(f"[R{rank}] Model compiled with torch.compile for faster inference")
-        except Exception as e:
-            print(f"[R{rank}] torch.compile failed: {e}, continuing without compilation")
-
-    # 所有视频按固定顺序分片给不同 rank
-    vid_list = sorted(os.listdir(args.data_path))
-    vid_list = vid_list[rank::world_size]
-
-    # Increase batch size significantly for better GPU utilization
-    BATCH_CLIPS = 64  # Increased from 20 to 64
-    NUM_CPU = 64  # Increased to match available CPU threads
-
-    # 全局统计（看整个进程级别的占比）
-    total_read_time = 0.0  # 视频初始化时间
-    total_infer_time = 0.0
-    total_save_time = 0.0
-    total_videos = 0
-
-    for idx, vid_name in enumerate(vid_list):
-        t_vid_start = time.perf_counter()
-
-        out_npy = os.path.join(args.save_path, f'{Path(vid_name).stem}.npy')
-        if os.path.isfile(out_npy):
-            print(f"[R{rank}] ✔ 已有特征，跳过 {vid_name}")
-            continue
-
-        video_path = os.path.join(args.data_path, vid_name)
-        print(f"[R{rank}] 开始处理视频: {video_path}")
-
-        # 每个视频内部的统计
-        read_time = 0.0  # 视频初始化时间
-        infer_time = 0.0
-        save_time = 0.0
-        num_clips = 0
-
-        try:
-            # 打开视频计时 - 增加线程数以加速解码
-            t0 = time.perf_counter()
-            vr = VideoReader(video_path, ctx=cpu(0), num_threads=NUM_CPU)  # 使用更多线程
-            clip_starts = list(get_clip_range(len(vr)))  # 只算一次
-            t1 = time.perf_counter()
-            read_time += (t1 - t0)
-
-            feat_bank = []
-            clip_batch = []
-            
-            # 使用预取器实现流水线并行
-            # prefetch_size=8 表示最多预先准备8个clip在队列中
-            prefetcher = ClipPrefetcher(vr, clip_starts, transform, prefetch_size=8)
-            prefetcher.start()
-
-            while True:
-                # 从预取器获取clip - 时间统计已在预取器内部完成
-                result = prefetcher.get()
-                
-                if result[0] == 'DONE':
-                    break
-                elif result[0] == 'ERROR':
-                    raise result[1]
-                
-                st, clip = result
-                # Note: read_time and transform_time are now overlapped with GPU computation
-                # The timing here represents only the queue wait time
-                
-                clip_batch.append(clip)
-                num_clips += 1
-
-                # batch infer - 使用混合精度加速
-                if len(clip_batch) == BATCH_CLIPS:
-                    torch.cuda.synchronize(device)
-                    t0 = time.perf_counter()
-                    
-                    if use_amp:
-                        with torch.cuda.amp.autocast(dtype=torch.float16):
-                            if args.model_type == 'llavavit':
-                                out = extract_by_llavavit(clip_batch, model, device, None, None)
-                            elif args.model_type == 'dinov3':
-                                out = extract_by_dinov3(clip_batch, model, device)
-                    else:
-                        if args.model_type == 'llavavit':
-                            out = extract_by_llavavit(clip_batch, model, device, None, None)
-                        elif args.model_type == 'dinov3':
-                            out = extract_by_dinov3(clip_batch, model, device)
-                    
-                    torch.cuda.synchronize(device)
-                    t1 = time.perf_counter()
-                    infer_time += (t1 - t0)
-                    feat_bank.append(out.cpu().numpy())
-                    clip_batch = []
-
-            # 停止预取器
-            prefetcher.stop()
-            
-            # 最后一批 infer - 使用混合精度加速
-            if len(clip_batch) > 0:
-                torch.cuda.synchronize(device)
-                t0 = time.perf_counter()
-
-                if use_amp:
-                    with torch.cuda.amp.autocast(dtype=torch.float16):
-                        if args.model_type == 'dinov3':
-                            out = extract_by_dinov3(clip_batch, model, device)
-                        elif args.model_type == 'llavavit':
-                            out = extract_by_llavavit(clip_batch, model, device, None, None)
+                    # hidden_states = hidden_states.view(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
+                    hidden_states = hidden_states.reshape(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
+                    # ===> 新增：sin/cos 时间位置编码（2行代码）<===
+                    pos = torch.arange(T, device=videos.device).unsqueeze(1) * torch.exp(torch.arange(0, args.embedding_size, 2, device=videos.device) * (-math.log(10000.0) / args.embedding_size))  # [T, D/2]
+                    temporal_pos = torch.stack([torch.sin(pos), torch.cos(pos)], dim=2).flatten(1)[:, :args.embedding_size]  # [T, D]
+                    hidden_states = hidden_states.view(B, T, -1, args.embedding_size) + temporal_pos.unsqueeze(0).unsqueeze(2)  # 加到每帧的 tokens 上
+                    hidden_states = hidden_states.view(B, -1, args.embedding_size)  # [B, T*tokens_per_frame, D]
+                    return hidden_states
                 else:
-                    if args.model_type == 'dinov3':
-                        out = extract_by_dinov3(clip_batch, model, device)
-                    elif args.model_type == 'llavavit':
-                        out = extract_by_llavavit(clip_batch, model, device, None, None)
+                    raise ValueError("SigLIP2 only supports image input with 4 dimensions [B, C, H, W].")
 
-                torch.cuda.synchronize(device)
-                t1 = time.perf_counter()
-                infer_time += (t1 - t0)
+    elif args.model_family == "llava_vit_sampling":
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                bs, C, T, H, W = videos.shape
+                device = videos.device
+                frame_tokens = args.frames_token_num  # 每帧的 token 数量
+                target_frames = args.target_frames  # 目标帧数，默认 64
 
-                feat_bank.append(out.cpu().numpy())
-                clip_batch = []
+                if frame_indices is not None and total_frames is not None:
+                    # ===> 插值帧索引到 target_frames <===
+                    interpolated_indices = interpolate_frame_indices(
+                        frame_indices,
+                        total_frames.view(-1),
+                        target_frames
+                    )  # [B, seq_len]
+                    # ===> 创建 target_frames 帧的空白视频 <===
+                    padded_videos = torch.zeros(bs, C, target_frames, H, W, device=device, dtype=videos.dtype)
 
-            # ====== 你的保存+打印逻辑（加上计时） ======
-            torch.cuda.synchronize(device)
-            t0 = time.perf_counter()
+                    # ===> 将原始帧放入插值后的对应位置 <===
+                    seq_len = frame_indices.shape[1]
 
-            features = np.vstack(feat_bank)
-            np.save(out_npy, features)
+                    # 准备 scatter 的索引
+                    frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
 
-            t1 = time.perf_counter()
-            save_time += (t1 - t0)
+                    # 将视频帧放入对应位置
+                    padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
 
-            print(f"GPU:{gpu_num}:[{idx+1}/{len(vid_list)}] {vid_name} -> {out_npy}")
+                    # ===> 计算 visible_index (基于 target_frames) <===
+                    per = torch.arange(frame_tokens, device=device)
+                    visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
+                    visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
-            t_vid_end = time.perf_counter()
-            total_videos += 1
+                    enc_out = model(padded_videos, visible_index)
+                    if hasattr(enc_out, "last_hidden_state"):
+                        outputs = enc_out.last_hidden_state
+                    else:
+                        outputs = enc_out["visible_embeddings"]
 
-            # 全局累加
-            total_read_time      += read_time
-            total_infer_time     += infer_time
-            total_save_time      += save_time
+                else:
+                    raise
 
-            # 打印当前视频耗时分布
-            print(
-                f"[R{rank}] {vid_name} 耗时 {t_vid_end - t_vid_start:.2f}s | "
-                f"初始化 {read_time:.2f}s | "
-                f"前向 {infer_time:.2f}s | 保存 {save_time:.2f}s | clips={num_clips}"
-                f" (注: 数据加载和预处理已与GPU计算流水线并行)"
-            )
+                return outputs
 
-        except Exception as e:
-            print(f"[R{rank}] raise error: {e}, the error video is {vid_name}")
-            continue
-
-    # ====== 最后打印本 rank 的总统计 ======
-    if total_videos > 0:
-        print(
-            f"[R{rank}] 总计处理 {total_videos} 个视频 | "
-            f"初始化 {total_read_time:.2f}s | "
-            f"前向 {total_infer_time:.2f}s | 保存 {total_save_time:.2f}s"
-            f" (注: 数据加载和预处理时间已与GPU计算重叠)"
-        )
+    raise ValueError(f"Unsupported model_family: {args.model_family}")
 
 
-if __name__ == '__main__':
-    args = get_args()
-    world_size = int(args.world_size)
-    mp.spawn(extract_feature, nprocs=world_size, args=(world_size, args), join=True)
-    generate_missing_txt(args)
+def get_model(args: argparse.Namespace) -> nn.Module:
+    model = create_model(args.model_name, pretrained=False)
+    if args.model_family in ["llava_vit_sampling"]:
+        state_dict = torch.load(args.model_weight, map_location="cpu")
+        state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=True)
+    return model
+
+
+
+def split_video_into_clips(total_frames: int, clip_length: int, stride: int = None) -> List[List[int]]:
+    """Split video frame indices into clips.
+    
+    Args:
+        total_frames: Total number of frames in the video
+        clip_length: Number of frames per clip
+        stride: Stride between clips. If None, uses clip_length (non-overlapping)
+    
+    Returns:
+        List of frame index lists for each clip
+    """
+    if stride is None:
+        stride = clip_length
+    
+    if total_frames == 0:
+        return []
+    
+    clips = []
+    start = 0
+    while start < total_frames:
+        end = min(start + clip_length, total_frames)
+        # Get frame indices for this clip
+        indices = list(range(start, end))
+        # Pad if necessary
+        if len(indices) < clip_length and len(indices) > 0:
+            indices += [indices[-1]] * (clip_length - len(indices))
+        elif len(indices) == 0:
+            # Edge case: if somehow we have no indices, use the last frame
+            indices = [total_frames - 1] * clip_length
+        clips.append(indices)
+        start += stride
+        
+        # Stop if we've covered all frames
+        if end >= total_frames:
+            break
+    
+    return clips
+
+
+def extract_features_from_dali(
+    args: argparse.Namespace,
+    model: nn.Module,
+    device: torch.device,
+    dataloader,
+) -> None:
+    """Extract features from videos using DALI dataloader"""
+    model.to(device).eval()
+    
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if args.rank == 0:
+        print(f"Starting feature extraction with DALI dataloader...")
+        print(f"Output directory: {output_dir}")
+        print(f"Processing mode: DALI standard frame sampling")
+    
+    # We need to track video names for per-video output
+    # Since DALI doesn't provide video paths directly, we'll use a counter and load the CSV again
+    csv_path = os.path.join(args.data_root, args.data_csv_path) if not os.path.isabs(args.data_csv_path) else args.data_csv_path
+    video_names = []
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(",")
+                offset_path = parts[0]
+                video_name = Path(offset_path).stem
+                video_names.append(video_name)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Data list file not found at: {csv_path}")
+    
+    # Shard video names to match DALI's sharding
+    if args.world_size > 1:
+        shard_size = len(video_names) // args.world_size
+        start_idx = args.rank * shard_size
+        if args.rank == args.world_size - 1:
+            end_idx = len(video_names)
+        else:
+            end_idx = start_idx + shard_size
+        video_names = video_names[start_idx:end_idx]
+    
+    total_processed = 0
+    batch_count = 0
+    
+    for batch in dataloader:
+        videos = batch["videos"].to(device, non_blocking=True)
+        indices = batch["indices"].to(device, non_blocking=True)
+        total_frames = batch["total_frames"].to(device, non_blocking=True)
+        batch_size = videos.size(0)
+        
+        # Extract features for each video in the batch
+        for i in range(batch_size):
+            video = videos[i:i+1]  # Keep batch dimension [1, C, T, H, W]
+            video_indices = indices[i:i+1]
+            video_total_frames = total_frames[i:i+1]
+            
+            # Get video dimensions
+            _, C, T, H, W = video.shape
+            
+            # Model expects args.num_frames (default 8) frames at a time, so split T frames into chunks
+            chunk_size = args.num_frames
+            num_chunks = (T + chunk_size - 1) // chunk_size  # Ceiling division
+            
+            # List to collect features from all chunks
+            chunk_features = []
+            
+            # Process each chunk of args.num_frames (typically 8) frames
+            for chunk_idx in range(num_chunks):
+                start_idx = chunk_idx * chunk_size
+                end_idx = min(start_idx + chunk_size, T)
+                
+                # Extract chunk [1, C, chunk_size, H, W]
+                video_chunk = video[:, :, start_idx:end_idx, :, :]
+                
+                # Pad if necessary (last chunk might have fewer than chunk_size frames)
+                actual_frames = end_idx - start_idx
+                if actual_frames < chunk_size:
+                    # Repeat last frame to make it chunk_size frames
+                    padding_needed = chunk_size - actual_frames
+                    last_frame = video_chunk[:, :, -1:, :, :]  # [1, C, 1, H, W]
+                    padding = last_frame.repeat(1, 1, padding_needed, 1, 1)  # [1, C, padding_needed, H, W]
+                    video_chunk = torch.cat([video_chunk, padding], dim=2)  # [1, C, chunk_size, H, W]
+                
+                # Extract corresponding indices for this chunk
+                chunk_indices = video_indices[:, start_idx:end_idx]
+                if actual_frames < chunk_size:
+                    # Repeat last index for padding
+                    last_index = chunk_indices[:, -1:]
+                    padding_indices = last_index.repeat(1, padding_needed)
+                    chunk_indices = torch.cat([chunk_indices, padding_indices], dim=1)
+                
+                # Extract features for this chunk
+                chunk_feat = get_feature(
+                    args, 
+                    video_chunk, 
+                    model, 
+                    frame_indices=chunk_indices, 
+                    total_frames=video_total_frames
+                )
+                
+                # Apply pooling method per chunk
+                if chunk_feat.dim() == 3:
+                    if args.pooling_method == "mean":
+                        chunk_feat = chunk_feat.mean(dim=1)  # [1, D]
+                    elif args.pooling_method == "cls":
+                        chunk_feat = chunk_feat[:, 0, :]  # [1, D]
+                    elif args.pooling_method == "all":
+                        pass  # Keep [1, seq_len, D]
+                
+                chunk_features.append(chunk_feat)
+            
+            # Stack all chunk features: [num_chunks, D] or [num_chunks, seq_len, D]
+            if chunk_features[0].dim() == 2:
+                # Pooled features: [num_chunks, D]
+                feats = torch.cat(chunk_features, dim=0)  # [num_chunks, D]
+            else:
+                # All token features: [num_chunks, seq_len, D]
+                feats = torch.cat(chunk_features, dim=0)  # [num_chunks, seq_len, D]
+            
+            # Convert to numpy
+            feats = feats.float().cpu().numpy()
+            
+            # Get video name
+            video_idx = batch_count * args.batch_size + i
+            if video_idx < len(video_names):
+                video_name = video_names[video_idx]
+            else:
+                video_name = f"video_{total_processed}"
+            
+            # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
+            feature_file = output_dir / f"{video_name}.npy"
+            np.save(feature_file, feats)
+            
+            total_processed += 1
+        
+        batch_count += 1
+        
+        # if args.rank == 0 and batch_count % 10 == 0:
+        #     print(f"Processed {total_processed} videos, batch {batch_count}")
+    
+    if args.rank == 0:
+        print(f"Feature extraction completed! Processed {total_processed} videos")
+
+
+def main() -> None:
+    args = parse_args()
+
+    try:
+        args.rank = int(os.environ["RANK"])
+        args.local_rank = int(os.environ["LOCAL_RANK"])
+        args.world_size = int(os.environ["WORLD_SIZE"])
+        distributed.init_process_group("nccl")
+    except KeyError:
+        args.rank = 0
+        args.local_rank = 0
+        args.world_size = 1
+        distributed.init_process_group(backend="nccl", init_method="tcp://127.0.0.1:12584", rank=args.rank, world_size=args.world_size)
+    torch.cuda.set_device(args.local_rank)
+    device = torch.device(args.local_rank)
+    args.global_rank = args.rank
+
+    if args.rank == 0:
+        print("Create data loaders...")
+
+    # Set normalization based on model family
+    if args.model_family in ["siglip", "siglip2"]:
+        args.mean = [0.5, 0.5, 0.5]
+        args.std = [0.5, 0.5, 0.5]
+    if args.model_family in ["dinov2", "dinov3"]:
+        args.mean = [0.485, 0.456, 0.406]
+        args.std = [0.229, 0.224, 0.225]
+
+    # Load model
+    model = get_model(args)
+
+    # Set sequence_length default if not provided
+    if args.sequence_length is None:
+        args.sequence_length = args.num_frames
+    
+    if args.rank == 0:
+        print("Using DALI dataloader for standard frame sampling")
+        print(f"Loading {args.sequence_length} frames per video, processing in chunks of {args.num_frames}")
+    
+    # Create DALI dataloader
+    dataloader = get_dali_dataloader(
+        data_root_path=args.data_root,
+        data_csv_path=os.path.join(args.data_root, args.data_csv_path) if not os.path.isabs(args.data_csv_path) else args.data_csv_path,
+        mode="val",
+        batch_size=args.batch_size,
+        sequence_length=args.sequence_length,
+        input_size=args.input_size,
+        short_side_size=args.short_side_size,
+        mean=args.mean,
+        std=args.std,
+        dali_num_threads=args.dali_num_threads,
+        dali_py_num_workers=args.dali_py_num_workers,
+        decord_num_threads=args.decord_num_threads,
+        seed=args.seed,
+        feature_extract = True,
+    )
+    
+    # Extract features using DALI dataloader
+    extract_features_from_dali(args, model, device, dataloader)
+
+    if args.rank == 0:
+        print("\n" + "=" * 60)
+        print("Extraction completed!")
+        print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
