@@ -125,8 +125,11 @@ class HEVCViTPackingVisionTower(nn.Module):
             # Split the packed output back to individual images
             image_features_list = []
             start_idx = 0
-            for grid in packed_grid_thw:
-                t, h, w = grid[0].item(), grid[1].item(), grid[2].item()
+            # Optimized for distributed training - extract scalars efficiently
+            for i in range(packed_grid_thw.shape[0]):
+                # Extract values with minimal synchronization (single sync per row)
+                thw = packed_grid_thw[i]
+                t, h, w = thw.tolist()
                 seq_len = t * h * w
                 image_features_list.append(image_features[start_idx:start_idx + seq_len])
                 start_idx += seq_len
@@ -179,7 +182,9 @@ class HEVCViTPackingVisionTower(nn.Module):
             
             # Split the packed output back to batch format
             # Calculate num_patches per image
-            t, h_patches, w_patches = packed_grid_thw[0][0].item(), packed_grid_thw[0][1].item(), packed_grid_thw[0][2].item()
+            # Optimized for distributed training - extract scalars efficiently
+            thw = packed_grid_thw[0]
+            t, h_patches, w_patches = thw.tolist()
             num_patches_per_image = t * h_patches * w_patches
             
             # Reshape from [total_seq_len, hidden_size] to [B, num_patches, hidden_size]
