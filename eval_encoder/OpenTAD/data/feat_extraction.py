@@ -16,6 +16,7 @@ from timm.models.layers import trunc_normal_
 from torch import distributed, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
+import sys
 
 # Ensure custom models and layers are registered
 import model_factory
@@ -27,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     # Data
     parser.add_argument("--data_root", default="/video_vit/feilong/TAD-Dataset/charades", help="Root directory of video data")
     parser.add_argument("--data_csv_path", default="charades_videos.csv", help="CSV file with video paths and labels")
-    parser.add_argument("--output_dir", default="/video_vit/feilong/TAD-Dataset/charades/features/llava_vit_base_ln/", help="Output directory for .npy feature files")
+    parser.add_argument("--output_dir", default="/video_vit/feilong/TAD-Dataset/charades/features/llava_vit_base_cls2/", help="Output directory for .npy feature files")
 
     # Model
     parser.add_argument("--model_family", default="llava_vit_sampling")
@@ -203,10 +204,8 @@ def get_feature(
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
                     enc_out = model(padded_videos, visible_index)
-                    if hasattr(enc_out, "last_hidden_state"):
-                        outputs = enc_out.last_hidden_state
-                    else:
-                        outputs = enc_out["visible_embeddings"]
+                    outputs = enc_out["head_output"]
+                    # outputs = enc_out["visible_embeddings"]
 
                 else:
                     raise
@@ -275,7 +274,7 @@ def extract_features_from_dali(
     model.to(device).eval()
     
     # Batch size for processing chunks (larger = better GPU utilization but more memory)
-    CHUNK_BATCH_SIZE = 8
+    CHUNK_BATCH_SIZE = 64
     
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -333,14 +332,14 @@ def extract_features_from_dali(
             
             # Check if feature file already exists
             feature_file = output_dir / f"{video_name}.npy"
-            if feature_file.exists():
-                print(f"Rank {args.rank}: Skipping {video_name}: feature file already exists at {feature_file}")
-                total_processed += 1
-                continue
+            # if feature_file.exists():
+            #     print(f"Rank {args.rank}: Skipping {video_name}: feature file already exists at {feature_file}")
+            #     total_processed += 1
+            #     continue
             
             video = videos[i:i+1]  # Keep batch dimension [1, C, T, H, W]
             video_indices = indices[i:i+1]
-            video_total_frames = total_frames[i:i+1]
+            video_total_frames = total_frames[i:i+1]-1
             
             # Get video dimensions
             _, C, T, H, W = video.shape
@@ -392,7 +391,8 @@ def extract_features_from_dali(
                 batched_chunk_indices = torch.cat(batch_chunk_indices, dim=0)
                 
                 # Replicate total_frames for batch processing
-                batched_total_frames = video_total_frames.repeat(batch_num_chunks)
+                # print(video_total_frames, batch_num_chunks)
+                batched_total_frames = video_total_frames.flatten().repeat(batch_num_chunks)
                 
                 # Extract features for this batch of chunks
                 batch_chunk_feat = get_feature(
@@ -403,14 +403,14 @@ def extract_features_from_dali(
                     total_frames=batched_total_frames
                 )
                 
-                # Apply pooling method per chunk
-                if batch_chunk_feat.dim() == 3:
-                    if args.pooling_method == "mean":
-                        batch_chunk_feat = batch_chunk_feat.mean(dim=1)  # [batch_num_chunks, D]
-                    elif args.pooling_method == "cls":
-                        batch_chunk_feat = batch_chunk_feat[:, 0, :]  # [batch_num_chunks, D]
-                    elif args.pooling_method == "all":
-                        pass  # Keep [batch_num_chunks, seq_len, D]
+                # # Apply pooling method per chunk
+                # if batch_chunk_feat.dim() == 3:
+                #     if args.pooling_method == "mean":
+                #         batch_chunk_feat = batch_chunk_feat.mean(dim=1)  # [batch_num_chunks, D]
+                #     elif args.pooling_method == "cls":
+                #         batch_chunk_feat = batch_chunk_feat[:, 0, :]  # [batch_num_chunks, D]
+                #     elif args.pooling_method == "all":
+                #         pass  # Keep [batch_num_chunks, seq_len, D]
                 
                 # Split batch results back into individual chunks
                 for j in range(batch_num_chunks):
@@ -424,9 +424,14 @@ def extract_features_from_dali(
                 # All token features: [num_chunks, seq_len, D]
                 feats = torch.cat(chunk_features, dim=0)  # [num_chunks, seq_len, D]
             
+            # if "001YG" in str(feature_file):
+            #     print(f"[R{args.rank}] ⚠ 检测到文件名包含 '001YG'，停止处理后续视频！文件是：{feature_file}")
+            #     print(feature_file, feats.shape, total_frames)
+            #     sys.exit(1)
+      
+            # print(feature_file, feats.shape)
             # Convert to numpy
             feats = feats.float().cpu().numpy()
-            
             # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
             np.save(feature_file, feats)
             # print("finish:", feature_file)
