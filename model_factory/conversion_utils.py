@@ -163,7 +163,9 @@ def compute_patch_positions_with_interpolated_temporal(
             # Generate spatial positions for this frame
             for h in range(h_patches):
                 for w in range(w_patches):
-                    positions[idx] = torch.tensor([t_pos, h, w], dtype=torch.long)
+                    positions[idx, 0] = t_pos
+                    positions[idx, 1] = h
+                    positions[idx, 2] = w
                     idx += 1
     
     return positions
@@ -225,6 +227,10 @@ def save_model_with_processor(model, output_dir, image_size=448) -> bool:
     
     Returns:
         bool: True if save was successful, False otherwise
+    
+    Note:
+        This function does not catch exceptions from save operations.
+        Callers should handle filesystem errors (permissions, disk space, etc.)
     """
     if not hasattr(model, "save_pretrained"):
         print("❌ Error: Model does not have save_pretrained method.")
@@ -256,11 +262,16 @@ def move_model_to_device(model, dtype=torch.bfloat16) -> torch.device:
     Move model to CUDA if available, otherwise CPU, and cast to specified dtype.
     
     Args:
-        model: Model to move
+        model: Model to move (modified in-place)
         dtype: Target dtype (default: torch.bfloat16)
     
     Returns:
-        torch.device: The device the model was moved to
+        torch.device: The device the model was moved to (for informational purposes)
+    
+    Note:
+        - Model is modified in-place
+        - Callers should handle CUDA OOM errors or dtype conversion issues
+        - Return value can be used for moving other tensors to the same device
     """
     if torch.cuda.is_available():
         device = torch.device("cuda")
