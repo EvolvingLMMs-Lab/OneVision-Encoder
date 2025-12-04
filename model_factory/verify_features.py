@@ -40,7 +40,7 @@ def load_features(features_dir: str):
     return hf_features, packing_features, metadata
 
 
-def compute_similarity(feat1: np.ndarray, feat2: np.ndarray, name: str):
+def compute_similarity(feat1: np.ndarray, feat2: np.ndarray, name: str, threshold: float = 0.99):
     """Compute and display similarity metrics between two features."""
     print(f"\n--- {name} ---")
     print(f"HF shape:      {feat1.shape}")
@@ -50,9 +50,16 @@ def compute_similarity(feat1: np.ndarray, feat2: np.ndarray, name: str):
     feat1_t = torch.from_numpy(feat1).float()
     feat2_t = torch.from_numpy(feat2).float()
     
-    # Flatten for comparison
-    feat1_flat = feat1_t.flatten(0, -2) if feat1_t.dim() > 2 else feat1_t
-    feat2_flat = feat2_t.flatten(0, -2) if feat2_t.dim() > 2 else feat2_t
+    # Flatten for comparison (preserve last dimension which is feature dimension)
+    if feat1_t.dim() == 2:
+        feat1_flat = feat1_t
+    else:
+        feat1_flat = feat1_t.reshape(-1, feat1_t.shape[-1])
+    
+    if feat2_t.dim() == 2:
+        feat2_flat = feat2_t
+    else:
+        feat2_flat = feat2_t.reshape(-1, feat2_t.shape[-1])
     
     # Handle shape mismatch
     if feat1_flat.shape[0] != feat2_flat.shape[0]:
@@ -78,11 +85,11 @@ def compute_similarity(feat1: np.ndarray, feat2: np.ndarray, name: str):
     print(f"Max Cosine Sim:  {max_cos:.8f}")
     
     # Pass/Fail
-    if min_cos > 0.99:
-        print(f"✅ {name}: PASS (min cosine > 0.99)")
+    if min_cos > threshold:
+        print(f"✅ {name}: PASS (min cosine > {threshold})")
         return True
     else:
-        print(f"❌ {name}: FAIL (min cosine <= 0.99)")
+        print(f"❌ {name}: FAIL (min cosine <= {threshold})")
         return False
 
 
@@ -92,12 +99,15 @@ def main():
     )
     parser.add_argument("--features_dir", type=str, default="./features",
                        help="Directory containing extracted features (default: ./features)")
+    parser.add_argument("--threshold", type=float, default=0.99,
+                       help="Cosine similarity threshold for pass/fail (default: 0.99)")
     
     args = parser.parse_args()
     
     print("=" * 80)
     print("Feature Verification Tool")
     print("=" * 80)
+    print(f"Similarity threshold: {args.threshold}")
     
     # Load features
     print(f"\nLoading features from: {args.features_dir}")
@@ -126,7 +136,7 @@ def main():
     results = {}
     for key in hf_features.keys():
         if key in packing_features:
-            passed = compute_similarity(hf_features[key], packing_features[key], key)
+            passed = compute_similarity(hf_features[key], packing_features[key], key, args.threshold)
             results[key] = passed
         else:
             print(f"\n⚠️  Warning: {key} not found in packing features")

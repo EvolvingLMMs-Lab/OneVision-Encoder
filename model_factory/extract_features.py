@@ -125,8 +125,11 @@ def load_video(video_path: str, num_frames: int, device: torch.device) -> Tuple[
     
     print(f"  Total frames: {total_frames}, FPS: {fps}, Resolution: {width}x{height}")
     
-    # Uniformly sample frames
-    frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+    # Uniformly sample frames (handle single-frame case)
+    if total_frames == 1:
+        frame_indices = np.array([0] * num_frames, dtype=int)
+    else:
+        frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
     print(f"  Sampling frames: {frame_indices.tolist()}")
     
     frames = []
