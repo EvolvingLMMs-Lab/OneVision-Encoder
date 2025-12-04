@@ -127,8 +127,7 @@ class HEVCViTPackingVisionTower(nn.Module):
             start_idx = 0
             # Avoid tensor operations in loop - convert to Python list once
             grid_values = packed_grid_thw.cpu().tolist()  # [[t, h, w], ...] as Python lists
-            for i in range(len(grid_values)):
-                t, h, w = grid_values[i]
+            for t, h, w in grid_values:
                 seq_len = t * h * w
                 image_features_list.append(image_features[start_idx:start_idx + seq_len])
                 start_idx += seq_len
