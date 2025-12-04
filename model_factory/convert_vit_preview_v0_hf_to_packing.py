@@ -31,12 +31,7 @@ import os
 from pathlib import Path
 import timm
 import torch
-import numpy as np
 import torch.nn.functional as F
-from PIL import Image
-import requests
-from io import BytesIO
-from torchvision import transforms
 from transformers import CLIPImageProcessor
 
 # Import model definitions
@@ -48,36 +43,18 @@ try:
         LlavaViTPackingModel,
         compute_patch_positions_from_grid_thw,
     )
+    from model_factory.conversion_utils import (
+        get_real_coco_image,
+        interpolate_frame_indices,
+        get_synthesized_video,
+        compute_patch_positions_with_interpolated_temporal,
+        CLIP_MEAN,
+        CLIP_STD,
+        move_model_to_device,
+        save_model_with_processor,
+    )
 except ImportError:
     print("[Warning] Could not import model definitions directly. Ensure they are in PYTHONPATH.")
-
-# CLIP Specific Constants
-CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
-CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
-
-
-def get_real_coco_image(size=448):
-    """
-    Download a real COCO image and preprocess to Tensor (using CLIP mean/std, Float32)
-    """
-    url = "http://images.cocodataset.org/val2017/000000039769.jpg"  # COCO cat image
-    print(f"--> Downloading real image from {url} (Target Size: {size})...")
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        img = Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception as e:
-        print(f"[Error] Failed to download image: {e}. Generating random noise as fallback.")
-        img = Image.fromarray(np.random.randint(0, 255, (size, size, 3), dtype=np.uint8))
-
-    transform = transforms.Compose([
-        transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=CLIP_MEAN, std=CLIP_STD),
-    ])
-
-    return transform(img).unsqueeze(0)  # [1, 3, size, size]
 
 
 def remap_state_dict_hf_to_packing(hf_state_dict):
@@ -287,62 +264,6 @@ def verify_consistency_packing(hf_model, packing_model, real_image_tensor):
         else:
             print("    ❌ Packing Head:    FAIL")
 
-
-def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
-    """
-    Interpolate frame indices from original video frame count to target frame count.
-    """
-    bs, seq_len = frame_indices.shape
-    device = frame_indices.device
-
-    total_frames_float = total_frames.float().view(bs, 1)
-    frame_indices_float = frame_indices.float()
-
-    total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
-    interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
-    interpolated_indices = torch.round(interpolated_indices).long()
-    interpolated_indices = torch.clamp(interpolated_indices, 0, target_frames - 1)
-
-    return interpolated_indices
-
-
-def get_synthesized_video(real_image_tensor, num_frames=8, size=224):
-    """
-    Create a synthesized video by stacking the real image multiple times.
-    """
-    if real_image_tensor.shape[-1] != size or real_image_tensor.shape[-2] != size:
-        real_image_tensor = F.interpolate(
-            real_image_tensor.float(),
-            size=(size, size),
-            mode='bicubic',
-            align_corners=False
-        )
-
-    video_tensor = real_image_tensor.unsqueeze(2).repeat(1, 1, num_frames, 1, 1)
-    return video_tensor
-
-
-def compute_patch_positions_with_interpolated_temporal(
-    interpolated_indices: torch.Tensor,
-    h_patches: int,
-    w_patches: int,
-    device: torch.device
-) -> torch.Tensor:
-    """
-    Compute patch positions with interpolated temporal positions for RoPE.
-    """
-    bs, num_frames = interpolated_indices.shape
-    patches_per_frame = h_patches * w_patches
-
-    positions = []
-    for b in range(bs):
-        for frame_idx in range(num_frames):
-            t_pos = interpolated_indices[b, frame_idx].item()
-            for h in range(h_patches):
-                for w in range(w_patches):
-                    positions.append([t_pos, h, w])
-
-    return torch.tensor(positions, dtype=torch.long, device=device)
 
 
 def verify_video_consistency_packing(hf_model, packing_model, real_image_tensor, num_frames=8, image_size=224):
@@ -997,16 +918,9 @@ def convert_and_save_packing(hf_model_name, packing_model_name, weight_path, out
         print("    Load OK (No critical missing keys).")
 
     # Move to device
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print(f"\n--> Moving models to {device} and casting to bfloat16...")
-        hf_model.to(device, dtype=torch.bfloat16)
-        packing_model.to(device, dtype=torch.bfloat16)
-    else:
-        device = torch.device("cpu")
-        print(f"\n--> [WARNING] CUDA not available. Tests may be slow.")
-        hf_model.to(device, dtype=torch.bfloat16)
-        packing_model.to(device, dtype=torch.bfloat16)
+    print()
+    move_model_to_device(hf_model)
+    move_model_to_device(packing_model)
 
     print("\n--> Fetching real image for verification (448x448)...")
     real_img = get_real_coco_image(size=448)
@@ -1018,29 +932,8 @@ def convert_and_save_packing(hf_model_name, packing_model_name, weight_path, out
     verify_multi_sample_consistency_packing(hf_model, packing_model, real_img)
 
     if output_dir:
-        print(f"\n--> Saving Packing Model to {output_dir}...")
-        if hasattr(packing_model, "save_pretrained"):
-            packing_model.save_pretrained(output_dir)
-
-            print("    Saving CLIPImageProcessor config...")
-            processor = CLIPImageProcessor(
-                size=448,
-                crop_size=448,
-                image_mean=CLIP_MEAN,
-                image_std=CLIP_STD,
-                resample=3,
-                do_center_crop=True,
-                do_normalize=True,
-                do_resize=True,
-                feature_extractor_type="CLIPFeatureExtractor"
-            )
-            processor.save_pretrained(output_dir)
-
-            print("✅ Packing Model (bf16) and CLIP Processor saved.")
-
+        if save_model_with_processor(packing_model, output_dir, image_size=448):
             verify_saved_model_loading_packing(hf_model, output_dir, real_img)
-        else:
-            print("❌ Error: Target model does not have save_pretrained method.")
 
 
 if __name__ == "__main__":
