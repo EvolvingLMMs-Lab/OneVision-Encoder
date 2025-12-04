@@ -519,8 +519,9 @@ def main() -> None:
         
         # Cleanup distributed process group
         try:
-            distributed.barrier()
-            distributed.destroy_process_group()
+            if distributed.is_initialized():
+                distributed.barrier()
+                distributed.destroy_process_group()
         except Exception as e:
             if args.rank == 0:
                 print(f"Warning: Error during distributed cleanup: {e}")
