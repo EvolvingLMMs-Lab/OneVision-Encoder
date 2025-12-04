@@ -9,7 +9,7 @@ class PECore(nn.Module):
         self,
         ckpt: str = "facebook/PE-Core-B16-224",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        local_files_only: bool = False,
+        local_files_only: bool = True,
     ):
         """
         Initialize PE-Core vision transformer model.
@@ -41,7 +41,7 @@ class PECore(nn.Module):
                 # If no vision_model attribute, use the base model directly
                 self.model = base_model.to(self.device).eval()
         except Exception as e:
-            print(f"Warning: Could not load model with vision_model attribute: {e}")
+            print(f"Warning: Error loading model: {e}")
             # Fallback to loading the entire model
             self.model = AutoModel.from_pretrained(
                 ckpt,
@@ -115,7 +115,9 @@ if __name__ == "__main__":
 
     # Test input: [bs, 3, 224, 224]
     bs = 2
-    test_input = torch.randn(bs, 3, 224, 224, device=model.device)
+    # Get device from the model's internal device attribute
+    device = model.device if hasattr(model, 'device') else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    test_input = torch.randn(bs, 3, 224, 224, device=device)
 
     # Get the last hidden state
     print("Running forward pass...")
