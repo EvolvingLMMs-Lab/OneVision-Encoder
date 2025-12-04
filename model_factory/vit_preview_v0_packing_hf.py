@@ -239,10 +239,7 @@ class VisionRotaryEmbedding(nn.Module):
         
         # Process all images at once using vectorized operations
         pos_ids = []
-        for i in range(grid_thw.shape[0]):
-            t = t_vals[i]
-            h = h_vals[i]
-            w = w_vals[i]
+        for t, h, w in zip(t_vals, h_vals, w_vals):
             patches_per_frame = h * w
 
             # Compute position ids for each axis
@@ -808,10 +805,7 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
     h_vals = grid_thw[:, 1].cpu().tolist()  # [num_images] as Python list
     w_vals = grid_thw[:, 2].cpu().tolist()  # [num_images] as Python list
 
-    for i in range(grid_thw.shape[0]):
-        t = t_vals[i]
-        h = h_vals[i]
-        w = w_vals[i]
+    for t, h, w in zip(t_vals, h_vals, w_vals):
         patches_per_frame = h * w
 
         # Compute position for each axis
