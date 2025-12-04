@@ -183,8 +183,8 @@ class HEVCViTPackingVisionTower(nn.Module):
             # Split the packed output back to batch format
             # Calculate num_patches per image
             # Optimized for distributed training - extract scalars efficiently
-            thw_first = packed_grid_thw[0]
-            t, h_patches, w_patches = thw_first.tolist()
+            thw = packed_grid_thw[0]
+            t, h_patches, w_patches = thw.tolist()
             num_patches_per_image = t * h_patches * w_patches
             
             # Reshape from [total_seq_len, hidden_size] to [B, num_patches, hidden_size]
