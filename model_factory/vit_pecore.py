@@ -83,9 +83,9 @@ def pecore_base_patch16_224(pretrained: bool = False, **kwargs):
         PECore: An instance of PECore.
     """
     model = PECore(
-        ckpt=kwargs.get("ckpt", "facebook/PE-Core-B16-224"),
+        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/facebook/PE-Core-B16-224"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
-        local_files_only=kwargs.get("local_files_only", False),
+        local_files_only=kwargs.get("local_files_only", True),
     )
     return model
 
