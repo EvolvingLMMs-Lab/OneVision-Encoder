@@ -25,9 +25,9 @@ warnings.filterwarnings("ignore")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser("Feature extraction from videos with clip-based processing")
     # Data
-    parser.add_argument("--data_root", default="/data_3/data_attentive_probe/ssv2", help="Root directory of video data")
-    parser.add_argument("--data_csv_path", default="ssv2_val_new.csv", help="CSV file with video paths and labels")
-    parser.add_argument("--output_dir", default="/video_vit/feilong/LLaVA-ViT/eval_encoder/feature/", help="Output directory for .npy feature files")
+    parser.add_argument("--data_root", default="/video_vit/feilong/TAD-Dataset/charades", help="Root directory of video data")
+    parser.add_argument("--data_csv_path", default="charades_videos.csv", help="CSV file with video paths and labels")
+    parser.add_argument("--output_dir", default="/video_vit/feilong/TAD-Dataset/charades/features/llava_vit_base_ln/", help="Output directory for .npy feature files")
 
     # Model
     parser.add_argument("--model_family", default="llava_vit_sampling")
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=1,
                         help="Batch size for DALI dataloader (use 1 for per-video processing)")
     parser.add_argument("--dali_num_threads", type=int, default=2)
-    parser.add_argument("--dali_py_num_workers", type=int, default=4)
+    parser.add_argument("--dali_py_num_workers", type=int, default=8)
     parser.add_argument("--decord_num_threads", type=int, default=2,
                         help="Number of threads for decord video reader.")
     parser.add_argument("--short_side_size", type=int, default=256)
@@ -400,13 +400,14 @@ def extract_features_from_dali(
             # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
             feature_file = output_dir / f"{video_name}.npy"
             np.save(feature_file, feats)
+            # print("finish:", feature_file)
             
             total_processed += 1
         
         batch_count += 1
         
-        # if args.rank == 0 and batch_count % 10 == 0:
-        #     print(f"Processed {total_processed} videos, batch {batch_count}")
+        if args.rank == 0 and batch_count % 10 == 0:
+            print(f"Processed {total_processed} videos, batch {batch_count}")
     
     if args.rank == 0:
         print(f"Feature extraction completed! Processed {total_processed} videos")
