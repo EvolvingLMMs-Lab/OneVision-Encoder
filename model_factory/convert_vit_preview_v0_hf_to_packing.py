@@ -932,8 +932,7 @@ def convert_and_save_packing(hf_model_name, packing_model_name, weight_path, out
     verify_multi_sample_consistency_packing(hf_model, packing_model, real_img)
 
     if output_dir:
-        save_model_with_processor(packing_model, output_dir, image_size=448)
-        if hasattr(packing_model, "save_pretrained"):
+        if save_model_with_processor(packing_model, output_dir, image_size=448):
             verify_saved_model_loading_packing(hf_model, output_dir, real_img)
 
 

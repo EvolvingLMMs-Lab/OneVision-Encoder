@@ -149,20 +149,24 @@ def compute_patch_positions_with_interpolated_temporal(
         patch_positions: Tensor of shape (total_patches, 3) with [t, h, w] positions
     """
     bs, num_frames = interpolated_indices.shape
-    patches_per_frame = h_patches * w_patches
-
-    positions = []
+    total_patches = bs * num_frames * h_patches * w_patches
+    
+    # Pre-allocate tensor for better performance
+    positions = torch.zeros((total_patches, 3), dtype=torch.long, device=device)
+    
+    idx = 0
     for b in range(bs):
         for frame_idx in range(num_frames):
             # Get the interpolated temporal position (in 64-frame context)
             t_pos = interpolated_indices[b, frame_idx].item()
-
+            
             # Generate spatial positions for this frame
             for h in range(h_patches):
                 for w in range(w_patches):
-                    positions.append([t_pos, h, w])
-
-    return torch.tensor(positions, dtype=torch.long, device=device)
+                    positions[idx] = torch.tensor([t_pos, h, w], dtype=torch.long)
+                    idx += 1
+    
+    return positions
 
 
 def compute_cosine_similarity(feat1, feat2, name="Feature"):
@@ -210,7 +214,7 @@ def compute_cosine_similarity(feat1, feat2, name="Feature"):
     }
 
 
-def save_model_with_processor(model, output_dir, image_size=448):
+def save_model_with_processor(model, output_dir, image_size=448) -> bool:
     """
     Save a model along with its CLIPImageProcessor configuration.
     
@@ -218,6 +222,9 @@ def save_model_with_processor(model, output_dir, image_size=448):
         model: Model to save (must have save_pretrained method)
         output_dir: Output directory path
         image_size: Target image size for the processor
+    
+    Returns:
+        bool: True if save was successful, False otherwise
     """
     if not hasattr(model, "save_pretrained"):
         print("❌ Error: Model does not have save_pretrained method.")
@@ -244,7 +251,7 @@ def save_model_with_processor(model, output_dir, image_size=448):
     return True
 
 
-def move_model_to_device(model, dtype=torch.bfloat16):
+def move_model_to_device(model, dtype=torch.bfloat16) -> torch.device:
     """
     Move model to CUDA if available, otherwise CPU, and cast to specified dtype.
     
@@ -253,7 +260,7 @@ def move_model_to_device(model, dtype=torch.bfloat16):
         dtype: Target dtype (default: torch.bfloat16)
     
     Returns:
-        device: The device the model was moved to
+        torch.device: The device the model was moved to
     """
     if torch.cuda.is_available():
         device = torch.device("cuda")

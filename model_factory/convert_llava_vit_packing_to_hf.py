@@ -1295,8 +1295,7 @@ def convert_and_save_packing(src_model_name, tgt_model_name, weight_path, output
     verify_multi_sample_consistency_packing(src_model, tgt_model, real_img)
 
     if output_dir:
-        save_model_with_processor(tgt_model, output_dir, image_size=448)
-        if hasattr(tgt_model, "save_pretrained"):
+        if save_model_with_processor(tgt_model, output_dir, image_size=448):
             # 验证 Reload 后的模型
             verify_saved_model_loading_packing(src_model, output_dir, real_img)
 
