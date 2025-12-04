@@ -125,8 +125,10 @@ class HEVCViTPackingVisionTower(nn.Module):
             # Split the packed output back to individual images
             image_features_list = []
             start_idx = 0
-            for grid in packed_grid_thw:
-                t, h, w = grid[0].item(), grid[1].item(), grid[2].item()
+            # Avoid .item() calls in loop to prevent CUDA synchronization
+            grid_values = packed_grid_thw.cpu()  # Move to CPU once for all iterations
+            for i in range(packed_grid_thw.shape[0]):
+                t, h, w = grid_values[i, 0].item(), grid_values[i, 1].item(), grid_values[i, 2].item()
                 seq_len = t * h * w
                 image_features_list.append(image_features[start_idx:start_idx + seq_len])
                 start_idx += seq_len
@@ -179,7 +181,9 @@ class HEVCViTPackingVisionTower(nn.Module):
             
             # Split the packed output back to batch format
             # Calculate num_patches per image
-            t, h_patches, w_patches = packed_grid_thw[0][0].item(), packed_grid_thw[0][1].item(), packed_grid_thw[0][2].item()
+            # Avoid .item() calls to prevent CUDA synchronization
+            grid_first = packed_grid_thw[0].cpu()  # Move to CPU once
+            t, h_patches, w_patches = grid_first[0].item(), grid_first[1].item(), grid_first[2].item()
             num_patches_per_image = t * h_patches * w_patches
             
             # Reshape from [total_seq_len, hidden_size] to [B, num_patches, hidden_size]
