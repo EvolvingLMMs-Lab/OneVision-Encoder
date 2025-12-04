@@ -25,9 +25,9 @@ warnings.filterwarnings("ignore")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser("Feature extraction from videos with clip-based processing")
     # Data
-    parser.add_argument("--data_root", default="/data_3/data_attentive_probe/ssv2", help="Root directory of video data")
-    parser.add_argument("--data_csv_path", default="ssv2_val_new.csv", help="CSV file with video paths and labels")
-    parser.add_argument("--output_dir", default="/video_vit/feilong/LLaVA-ViT/eval_encoder/feature/", help="Output directory for .npy feature files")
+    parser.add_argument("--data_root", default="/video_vit/feilong/TAD-Dataset/charades", help="Root directory of video data")
+    parser.add_argument("--data_csv_path", default="charades_videos.csv", help="CSV file with video paths and labels")
+    parser.add_argument("--output_dir", default="/video_vit/feilong/TAD-Dataset/charades/features/llava_vit_base_ln/", help="Output directory for .npy feature files")
 
     # Model
     parser.add_argument("--model_family", default="llava_vit_sampling")
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=1,
                         help="Batch size for DALI dataloader (use 1 for per-video processing)")
     parser.add_argument("--dali_num_threads", type=int, default=2)
-    parser.add_argument("--dali_py_num_workers", type=int, default=4)
+    parser.add_argument("--dali_py_num_workers", type=int, default=8)
     parser.add_argument("--decord_num_threads", type=int, default=2,
                         help="Number of threads for decord video reader.")
     parser.add_argument("--short_side_size", type=int, default=256)
@@ -274,6 +274,9 @@ def extract_features_from_dali(
     """Extract features from videos using DALI dataloader"""
     model.to(device).eval()
     
+    # Batch size for processing chunks (larger = better GPU utilization but more memory)
+    CHUNK_BATCH_SIZE = 8
+    
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -320,6 +323,21 @@ def extract_features_from_dali(
         
         # Extract features for each video in the batch
         for i in range(batch_size):
+            # Get video name first to check if feature already exists
+            video_idx = batch_count * args.batch_size + i
+            if video_idx < len(video_names):
+                video_name = video_names[video_idx]
+            else:
+                # Use deterministic naming based on video index
+                video_name = f"video_{video_idx}"
+            
+            # Check if feature file already exists
+            feature_file = output_dir / f"{video_name}.npy"
+            if feature_file.exists():
+                print(f"Rank {args.rank}: Skipping {video_name}: feature file already exists at {feature_file}")
+                total_processed += 1
+                continue
+            
             video = videos[i:i+1]  # Keep batch dimension [1, C, T, H, W]
             video_indices = indices[i:i+1]
             video_total_frames = total_frames[i:i+1]
@@ -334,50 +352,69 @@ def extract_features_from_dali(
             # List to collect features from all chunks
             chunk_features = []
             
-            # Process each chunk of args.num_frames (typically 8) frames
-            for chunk_idx in range(num_chunks):
-                start_idx = chunk_idx * chunk_size
-                end_idx = min(start_idx + chunk_size, T)
+            for batch_start in range(0, num_chunks, CHUNK_BATCH_SIZE):
+                batch_end = min(batch_start + CHUNK_BATCH_SIZE, num_chunks)
+                batch_num_chunks = batch_end - batch_start
                 
-                # Extract chunk [1, C, chunk_size, H, W]
-                video_chunk = video[:, :, start_idx:end_idx, :, :]
+                # Collect chunks for this batch
+                batch_video_chunks = []
+                batch_chunk_indices = []
                 
-                # Pad if necessary (last chunk might have fewer than chunk_size frames)
-                actual_frames = end_idx - start_idx
-                if actual_frames < chunk_size:
-                    # Repeat last frame to make it chunk_size frames
-                    padding_needed = chunk_size - actual_frames
-                    last_frame = video_chunk[:, :, -1:, :, :]  # [1, C, 1, H, W]
-                    padding = last_frame.repeat(1, 1, padding_needed, 1, 1)  # [1, C, padding_needed, H, W]
-                    video_chunk = torch.cat([video_chunk, padding], dim=2)  # [1, C, chunk_size, H, W]
+                for chunk_idx in range(batch_start, batch_end):
+                    start_idx = chunk_idx * chunk_size
+                    end_idx = min(start_idx + chunk_size, T)
+                    
+                    # Extract chunk [1, C, chunk_size, H, W]
+                    video_chunk = video[:, :, start_idx:end_idx, :, :]
+                    
+                    # Pad if necessary (last chunk might have fewer than chunk_size frames)
+                    actual_frames = end_idx - start_idx
+                    if actual_frames < chunk_size:
+                        # Repeat last frame to make it chunk_size frames
+                        padding_needed = chunk_size - actual_frames
+                        last_frame = video_chunk[:, :, -1:, :, :]  # [1, C, 1, H, W]
+                        padding = last_frame.repeat(1, 1, padding_needed, 1, 1)  # [1, C, padding_needed, H, W]
+                        video_chunk = torch.cat([video_chunk, padding], dim=2)  # [1, C, chunk_size, H, W]
+                    
+                    # Extract corresponding indices for this chunk
+                    chunk_indices = video_indices[:, start_idx:end_idx]
+                    if actual_frames < chunk_size:
+                        # Repeat last index for padding
+                        last_index = chunk_indices[:, -1:]
+                        padding_indices = last_index.repeat(1, padding_needed)
+                        chunk_indices = torch.cat([chunk_indices, padding_indices], dim=1)
+                    
+                    batch_video_chunks.append(video_chunk)
+                    batch_chunk_indices.append(chunk_indices)
                 
-                # Extract corresponding indices for this chunk
-                chunk_indices = video_indices[:, start_idx:end_idx]
-                if actual_frames < chunk_size:
-                    # Repeat last index for padding
-                    last_index = chunk_indices[:, -1:]
-                    padding_indices = last_index.repeat(1, padding_needed)
-                    chunk_indices = torch.cat([chunk_indices, padding_indices], dim=1)
+                # Stack chunks into a single batch [batch_num_chunks, C, chunk_size, H, W]
+                batched_video_chunks = torch.cat(batch_video_chunks, dim=0)
+                batched_chunk_indices = torch.cat(batch_chunk_indices, dim=0)
                 
-                # Extract features for this chunk
-                chunk_feat = get_feature(
+                # Replicate total_frames for batch processing
+                batched_total_frames = video_total_frames.repeat(batch_num_chunks)
+                
+                # Extract features for this batch of chunks
+                batch_chunk_feat = get_feature(
                     args, 
-                    video_chunk, 
+                    batched_video_chunks, 
                     model, 
-                    frame_indices=chunk_indices, 
-                    total_frames=video_total_frames
+                    frame_indices=batched_chunk_indices, 
+                    total_frames=batched_total_frames
                 )
                 
                 # Apply pooling method per chunk
-                if chunk_feat.dim() == 3:
+                if batch_chunk_feat.dim() == 3:
                     if args.pooling_method == "mean":
-                        chunk_feat = chunk_feat.mean(dim=1)  # [1, D]
+                        batch_chunk_feat = batch_chunk_feat.mean(dim=1)  # [batch_num_chunks, D]
                     elif args.pooling_method == "cls":
-                        chunk_feat = chunk_feat[:, 0, :]  # [1, D]
+                        batch_chunk_feat = batch_chunk_feat[:, 0, :]  # [batch_num_chunks, D]
                     elif args.pooling_method == "all":
-                        pass  # Keep [1, seq_len, D]
+                        pass  # Keep [batch_num_chunks, seq_len, D]
                 
-                chunk_features.append(chunk_feat)
+                # Split batch results back into individual chunks
+                for j in range(batch_num_chunks):
+                    chunk_features.append(batch_chunk_feat[j:j+1])
             
             # Stack all chunk features: [num_chunks, D] or [num_chunks, seq_len, D]
             if chunk_features[0].dim() == 2:
@@ -390,23 +427,16 @@ def extract_features_from_dali(
             # Convert to numpy
             feats = feats.float().cpu().numpy()
             
-            # Get video name
-            video_idx = batch_count * args.batch_size + i
-            if video_idx < len(video_names):
-                video_name = video_names[video_idx]
-            else:
-                video_name = f"video_{total_processed}"
-            
             # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
-            feature_file = output_dir / f"{video_name}.npy"
             np.save(feature_file, feats)
+            # print("finish:", feature_file)
             
             total_processed += 1
         
         batch_count += 1
         
-        # if args.rank == 0 and batch_count % 10 == 0:
-        #     print(f"Processed {total_processed} videos, batch {batch_count}")
+        if args.rank == 0 and batch_count % 10 == 0:
+            print(f"Processed {total_processed} videos, batch {batch_count}")
     
     if args.rank == 0:
         print(f"Feature extraction completed! Processed {total_processed} videos")
@@ -469,13 +499,32 @@ def main() -> None:
         feature_extract = True,
     )
     
-    # Extract features using DALI dataloader
-    extract_features_from_dali(args, model, device, dataloader)
+    try:
+        # Extract features using DALI dataloader
+        extract_features_from_dali(args, model, device, dataloader)
 
-    if args.rank == 0:
-        print("\n" + "=" * 60)
-        print("Extraction completed!")
-        print("=" * 60)
+        if args.rank == 0:
+            print("\n" + "=" * 60)
+            print("Extraction completed!")
+            print("=" * 60)
+    finally:
+        # Cleanup DALI resources
+        try:
+            if hasattr(dataloader, 'iter') and hasattr(dataloader.iter, '_pipes'):
+                for pipe in dataloader.iter._pipes:
+                    pipe.reset()
+        except Exception as e:
+            if args.rank == 0:
+                print(f"Warning: Error during DALI cleanup: {e}")
+        
+        # Cleanup distributed process group
+        try:
+            if distributed.is_initialized():
+                distributed.barrier()
+                distributed.destroy_process_group()
+        except Exception as e:
+            if args.rank == 0:
+                print(f"Warning: Error during distributed cleanup: {e}")
 
 
 if __name__ == "__main__":

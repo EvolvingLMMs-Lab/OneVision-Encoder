@@ -3,12 +3,7 @@ import os
 from pathlib import Path
 import timm
 import torch
-import numpy as np
 import torch.nn.functional as F
-from PIL import Image
-import requests
-from io import BytesIO
-from torchvision import transforms
 from transformers import CLIPImageProcessor
 
 # 务必确保这里导入了定义了两个模型的文件
@@ -22,51 +17,18 @@ try:
         LLAVA_VIT_ATTENTION_CLASSES,
     )
     from model_factory import vit_preview_v0     # 你的 Source 模型定义
+    from model_factory.conversion_utils import (
+        get_real_coco_image,
+        interpolate_frame_indices,
+        CLIP_MEAN,
+        CLIP_STD,
+        move_model_to_device,
+        save_model_with_processor,
+    )
 except ImportError:
     print("[Warning] Could not import model definitions directly. Ensure they are in PYTHONPATH.")
 
 
-# CLIP Specific Constants
-CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
-CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
-
-
-def get_real_coco_image(size=448):
-    """
-    下载一张真实的 COCO 图片并预处理为 Tensor (使用 CLIP 均值/方差, Float32)
-    """
-    url = "http://images.cocodataset.org/val2017/000000039769.jpg" # COCO cat image
-    print(f"--> Downloading real image from {url} (Target Size: {size})...")
-    try:
-        # 增加 header 伪装浏览器，防止某些情况下下载失败
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        img = Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception as e:
-        print(f"[Error] Failed to download image: {e}. Generating random noise as fallback.")
-        img = Image.fromarray(np.random.randint(0, 255, (size, size, 3), dtype=np.uint8))
-
-    # 预处理：Resize -> ToTensor -> Normalize (CLIP Specific)
-    # 注意：这里保持 Float32，具体的精度转换在模型输入前进行
-    transform = transforms.Compose([
-        transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=CLIP_MEAN, std=CLIP_STD),
-    ])
-
-    return transform(img).unsqueeze(0) # [1, 3, size, size]
-
-
-def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
-    bs, seq_len = frame_indices.shape
-    total_frames_float = total_frames.float().view(bs, 1)
-    frame_indices_float = frame_indices.float()
-    total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
-    interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
-    interpolated_indices = torch.round(interpolated_indices).long()
-    interpolated_indices = torch.clamp(interpolated_indices, 0, target_frames - 1)
-    return interpolated_indices
 
 
 def remap_state_dict(src_state_dict):
@@ -362,18 +324,9 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
         print("    Load OK (No critical missing keys).")
 
     # 3. CRITICAL: 检测 CUDA 并移动模型，并转换为 bfloat16
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print(f"\n--> [CUDA DETECTED] Moving models to {device} and casting to bfloat16...")
-        # Convert both models to bfloat16
-        src_model.to(device, dtype=torch.bfloat16)
-        tgt_model.to(device, dtype=torch.bfloat16)
-    else:
-        device = torch.device("cpu")
-        print(f"\n--> [WARNING] CUDA not available. Flash Attention will FAIL. bfloat16 on CPU is slow.")
-        src_model.to(device, dtype=torch.bfloat16)
-        tgt_model.to(device, dtype=torch.bfloat16)
-
+    print()
+    move_model_to_device(src_model)
+    move_model_to_device(tgt_model)
 
     print("\n--> Fetching real image for verification (448x448)...")
     real_img = get_real_coco_image(size=448)
@@ -385,34 +338,9 @@ def convert_and_save(src_model_name, tgt_model_name, weight_path, output_dir):
     verify_consistency_video(src_model, tgt_model, real_img)
 
     if output_dir:
-        print(f"\n--> Saving HF Model to {output_dir}...")
-        if hasattr(tgt_model, "save_pretrained"):
-            # 模型本身已经是 bf16，save_pretrained 会保存为 bf16 (safetensors 默认支持)
-            tgt_model.save_pretrained(output_dir)
-
-            # --- 保存 CLIPImageProcessor ---
-            print("    Saving CLIPImageProcessor config (CLIP Defaults + 448)...")
-
-            processor = CLIPImageProcessor(
-                size=448,
-                crop_size=448,
-                image_mean=CLIP_MEAN,
-                image_std=CLIP_STD,
-                resample=3,
-                do_center_crop=True,
-                do_normalize=True,
-                do_resize=True,
-                feature_extractor_type="CLIPFeatureExtractor"
-            )
-            processor.save_pretrained(output_dir)
-
-            print("✅ Model (bf16) and CLIP Processor saved.")
-
+        if save_model_with_processor(tgt_model, output_dir, image_size=448):
             # 验证 Reload 后的模型
             verify_saved_model_loading(src_model, output_dir, real_img)
-
-        else:
-            print("❌ Error: Target model does not have save_pretrained method.")
 
 
 if __name__ == "__main__":
