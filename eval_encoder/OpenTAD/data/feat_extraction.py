@@ -499,13 +499,31 @@ def main() -> None:
         feature_extract = True,
     )
     
-    # Extract features using DALI dataloader
-    extract_features_from_dali(args, model, device, dataloader)
+    try:
+        # Extract features using DALI dataloader
+        extract_features_from_dali(args, model, device, dataloader)
 
-    if args.rank == 0:
-        print("\n" + "=" * 60)
-        print("Extraction completed!")
-        print("=" * 60)
+        if args.rank == 0:
+            print("\n" + "=" * 60)
+            print("Extraction completed!")
+            print("=" * 60)
+    finally:
+        # Cleanup DALI resources
+        try:
+            if hasattr(dataloader, 'iter') and hasattr(dataloader.iter, '_pipes'):
+                for pipe in dataloader.iter._pipes:
+                    pipe.reset()
+        except Exception as e:
+            if args.rank == 0:
+                print(f"Warning: Error during DALI cleanup: {e}")
+        
+        # Cleanup distributed process group
+        try:
+            distributed.barrier()
+            distributed.destroy_process_group()
+        except Exception as e:
+            if args.rank == 0:
+                print(f"Warning: Error during distributed cleanup: {e}")
 
 
 if __name__ == "__main__":
