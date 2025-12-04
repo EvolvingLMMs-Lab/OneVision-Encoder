@@ -397,6 +397,8 @@ def extract_features_from_dali(
                     frame_indices=batched_chunk_indices, 
                     total_frames=batched_total_frames
                 )
+                # Convert from bfloat16 to float32 immediately after extraction
+                batch_chunk_feat = batch_chunk_feat.float()
                 
                 # # Apply pooling method per chunk
                 # if batch_chunk_feat.dim() == 3:
@@ -425,8 +427,8 @@ def extract_features_from_dali(
             #     print(f"   features.dtype = {feats.dtype}")
             #     sys.exit(1)
       
-            # Convert to numpy
-            feats = feats.float().cpu().numpy()
+            # Convert to numpy (already in float32 from earlier conversion)
+            feats = feats.cpu().numpy()
             # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
             np.save(feature_file, feats)
             total_processed += 1
