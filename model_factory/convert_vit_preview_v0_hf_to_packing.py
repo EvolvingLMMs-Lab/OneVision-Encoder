@@ -852,8 +852,9 @@ def verify_multi_sample_consistency_packing(hf_model, packing_model, real_image_
 
         cos_sim = F.cosine_similarity(hf_feat, packing_feat, dim=-1)
         min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
 
-        print(f"    [Image {i+1} (res={image_sizes[i]})] Min Cos: {min_cos:.8f}")
+        print(f"    [Image {i+1} (res={image_sizes[i]})] Min Cos: {min_cos:.8f} (Mean: {mean_cos:.8f})")
         if min_cos <= 0.99:
             all_pass = False
 
@@ -868,8 +869,9 @@ def verify_multi_sample_consistency_packing(hf_model, packing_model, real_image_
 
         cos_sim = F.cosine_similarity(hf_feat, packing_feat, dim=-1)
         min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
 
-        print(f"    [Video {i+1} (res={video_sizes[i]})] Min Cos: {min_cos:.8f}")
+        print(f"    [Video {i+1} (res={video_sizes[i]})] Min Cos: {min_cos:.8f} (Mean: {mean_cos:.8f})")
         if min_cos <= 0.99:
             all_pass = False
 
