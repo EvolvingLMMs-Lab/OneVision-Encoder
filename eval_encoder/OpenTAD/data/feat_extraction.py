@@ -61,7 +61,8 @@ def parse_args() -> argparse.Namespace:
     # Clip processing
 
     parser.add_argument("--clip_stride", type=int, default=None,
-                        help="Stride between clips when splitting long videos. If None, uses num_frames (non-overlapping clips)")
+                        help="Stride between clips when splitting long videos. If None, uses num_frames (non-overlapping clips). "
+                             "Set to 4 for 8-frame sliding window with stride=4 (50%% overlap)")
 
     # Misc
     parser.add_argument("--seed", type=int, default=1)
@@ -283,6 +284,10 @@ def extract_features_from_dali(
         print(f"Starting feature extraction with DALI dataloader...")
         print(f"Output directory: {output_dir}")
         print(f"Processing mode: DALI standard frame sampling")
+        if args.clip_stride is not None:
+            print(f"Clip stride: {args.clip_stride} (sliding window with stride {args.clip_stride})")
+        else:
+            print(f"Clip stride: None (non-overlapping chunks)")
     
     # We need to track video names for per-video output
     # Since DALI doesn't provide video paths directly, we'll use a counter and load the CSV again
@@ -346,7 +351,11 @@ def extract_features_from_dali(
             
             # Model expects args.num_frames (default 8) frames at a time, so split T frames into chunks
             chunk_size = args.num_frames
-            num_chunks = (T + chunk_size - 1) // chunk_size  # Ceiling division
+            
+            # Use split_video_into_clips to get clip frame indices with stride support
+            clip_stride = args.clip_stride if args.clip_stride is not None else chunk_size
+            clip_frame_indices = split_video_into_clips(T, chunk_size, stride=clip_stride)
+            num_chunks = len(clip_frame_indices)
             
             # List to collect features from all chunks
             chunk_features = []
@@ -360,28 +369,14 @@ def extract_features_from_dali(
                 batch_chunk_indices = []
                 
                 for chunk_idx in range(batch_start, batch_end):
-                    start_idx = chunk_idx * chunk_size
-                    end_idx = min(start_idx + chunk_size, T)
+                    # Get frame indices for this clip
+                    frame_list = clip_frame_indices[chunk_idx]
                     
-                    # Extract chunk [1, C, chunk_size, H, W]
-                    video_chunk = video[:, :, start_idx:end_idx, :, :]
-                    
-                    # Pad if necessary (last chunk might have fewer than chunk_size frames)
-                    actual_frames = end_idx - start_idx
-                    if actual_frames < chunk_size:
-                        # Repeat last frame to make it chunk_size frames
-                        padding_needed = chunk_size - actual_frames
-                        last_frame = video_chunk[:, :, -1:, :, :]  # [1, C, 1, H, W]
-                        padding = last_frame.repeat(1, 1, padding_needed, 1, 1)  # [1, C, padding_needed, H, W]
-                        video_chunk = torch.cat([video_chunk, padding], dim=2)  # [1, C, chunk_size, H, W]
+                    # Extract frames based on the frame list [1, C, chunk_size, H, W]
+                    video_chunk = video[:, :, frame_list, :, :]
                     
                     # Extract corresponding indices for this chunk
-                    chunk_indices = video_indices[:, start_idx:end_idx]
-                    if actual_frames < chunk_size:
-                        # Repeat last index for padding
-                        last_index = chunk_indices[:, -1:]
-                        padding_indices = last_index.repeat(1, padding_needed)
-                        chunk_indices = torch.cat([chunk_indices, padding_indices], dim=1)
+                    chunk_indices = video_indices[:, frame_list]
                     
                     batch_video_chunks.append(video_chunk)
                     batch_chunk_indices.append(chunk_indices)
