@@ -232,14 +232,13 @@ class VisionRotaryEmbedding(nn.Module):
         inv_w = self.inv_freq_w.to(device=device)
 
         # Optimized implementation to avoid .item() calls and CUDA synchronization
-        # Extract t, h, w as Python lists to avoid any tensor operations in the loop
-        t_vals = grid_thw[:, 0].cpu().tolist()  # [num_images] as Python list
-        h_vals = grid_thw[:, 1].cpu().tolist()  # [num_images] as Python list
-        w_vals = grid_thw[:, 2].cpu().tolist()  # [num_images] as Python list
-        
-        # Process images individually without CUDA synchronization overhead
+        # For distributed training compatibility, we keep tensor operations on device
+        # and only convert to scalars when absolutely necessary
         pos_ids = []
-        for t, h, w in zip(t_vals, h_vals, w_vals):
+        for i in range(grid_thw.shape[0]):
+            # Extract values as GPU tensors (no sync)
+            thw = grid_thw[i]
+            t, h, w = thw[0], thw[1], thw[2]
             patches_per_frame = h * w
 
             # Compute position ids for each axis
@@ -800,12 +799,12 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
     positions = []
 
     # Optimized implementation to avoid .item() calls and CUDA synchronization
-    # Extract t, h, w as Python lists to avoid any tensor operations in the loop
-    t_vals = grid_thw[:, 0].cpu().tolist()  # [num_images] as Python list
-    h_vals = grid_thw[:, 1].cpu().tolist()  # [num_images] as Python list
-    w_vals = grid_thw[:, 2].cpu().tolist()  # [num_images] as Python list
-
-    for t, h, w in zip(t_vals, h_vals, w_vals):
+    # For distributed training compatibility, we keep tensor operations on device
+    # and only convert to scalars when absolutely necessary
+    for i in range(grid_thw.shape[0]):
+        # Extract values as GPU tensors (no sync)
+        thw = grid_thw[i]
+        t, h, w = thw[0], thw[1], thw[2]
         patches_per_frame = h * w
 
         # Compute position for each axis
