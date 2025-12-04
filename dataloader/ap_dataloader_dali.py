@@ -227,6 +227,7 @@ def get_dali_dataloader(
     dali_py_num_workers: int = 8,
     decord_num_threads: int = 2,
     seed: int = 0,
+    feature_extract: bool = False,
 ) -> DALIWarper:
     """
     """
