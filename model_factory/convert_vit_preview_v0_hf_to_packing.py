@@ -739,7 +739,8 @@ def verify_multi_sample_consistency_packing(hf_model, packing_model, real_image_
     bs = 1
 
     with torch.no_grad():
-        # Process each sample with HF model
+        # Process each sample with HF model (individually)
+        print("    Processing samples with HF model (one at a time)...")
         hf_image_feats = []
         hf_video_feats = []
 
@@ -768,7 +769,8 @@ def verify_multi_sample_consistency_packing(hf_model, packing_model, real_image_
             hf_out = hf_model(padded_videos, visible_indices=visible_index)
             hf_video_feats.append(hf_out.last_hidden_state)
 
-        # Process all samples together with packing model
+        # Process all samples together with packing model (batched)
+        print("    Processing samples with Packing model (all at once in batch)...")
         patch_dim = patch_size * patch_size * channels
         all_hidden_states = []
         all_patch_positions = []
@@ -817,6 +819,8 @@ def verify_multi_sample_consistency_packing(hf_model, packing_model, real_image_
         combined_grid_thw = torch.tensor(grid_thw_list, dtype=torch.long, device=device)
 
         print(f"    Combined input shape: {combined_hidden_states.shape}")
+        print(f"    NOTE: HF model processes samples individually, Packing model processes all together.")
+        print(f"          This may cause misalignment due to cross-sample attention in the batched forward pass.")
 
         packing_out = packing_model(
             hidden_states=combined_hidden_states,
@@ -852,8 +856,9 @@ def verify_multi_sample_consistency_packing(hf_model, packing_model, real_image_
 
         cos_sim = F.cosine_similarity(hf_feat, packing_feat, dim=-1)
         min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
 
-        print(f"    [Image {i+1} (res={image_sizes[i]})] Min Cos: {min_cos:.8f}")
+        print(f"    [Image {i+1} (res={image_sizes[i]})] Min Cos: {min_cos:.8f} (Mean: {mean_cos:.8f})")
         if min_cos <= 0.99:
             all_pass = False
 
@@ -868,8 +873,9 @@ def verify_multi_sample_consistency_packing(hf_model, packing_model, real_image_
 
         cos_sim = F.cosine_similarity(hf_feat, packing_feat, dim=-1)
         min_cos = cos_sim.min().item()
+        mean_cos = cos_sim.mean().item()
 
-        print(f"    [Video {i+1} (res={video_sizes[i]})] Min Cos: {min_cos:.8f}")
+        print(f"    [Video {i+1} (res={video_sizes[i]})] Min Cos: {min_cos:.8f} (Mean: {mean_cos:.8f})")
         if min_cos <= 0.99:
             all_pass = False
 
