@@ -231,14 +231,13 @@ class VisionRotaryEmbedding(nn.Module):
         inv_h = self.inv_freq_h.to(device=device)
         inv_w = self.inv_freq_w.to(device=device)
 
-        # Optimized implementation to avoid .item() calls and CUDA synchronization
-        # For distributed training compatibility, we keep tensor operations on device
-        # and only convert to scalars when absolutely necessary
+        # Optimized implementation to avoid excessive CUDA synchronization
+        # For distributed training compatibility, extract scalars efficiently
         pos_ids = []
         for i in range(grid_thw.shape[0]):
-            # Extract values as GPU tensors (no sync)
+            # Extract values with minimal synchronization (single sync per row)
             thw = grid_thw[i]
-            t, h, w = thw[0].item(), thw[1].item(), thw[2].item()
+            t, h, w = thw.tolist()
             patches_per_frame = h * w
 
             # Compute position ids for each axis
@@ -798,13 +797,12 @@ def compute_patch_positions_from_grid_thw(grid_thw: torch.Tensor) -> torch.Tenso
     device = grid_thw.device
     positions = []
 
-    # Optimized implementation to avoid .item() calls and CUDA synchronization
-    # For distributed training compatibility, we keep tensor operations on device
-    # and only convert to scalars when absolutely necessary
+    # Optimized implementation to avoid excessive CUDA synchronization
+    # For distributed training compatibility, extract scalars efficiently
     for i in range(grid_thw.shape[0]):
-        # Extract values as GPU tensors (no sync)
+        # Extract values with minimal synchronization (single sync per row)
         thw = grid_thw[i]
-        t, h, w = thw[0].item(), thw[1].item(), thw[2].item()
+        t, h, w = thw.tolist()
         patches_per_frame = h * w
 
         # Compute position for each axis
