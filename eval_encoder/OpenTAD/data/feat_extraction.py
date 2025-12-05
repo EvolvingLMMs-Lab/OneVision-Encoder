@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchmetrics
-from dataloader.ap_dataloader_dali import get_dali_dataloader
+from dataloader.ap_dataloader_dali_new import get_dali_dataloader
 from timm.loss import LabelSmoothingCrossEntropy
 from timm.models import create_model
 from timm.models.layers import trunc_normal_
@@ -396,10 +396,10 @@ def extract_features_from_dali(
                 feats = torch.cat(chunk_features, dim=0)  # [num_chunks, seq_len, D]
             
             # if "001YG" in str(feature_file):
-            #     print(f"[R{args.rank}] ⚠ 检测到文件名包含 '001YG'，停止处理后续视频！文件是：{feature_file}")
-            #     print(feature_file, feats.shape, total_frames, video_total_frames)
-            #     print(f"   features.dtype = {feats.dtype}")
-            #     sys.exit(1)
+            # print(f"[R{args.rank}] ⚠ 检测到文件名包含 '001YG'，停止处理后续视频！文件是：{feature_file}")
+            # print(feature_file, feats.shape, total_frames, video_total_frames)
+            # print(f"   features.dtype = {feats.dtype}")
+            # sys.exit(1)
             # Convert to numpy (already in float32 from earlier conversion)
             feats = feats.cpu().numpy()
             # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
