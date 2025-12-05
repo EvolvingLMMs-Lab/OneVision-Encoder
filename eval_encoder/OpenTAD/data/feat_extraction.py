@@ -289,33 +289,6 @@ def extract_features_from_dali(
         else:
             print(f"Clip stride: None (non-overlapping chunks)")
     
-    # We need to track video names for per-video output
-    # Since DALI doesn't provide video paths directly, we'll use a counter and load the CSV again
-    csv_path = os.path.join(args.data_root, args.data_csv_path) if not os.path.isabs(args.data_csv_path) else args.data_csv_path
-    video_names = []
-    try:
-        with open(csv_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split(",")
-                offset_path = parts[0]
-                video_name = Path(offset_path).stem
-                video_names.append(video_name)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Data list file not found at: {csv_path}")
-    
-    # Shard video names to match DALI's sharding
-    if args.world_size > 1:
-        shard_size = len(video_names) // args.world_size
-        start_idx = args.rank * shard_size
-        if args.rank == args.world_size - 1:
-            end_idx = len(video_names)
-        else:
-            end_idx = start_idx + shard_size
-        video_names = video_names[start_idx:end_idx]
-    
     total_processed = 0
     batch_count = 0
     
@@ -323,18 +296,19 @@ def extract_features_from_dali(
         videos = batch["videos"].to(device, non_blocking=True)
         indices = batch["indices"].to(device, non_blocking=True)
         total_frames = batch["total_frames"].to(device, non_blocking=True)
+        video_names = [
+            os.path.splitext(os.path.basename(
+                row.tobytes().decode("utf-8").split("\x00")[0]
+            ))[0]
+            for row in batch["file_name"].detach().cpu().numpy()
+        ]
+
         batch_size = videos.size(0)
         
         # Extract features for each video in the batch
         for i in range(batch_size):
-            # Get video name first to check if feature already exists
-            video_idx = batch_count * args.batch_size + i
-            if video_idx < len(video_names):
-                video_name = video_names[video_idx]
-            else:
-                # Use deterministic naming based on video index
-                video_name = f"video_{video_idx}"
-            
+
+            video_name = video_names[i]
             # Check if feature file already exists
             feature_file = output_dir / f"{video_name}.npy"
             # if feature_file.exists():
@@ -344,7 +318,7 @@ def extract_features_from_dali(
             
             video = videos[i:i+1]  # Keep batch dimension [1, C, T, H, W]
             video_indices = indices[i:i+1]
-            video_total_frames = total_frames[i:i+1]-1
+            video_total_frames = total_frames[i:i+1]
             
             # Get video dimensions
             _, C, T, H, W = video.shape
@@ -423,10 +397,9 @@ def extract_features_from_dali(
             
             # if "001YG" in str(feature_file):
             #     print(f"[R{args.rank}] ⚠ 检测到文件名包含 '001YG'，停止处理后续视频！文件是：{feature_file}")
-            #     print(feature_file, feats.shape, total_frames)
+            #     print(feature_file, feats.shape, total_frames, video_total_frames)
             #     print(f"   features.dtype = {feats.dtype}")
             #     sys.exit(1)
-      
             # Convert to numpy (already in float32 from earlier conversion)
             feats = feats.cpu().numpy()
             # Save features with shape [num_chunks, D] or [num_chunks, seq_len, D]
@@ -437,7 +410,7 @@ def extract_features_from_dali(
         
         if args.rank == 0 and batch_count % 10 == 0:
             print(f"Processed {total_processed} videos, batch {batch_count}")
-    
+            print(feature_file)
     if args.rank == 0:
         print(f"Feature extraction completed! Processed {total_processed} videos")
 
