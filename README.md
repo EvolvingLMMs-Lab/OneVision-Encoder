@@ -471,14 +471,21 @@ Thanks so much to all of our amazing contributors!
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/zhangquanchen">
+                    <img src="https://avatars.githubusercontent.com/u/140872772?v=4" width="80;" alt="zhangquanchen"/>
+                    <br />
+                    <sub><b>zhangquanchen</b></sub>
+                </a>
+            </td>
+		</tr>
+		<tr>
+            <td align="center">
                 <a href="https://github.com/FeilongTangmonash">
                     <img src="https://avatars.githubusercontent.com/u/152372878?v=4" width="80;" alt="FeilongTangmonash"/>
                     <br />
                     <sub><b>FeilongTangmonash</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
             <td align="center">
                 <a href="https://github.com/wkzhang636">
                     <img src="https://avatars.githubusercontent.com/u/194186498?v=4" width="80;" alt="wkzhang636"/>
