@@ -113,6 +113,12 @@ CONCEPT_CENTER_GRAY = (220, 220, 225)  # Lighter gray for non-sampled concept ce
 CONCEPT_CENTER_GRAY_BORDER = (180, 180, 190)  # Lighter border color for non-sampled centers / 浅灰边框
 FAINT_LINE_COLOR = (210, 210, 215)  # Lighter color for faint connection lines / 浅色连接线
 
+# Glow effect colors / 发光效果颜色
+POSITIVE_GLOW_OUTER = (200, 245, 220)  # Outer glow for positive centers / 正样本外圈发光
+POSITIVE_GLOW_INNER = (160, 240, 200)  # Inner glow for positive centers / 正样本内圈发光
+NEGATIVE_GLOW = (255, 180, 180)  # Glow for negative centers / 负样本发光
+HIGHLIGHT_COLOR = (255, 195, 113)  # Peach highlight color for selected samples / 桃色高亮（选中样本）
+
 # Typography / 字体设置
 # ----------------------------------------------------------------------------
 FONT_SIZE_TITLE = 40  # Main title font size / 主标题字体大小
@@ -266,8 +272,7 @@ def create_clip_frame(
     
     # 副标题
     # Subtitle
-    batch_size = CLIP_BATCH_SIZE
-    draw.text((50, 100), f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
+    draw.text((50, 100), f"Batch Size: {CLIP_BATCH_SIZE} pairs | Max ~32K negatives in large batches",
               fill=(80, 80, 80), font=font_label)
     
     # 布局参数
@@ -288,7 +293,7 @@ def create_clip_frame(
     
     # 绘制图像框 (无阴影，扁平化)
     # Draw image boxes (no shadows, flat)
-    for i in range(batch_size):
+    for i in range(CLIP_BATCH_SIZE):
         y = y_start + i * (item_height + gap)
         draw_rounded_rectangle(draw, [img_encoder_x - 80, y, img_encoder_x + 20, y + item_height],
                               radius=8, fill=image_colors[i], outline=(0, 0, 0), width=2)
@@ -298,7 +303,7 @@ def create_clip_frame(
     # Image Encoder (SAM-style, elegant design)
     encoder_x = img_encoder_x + 180
     encoder_width = CLIP_ENCODER_WIDTH
-    encoder_height = batch_size * (item_height + gap) - gap
+    encoder_height = CLIP_BATCH_SIZE * (item_height + gap) - gap
     
     # 使用更优雅的渐变效果背景
     # Use more elegant gradient-like background
@@ -323,7 +328,7 @@ def create_clip_frame(
     # 图像嵌入 (SAM风格圆圈，优雅)
     # Image embeddings (SAM-style circles, elegant)
     emb_x = encoder_x + encoder_width + 90
-    for i in range(batch_size):
+    for i in range(CLIP_BATCH_SIZE):
         y = y_start + i * (item_height + gap)
         # 添加微妙的外圈以增强视觉层次
         # Add subtle outer ring for visual hierarchy
@@ -340,7 +345,7 @@ def create_clip_frame(
     
     # 绘制文本框 (无阴影，扁平化)
     # Draw text boxes (no shadows, flat)
-    for i in range(batch_size):
+    for i in range(CLIP_BATCH_SIZE):
         y = y_start + i * (item_height + gap)
         draw_rounded_rectangle(draw, [text_encoder_x + 80, y, text_encoder_x + 180, y + item_height],
                               radius=8, fill=text_colors[i], outline=(0, 0, 0), width=2)
@@ -373,7 +378,7 @@ def create_clip_frame(
     # 文本嵌入 (SAM风格圆圈，优雅)
     # Text embeddings (SAM-style circles, elegant)
     text_emb_x = text_enc_x - 90
-    for i in range(batch_size):
+    for i in range(CLIP_BATCH_SIZE):
         y = y_start + i * (item_height + gap)
         # 添加微妙的外圈以增强视觉层次
         # Add subtle outer ring for visual hierarchy
@@ -401,7 +406,7 @@ def create_clip_frame(
     draw.text((title_x, matrix_y - 45), title_text,
               fill=(0, 0, 0), font=get_font(26, bold=True))
     
-    cell_size = matrix_size // batch_size
+    cell_size = matrix_size // CLIP_BATCH_SIZE
     
     # 动画：只高亮显示前N个配对 (由CLIP_ANIMATION_EXAMPLES定义)
     # Animation: only highlight first N pairs (defined by CLIP_ANIMATION_EXAMPLES)
@@ -411,7 +416,7 @@ def create_clip_frame(
     
     # 绘制从图像嵌入到矩阵列的连接线 (所有样本都显示，突出动画样本)
     # Draw connection lines from image embeddings to matrix columns (all samples shown, animated ones highlighted)
-    for i in range(batch_size):
+    for i in range(CLIP_BATCH_SIZE):
         img_emb_y = y_start + i * (item_height + gap) + 48
         matrix_col_x = matrix_x + i * cell_size + cell_size // 2
         # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
@@ -427,7 +432,7 @@ def create_clip_frame(
     
     # 绘制从文本嵌入到矩阵行的连接线 (所有样本都显示，突出动画样本)
     # Draw connection lines from text embeddings to matrix rows (all samples shown, animated ones highlighted)
-    for i in range(batch_size):
+    for i in range(CLIP_BATCH_SIZE):
         text_emb_y = y_start + i * (item_height + gap) + 48
         matrix_row_y = matrix_y + i * cell_size + cell_size // 2
         # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
@@ -441,8 +446,8 @@ def create_clip_frame(
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
                      fill=FAINT_LINE_COLOR, width=1)
     
-    for i in range(batch_size):
-        for j in range(batch_size):
+    for i in range(CLIP_BATCH_SIZE):
+        for j in range(CLIP_BATCH_SIZE):
             x = matrix_x + j * cell_size
             y = matrix_y + i * cell_size
             
@@ -495,9 +500,9 @@ def create_clip_frame(
                           radius=10, fill=(245, 245, 250), outline=(120, 120, 150), width=2)
     
     info_lines = [
-        f"⦿ Positive pairs: {batch_size} (diagonal - matching image-text pairs)",
-        f"⦿ Negative pairs: {batch_size * (batch_size - 1)} (off-diagonal - mismatched pairs)",
-        f"⦿ Total comparisons: {batch_size * batch_size} within batch",
+        f"⦿ Positive pairs: {CLIP_BATCH_SIZE} (diagonal - matching image-text pairs)",
+        f"⦿ Negative pairs: {CLIP_BATCH_SIZE * (CLIP_BATCH_SIZE - 1)} (off-diagonal - mismatched pairs)",
+        f"⦿ Total comparisons: {CLIP_BATCH_SIZE * CLIP_BATCH_SIZE} within batch",
         "⦿ Limitation: Negative samples scale with batch size (max ~32K in largest batches)"
     ]
     
@@ -538,12 +543,7 @@ def create_global_frame(
     
     # 布局参数
     # Layout parameters
-    batch_size = GLOBAL_BATCH_SIZE
-    sampled_negatives = GLOBAL_SAMPLED_NEGATIVES
-    total_concepts = GLOBAL_TOTAL_CONCEPTS
-    num_positive_centers = GLOBAL_NUM_POSITIVE_CENTERS
-    
-    draw.text((50, 100), f"Batch: {batch_size} images | Sampled Negatives: {sampled_negatives:,} | Total Concepts: {total_concepts:,}",
+    draw.text((50, 100), f"Batch: {GLOBAL_BATCH_SIZE} images | Sampled Negatives: {GLOBAL_SAMPLED_NEGATIVES:,} | Total Concepts: {GLOBAL_TOTAL_CONCEPTS:,}",
               fill=(80, 80, 80), font=font_label)
     
     # 左侧：图像和编码器
@@ -561,18 +561,18 @@ def create_global_frame(
     
     # 动画：循环遍历样本
     # Animation: cycle through samples
-    current_sample = (animation_step // 6) % batch_size
+    current_sample = (animation_step // 6) % GLOBAL_BATCH_SIZE
     sample_phase = (animation_step % 6)
     
     # 绘制图像框 (无阴影，扁平化)
     # Draw image boxes (no shadows, flat)
-    for i in range(batch_size):
+    for i in range(GLOBAL_BATCH_SIZE):
         y = y_start + i * (item_height + gap)
         
         # 高亮当前处理的样本 - SAM风格
         # Highlight current sample being processed - SAM-style
         if i == current_sample and sample_phase >= 2:
-            outline_color = (255, 195, 113)  # SAM风格温暖的橙色高亮
+            outline_color = HIGHLIGHT_COLOR  # SAM风格温暖的橙色高亮
             outline_width = 3
         else:
             outline_color = (100, 100, 110)  # 柔和的灰色边框
@@ -586,7 +586,7 @@ def create_global_frame(
     # Image Encoder (SAM-style)
     encoder_x = img_x + 190
     encoder_width = GLOBAL_ENCODER_WIDTH
-    encoder_height = batch_size * (item_height + gap) - gap
+    encoder_height = GLOBAL_BATCH_SIZE * (item_height + gap) - gap
     
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
                           radius=BORDER_RADIUS, fill=(235, 240, 250), outline=(100, 120, 200), width=HIGHLIGHT_BORDER_WIDTH)
@@ -609,13 +609,13 @@ def create_global_frame(
     # 图像嵌入 (SAM风格圆圈)
     # Image embeddings (SAM-style circles)
     emb_x = encoder_x + encoder_width + 100
-    for i in range(batch_size):
+    for i in range(GLOBAL_BATCH_SIZE):
         y = y_start + i * (item_height + gap)
         
         # 当前样本的优雅高亮效果
         # Elegant highlight effect for current sample
         if i == current_sample and sample_phase >= 2:
-            outline_color = (255, 195, 113)
+            outline_color = HIGHLIGHT_COLOR
             outline_width = 3
             # 添加外圈
             draw.ellipse([emb_x - 3, y + 9, emb_x + 43, y + 55],
@@ -647,7 +647,7 @@ def create_global_frame(
     draw.text((bank_x + (bank_width - title_w) // 2, bank_y + 25), title_text,
               fill=(0, 0, 0), font=font_label)
     
-    subtitle_text = f"({total_concepts:,} centers from offline clustering)"
+    subtitle_text = f"({GLOBAL_TOTAL_CONCEPTS:,} centers from offline clustering)"
     bbox = draw.textbbox((0, 0), subtitle_text, font=font_small)
     subtitle_w = bbox[2] - bbox[0]
     draw.text((bank_x + (bank_width - subtitle_w) // 2, bank_y + 55), subtitle_text,
@@ -689,7 +689,7 @@ def create_global_frame(
         # 按距离排序并取最近的10个
         # Sort by distance and take the 10 closest
         distances.sort()
-        positive_indices = [distances[i][1] for i in range(min(num_positive_centers, num_visible_concepts))]
+        positive_indices = [distances[i][1] for i in range(min(GLOBAL_NUM_POSITIVE_CENTERS, num_visible_concepts))]
         positive_centers = set(positive_indices)
         
         # 选择随机负样本中心 - 占所有可见概念的20%，分散分布
@@ -712,9 +712,9 @@ def create_global_frame(
             # 添加多层外圈增强视觉层次感
             # Add multiple outer rings for enhanced visual hierarchy
             draw.ellipse([cx - size - 3, cy - size - 3, cx + size + 3, cy + size + 3],
-                        fill=(200, 245, 220), outline=None)
+                        fill=POSITIVE_GLOW_OUTER, outline=None)
             draw.ellipse([cx - size - 1, cy - size - 1, cx + size + 1, cy + size + 1],
-                        fill=(160, 240, 200), outline=None)
+                        fill=POSITIVE_GLOW_INNER, outline=None)
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
                         fill=color, outline=(255, 255, 255), width=2)
         elif i in negative_centers:
@@ -725,7 +725,7 @@ def create_global_frame(
             # 添加轻微的外圈
             # Add subtle outer ring
             draw.ellipse([cx - size - 1, cy - size - 1, cx + size + 1, cy + size + 1],
-                        fill=(255, 180, 180), outline=None)
+                        fill=NEGATIVE_GLOW, outline=None)
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
                         fill=color, outline=(255, 255, 255), width=1)
         else:
@@ -738,7 +738,7 @@ def create_global_frame(
     
     # 从当前样本到中心的连接线 (SAM风格)
     # Connection lines from current sample to centers (SAM-style)
-    if sample_phase >= 4 and current_sample < batch_size:
+    if sample_phase >= 4 and current_sample < GLOBAL_BATCH_SIZE:
         start_x = emb_x + 40
         start_y = y_start + current_sample * (item_height + gap) + 32
         
@@ -771,8 +771,8 @@ def create_global_frame(
     # Legend items - SAM-style colors
     num_visible_negatives = int(num_visible_concepts * GLOBAL_VISIBLE_NEGATIVES_RATIO)
     legend_items = [
-        ("Selected Sample", (255, 195, 113), 9),  # SAM风格橙色
-        (f"{num_positive_centers} Positive Centers", POSITIVE_COLOR_BRIGHT, 8),  # SAM风格绿色
+        ("Selected Sample", HIGHLIGHT_COLOR, 9),  # SAM风格橙色
+        (f"{GLOBAL_NUM_POSITIVE_CENTERS} Positive Centers", POSITIVE_COLOR_BRIGHT, 8),  # SAM风格绿色
         (f"{num_visible_negatives} Sampled Negatives", NEGATIVE_COLOR_BRIGHT, 7),  # SAM风格红色
         ("Other Concepts", CONCEPT_CENTER_GRAY, 5)  # SAM风格灰色
     ]
@@ -805,7 +805,7 @@ def create_global_frame(
     
     info_lines = [
         "✓ Pure visual representation learning without text encoder",
-        f"✓ Each sample: {num_positive_centers} clustered positives + {sampled_negatives:,} sampled negatives",
+        f"✓ Each sample: {GLOBAL_NUM_POSITIVE_CENTERS} clustered positives + {GLOBAL_SAMPLED_NEGATIVES:,} sampled negatives",
         f"✓ Positives clustered together; negatives scattered across concept space",
         "✓ Concept bank built via offline clustering (e.g., K-means on ImageNet-21K)"
     ]
