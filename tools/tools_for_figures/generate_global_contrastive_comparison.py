@@ -1,14 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
+生成动画GIF来可视化CLIP对比学习和全局对比学习方法的比较
 Generate an animated GIF to visualize the comparison between CLIP's contrastive learning
 and the global contrastive learning approach.
 
-Key differences:
-1. CLIP: Image-Text pairs within a batch (limited negative samples)
-2. Global: No text encoder, 1M concept centers from offline clustering as negatives
+主要区别 / Key differences:
+1. CLIP: 批次内的图像-文本对 (有限的负样本) / Image-Text pairs within a batch (limited negative samples)
+2. Global: 无文本编码器，使用离线聚类得到的100万概念中心作为负样本 / No text encoder, 1M concept centers from offline clustering as negatives
 
-Usage:
+使用方法 / Usage:
     python generate_global_contrastive_comparison.py --output comparison.gif
     python generate_global_contrastive_comparison.py --output comparison.mp4 --video
 """
@@ -22,24 +23,47 @@ import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# Cross-platform font paths
+# 跨平台字体路径 (CVPR风格：优先使用Times/Serif字体)
+# Cross-platform font paths (CVPR style: prioritize Times/Serif fonts)
 FONT_PATHS = [
-    # Linux
+    # Linux - Times New Roman / Serif fonts for CVPR style
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    # Fallback to sans-serif if serif not available
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    # macOS
+    # macOS - Times New Roman
+    "/Library/Fonts/Times New Roman.ttf",
+    "/Library/Fonts/Times New Roman Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
     "/Library/Fonts/Arial.ttf",
-    # Windows
+    # Windows - Times New Roman for CVPR style
+    "C:/Windows/Fonts/times.ttf",
+    "C:/Windows/Fonts/timesbd.ttf",
     "C:/Windows/Fonts/arial.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
 ]
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """Get a font with cross-platform support."""
+    """
+    获取跨平台支持的字体 (CVPR风格)
+    Get a font with cross-platform support (CVPR style)
+    
+    Args:
+        size: 字体大小 / Font size
+        bold: 是否使用粗体 / Whether to use bold font
+    
+    Returns:
+        ImageFont.FreeTypeFont: 字体对象 / Font object
+    """
+    # 首先尝试查找匹配bold参数的字体
+    # First try to find fonts matching the bold parameter
     for font_path in FONT_PATHS:
         if os.path.exists(font_path):
             if bold and ("Bold" in font_path or "bd" in font_path.lower()):
@@ -52,13 +76,18 @@ def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
                     return ImageFont.truetype(font_path, size)
                 except OSError:
                     continue
-    # Fallback
+    
+    # 回退：尝试任何可用的字体
+    # Fallback: try any available font
     for font_path in FONT_PATHS:
         if os.path.exists(font_path):
             try:
                 return ImageFont.truetype(font_path, size)
             except OSError:
                 continue
+    
+    # 最终回退：使用默认字体
+    # Final fallback: use default font
     return ImageFont.load_default()
 
 
@@ -70,132 +99,138 @@ def draw_rounded_rectangle(
     outline: Optional[Tuple[int, int, int]] = None,
     width: int = 1
 ) -> None:
-    """Draw a rounded rectangle with fallback for older Pillow versions."""
+    """
+    绘制圆角矩形，支持旧版本Pillow的回退方案
+    Draw a rounded rectangle with fallback for older Pillow versions
+    
+    Args:
+        draw: ImageDraw对象 / ImageDraw object
+        xy: 坐标列表 [x1, y1, x2, y2] / Coordinate list [x1, y1, x2, y2]
+        radius: 圆角半径 / Corner radius
+        fill: 填充颜色 / Fill color
+        outline: 边框颜色 / Outline color
+        width: 边框宽度 / Border width
+    """
     try:
         draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
     except AttributeError:
+        # 如果Pillow版本不支持rounded_rectangle，使用普通矩形
+        # If Pillow version doesn't support rounded_rectangle, use regular rectangle
         draw.rectangle(xy, fill=fill, outline=outline, width=width)
 
 
 def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Image:
-    """Create an introduction title frame with publication-quality design."""
-    # Create smooth gradient background (soft blue to white)
+    """
+    创建扁平化风格的标题帧 (CLIP/SAM论文风格)
+    Create a flat-style title frame (CLIP/SAM paper style)
+    
+    Args:
+        canvas_size: 画布大小 / Canvas size (width, height)
+    
+    Returns:
+        Image.Image: 标题帧图像 / Title frame image
+    """
+    # 创建纯白色背景 (扁平化风格)
+    # Create pure white background (flat style)
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    font_title = get_font(64, bold=True)
-    font_subtitle = get_font(36, bold=False)
-    font_text = get_font(26, bold=False)
+    # 使用较小的字体以避免超出框
+    # Use smaller fonts to avoid overflow
+    font_title = get_font(52, bold=True)
+    font_subtitle = get_font(30, bold=False)
+    font_text = get_font(22, bold=False)
     
-    # Sophisticated gradient background with smooth transition
-    for y in range(canvas_size[1]):
-        alpha = y / canvas_size[1]
-        # Smooth gradient from light blue to pure white
-        r = int(240 + (255 - 240) * alpha ** 0.7)
-        g = int(247 + (255 - 247) * alpha ** 0.7)
-        b = int(255)
-        draw.line([(0, y), (canvas_size[0], y)], fill=(r, g, b))
-    
-    # Main title with shadow effect for depth
+    # 主标题 (无阴影，扁平化)
+    # Main title (no shadow, flat)
     title = "Visual Contrastive Learning"
     bbox = draw.textbbox((0, 0), title, font=font_title)
     title_w = bbox[2] - bbox[0]
     title_x = canvas_size[0] // 2 - title_w // 2
-    title_y = 180
+    title_y = 160
+    draw.text((title_x, title_y), title, fill=(0, 0, 0), font=font_title)
     
-    # Shadow
-    draw.text((title_x + 3, title_y + 3), title, fill=(180, 190, 200), font=font_title)
-    # Main text
-    draw.text((title_x, title_y), title, fill=(30, 64, 175), font=font_title)
-    
-    # Elegant subtitle
+    # 副标题
+    # Subtitle
     subtitle = "Comparing CLIP and Global Contrastive Approaches"
     bbox = draw.textbbox((0, 0), subtitle, font=font_subtitle)
     subtitle_w = bbox[2] - bbox[0]
-    draw.text((canvas_size[0] // 2 - subtitle_w // 2, 270), subtitle,
-              fill=(71, 85, 105), font=font_subtitle)
+    draw.text((canvas_size[0] // 2 - subtitle_w // 2, 230), subtitle,
+              fill=(60, 60, 60), font=font_subtitle)
     
-    # Elegant divider with gradient effect
-    div_y = 350
-    for i in range(3):
-        opacity = 255 - i * 60
-        draw.line([(canvas_size[0] // 2 - 500, div_y + i), (canvas_size[0] // 2 + 500, div_y + i)],
-                  fill=(200 - i*20, 210 - i*20, 230 - i*10), width=1)
+    # 简单分隔线 (扁平化)
+    # Simple divider line (flat)
+    div_y = 290
+    draw.line([(canvas_size[0] // 2 - 400, div_y), (canvas_size[0] // 2 + 400, div_y)],
+              fill=(180, 180, 180), width=2)
     
-    # Enhanced content boxes with better spacing and visual hierarchy
-    y_start = 440
-    box_width = 750
-    box_height = 520
-    gap = 140
+    # 对比框布局 (扁平化，无阴影)
+    # Comparison boxes layout (flat, no shadows)
+    y_start = 360
+    box_width = 700
+    box_height = 480
+    gap = 120
     
-    # CLIP box with sophisticated styling
+    # CLIP框 (扁平化设计)
+    # CLIP box (flat design)
     clip_x = canvas_size[0] // 2 - box_width - gap // 2
     
-    # Add subtle shadow for depth
-    for offset in range(8, 0, -2):
-        shadow_alpha = 20 - offset * 2
-        shadow_color = (200, 205, 210)
-        draw_rounded_rectangle(draw, 
-            [clip_x + offset, y_start + offset, 
-             clip_x + box_width + offset, y_start + box_height + offset],
-            radius=20, fill=None, outline=shadow_color, width=1)
-    
+    # 使用简单的矩形边框，无阴影
+    # Use simple rectangle border, no shadows
     draw_rounded_rectangle(draw, [clip_x, y_start, clip_x + box_width, y_start + box_height],
-                          radius=20, fill=(249, 250, 251), outline=(147, 197, 253), width=4)
+                          radius=15, fill=(245, 245, 250), outline=(100, 100, 150), width=3)
     
-    # Title with icon-like accent
-    draw.text((clip_x + 280, y_start + 40), "CLIP", fill=(37, 99, 235), font=font_subtitle)
-    draw.text((clip_x + 200, y_start + 42), "▶", fill=(96, 165, 250), font=font_subtitle)
+    # 标题
+    # Title
+    draw.text((clip_x + 290, y_start + 30), "CLIP", fill=(50, 50, 100), font=font_subtitle)
     
+    # 特征列表
+    # Feature list
     clip_features = [
         "• Image-Text paired learning",
         "• Batch-level contrastive loss",
         "• Limited negative samples",
         "  (batch size: 32-1024)",
-        "  (max ~32K negatives)",
         "• Dual encoder architecture:",
-        "  › Image Encoder (ViT)",
-        "  › Text Encoder (Transformer)",
-        "• Cross-modal semantic alignment"
+        "  › Image Encoder",
+        "  › Text Encoder",
+        "• Cross-modal alignment"
     ]
     
     for i, feature in enumerate(clip_features):
-        draw.text((clip_x + 70, y_start + 140 + i * 48), feature,
-                 fill=(51, 65, 85), font=font_text)
+        draw.text((clip_x + 60, y_start + 100 + i * 42), feature,
+                 fill=(40, 40, 40), font=font_text)
     
-    # Global box with sophisticated styling
+    # Global框 (扁平化设计)
+    # Global box (flat design)
     global_x = canvas_size[0] // 2 + gap // 2
     
-    # Add subtle shadow for depth
-    for offset in range(8, 0, -2):
-        shadow_color = (200, 205, 210)
-        draw_rounded_rectangle(draw, 
-            [global_x + offset, y_start + offset, 
-             global_x + box_width + offset, y_start + box_height + offset],
-            radius=20, fill=None, outline=shadow_color, width=1)
-    
+    # 使用简单的矩形边框，无阴影
+    # Use simple rectangle border, no shadows
     draw_rounded_rectangle(draw, [global_x, y_start, global_x + box_width, y_start + box_height],
-                          radius=20, fill=(240, 249, 255), outline=(59, 130, 246), width=4)
+                          radius=15, fill=(240, 245, 255), outline=(80, 120, 180), width=3)
     
-    # Title with icon-like accent
-    draw.text((global_x + 180, y_start + 40), "Global Contrastive",
-              fill=(30, 64, 175), font=font_subtitle)
-    draw.text((global_x + 100, y_start + 42), "◆", fill=(59, 130, 246), font=font_subtitle)
+    # 标题
+    # Title
+    draw.text((global_x + 200, y_start + 30), "Global Contrastive",
+              fill=(40, 80, 140), font=font_subtitle)
     
+    # 特征列表
+    # Feature list
     global_features = [
         "• Image-only representation",
         "• Global negative sampling",
         "• 1M concept centers pool",
         "  (offline clustering)",
-        "• Single encoder architecture:",
+        "• Single encoder:",
         "  › Image Encoder only",
         "• Massive negative sampling:",
         "  › 1024+ negatives per batch"
     ]
     
     for i, feature in enumerate(global_features):
-        draw.text((global_x + 70, y_start + 140 + i * 48), feature,
-                 fill=(23, 37, 84), font=font_text)
+        draw.text((global_x + 60, y_start + 100 + i * 42), feature,
+                 fill=(40, 40, 40), font=font_text)
     
     return canvas
 
@@ -204,170 +239,137 @@ def create_clip_frame(
     canvas_size: Tuple[int, int] = (1920, 1080),
     animation_step: int = 0
 ) -> Image.Image:
-    """Create a frame showing CLIP's contrastive learning with publication-quality design."""
-    # Elegant gradient background
+    """
+    创建展示CLIP对比学习的扁平化帧 (CLIP/SAM论文风格)
+    Create a flat-style frame showing CLIP's contrastive learning (CLIP/SAM paper style)
+    
+    Args:
+        canvas_size: 画布大小 / Canvas size (width, height)
+        animation_step: 动画步骤 / Animation step for highlighting
+    
+    Returns:
+        Image.Image: CLIP帧图像 / CLIP frame image
+    """
+    # 纯白色背景 (扁平化)
+    # Pure white background (flat)
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    # Smooth gradient from top to bottom
-    for y in range(canvas_size[1]):
-        alpha = (y / canvas_size[1]) ** 0.6
-        r = int(252 + (255 - 252) * alpha)
-        g = int(252 + (255 - 252) * alpha)
-        b = int(253 + (255 - 253) * alpha)
-        draw.line([(0, y), (canvas_size[0], y)], fill=(r, g, b))
+    font_title = get_font(40, bold=True)
+    font_label = get_font(22, bold=False)
+    font_small = get_font(18, bold=False)
     
-    font_title = get_font(44, bold=True)
-    font_label = get_font(24, bold=False)
-    font_small = get_font(20, bold=False)
-    
-    # Title with shadow for depth
+    # 标题 (无阴影)
+    # Title (no shadow)
     title_text = "CLIP: Batch-Level Image-Text Contrastive Learning"
-    draw.text((53, 43), title_text, fill=(180, 190, 200), font=font_title)
-    draw.text((50, 40), title_text, fill=(37, 99, 235), font=font_title)
+    draw.text((50, 40), title_text, fill=(0, 0, 0), font=font_title)
     
-    # Enhanced subtitle
+    # 副标题
+    # Subtitle
     batch_size = 8
-    draw.text((50, 105), f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
-              fill=(71, 85, 105), font=font_label)
+    draw.text((50, 100), f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
+              fill=(80, 80, 80), font=font_label)
     
-    # Layout with improved spacing
+    # 布局参数
+    # Layout parameters
     img_encoder_x = 200
     text_encoder_x = 1500
-    y_start = 210
+    y_start = 200
     item_height = 95
     gap = 12
     
-    # Draw images on the left with label
-    draw.text((img_encoder_x - 90, 165), "Images", fill=(37, 99, 235), font=font_label)
+    # 左侧图像标签
+    # Left side images label
+    draw.text((img_encoder_x - 90, 155), "Images", fill=(0, 0, 0), font=font_label)
     
-    # Modern color palette
+    # 扁平化配色方案
+    # Flat color scheme
     image_colors = [
         (239, 68, 68), (34, 197, 94), (59, 130, 246), (251, 191, 36),
         (168, 85, 247), (20, 184, 166), (249, 115, 22), (236, 72, 153)
     ]
     
+    # 绘制图像框 (无阴影，扁平化)
+    # Draw image boxes (no shadows, flat)
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
-        
-        # Add subtle shadow for depth
-        for offset in range(4, 0, -1):
-            shadow_color = (220 - offset*10, 220 - offset*10, 220 - offset*10)
-            draw_rounded_rectangle(draw, 
-                [img_encoder_x - 80 + offset, y + offset, 
-                 img_encoder_x + 20 + offset, y + item_height + offset],
-                radius=10, fill=None, outline=shadow_color, width=1)
-        
-        # Image box with gradient effect
         draw_rounded_rectangle(draw, [img_encoder_x - 80, y, img_encoder_x + 20, y + item_height],
-                              radius=10, fill=image_colors[i], outline=(255, 255, 255), width=3)
+                              radius=8, fill=image_colors[i], outline=(0, 0, 0), width=2)
         draw.text((img_encoder_x - 63, y + 32), f"I{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # Image Encoder with enhanced styling
+    # 图像编码器 (扁平化，无阴影)
+    # Image Encoder (flat, no shadows)
     encoder_x = img_encoder_x + 160
     encoder_width = 200
     encoder_height = batch_size * (item_height + gap) - gap
     
-    # Shadow for depth
-    for offset in range(6, 0, -2):
-        shadow_color = (200 - offset*8, 205 - offset*8, 215 - offset*8)
-        draw_rounded_rectangle(draw, 
-            [encoder_x + offset, y_start + offset, 
-             encoder_x + encoder_width + offset, y_start + encoder_height + offset],
-            radius=15, fill=None, outline=shadow_color, width=1)
-    
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=15, fill=(30, 58, 138), outline=(96, 165, 250), width=4)
+                          radius=10, fill=(220, 220, 240), outline=(80, 80, 120), width=3)
     
-    # Encoder label with better positioning
-    draw.text((encoder_x + 48, y_start + encoder_height // 2 - 35), "Image",
-              fill=(191, 219, 254), font=font_label)
-    draw.text((encoder_x + 35, y_start + encoder_height // 2 - 5), "Encoder",
-              fill=(191, 219, 254), font=font_label)
-    draw.text((encoder_x + 40, y_start + encoder_height // 2 + 30), "(ViT-L)",
-              fill=(147, 197, 253), font=font_small)
+    # 编码器标签 (仅"Image Encoder"，不显示ViT-L)
+    # Encoder label (only "Image Encoder", no ViT-L)
+    draw.text((encoder_x + 48, y_start + encoder_height // 2 - 20), "Image",
+              fill=(40, 40, 80), font=font_label)
+    draw.text((encoder_x + 35, y_start + encoder_height // 2 + 10), "Encoder",
+              fill=(40, 40, 80), font=font_label)
     
-    # Image embeddings with enhanced appearance
+    # 图像嵌入 (扁平化圆圈，无发光)
+    # Image embeddings (flat circles, no glow)
     emb_x = encoder_x + encoder_width + 110
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
-        # Subtle glow effect
-        for offset in range(3, 0, -1):
-            glow_alpha = 80 - offset * 20
-            draw.ellipse([emb_x + 20 - offset*3, y + 28 - offset*3, 
-                         emb_x + 20 + offset*3, y + 68 + offset*3],
-                        fill=None, outline=image_colors[i], width=1)
-        # Main embedding
         draw.ellipse([emb_x, y + 28, emb_x + 40, y + 68],
-                    fill=image_colors[i], outline=(255, 255, 255), width=3)
+                    fill=image_colors[i], outline=(0, 0, 0), width=2)
     
-    # Draw texts on the right with label
-    draw.text((text_encoder_x + 110, 165), "Texts", fill=(249, 115, 22), font=font_label)
+    # 右侧文本标签
+    # Right side texts label
+    draw.text((text_encoder_x + 110, 155), "Texts", fill=(0, 0, 0), font=font_label)
     
-    text_colors = image_colors  # Same colors for matching pairs
+    text_colors = image_colors  # 匹配的配对使用相同颜色 / Same colors for matching pairs
     
+    # 绘制文本框 (无阴影，扁平化)
+    # Draw text boxes (no shadows, flat)
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
-        
-        # Add shadow for depth
-        for offset in range(4, 0, -1):
-            shadow_color = (220 - offset*10, 220 - offset*10, 220 - offset*10)
-            draw_rounded_rectangle(draw, 
-                [text_encoder_x + 80 + offset, y + offset, 
-                 text_encoder_x + 180 + offset, y + item_height + offset],
-                radius=10, fill=None, outline=shadow_color, width=1)
-        
-        # Text box
         draw_rounded_rectangle(draw, [text_encoder_x + 80, y, text_encoder_x + 180, y + item_height],
-                              radius=10, fill=text_colors[i], outline=(255, 255, 255), width=3)
+                              radius=8, fill=text_colors[i], outline=(0, 0, 0), width=2)
         draw.text((text_encoder_x + 107, y + 32), f"T{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # Text Encoder with enhanced styling
+    # 文本编码器 (扁平化，无阴影)
+    # Text Encoder (flat, no shadows)
     text_enc_x = text_encoder_x - 160
     
-    # Shadow for depth
-    for offset in range(6, 0, -2):
-        shadow_color = (200 - offset*8, 205 - offset*8, 215 - offset*8)
-        draw_rounded_rectangle(draw, 
-            [text_enc_x + offset, y_start + offset, 
-             text_enc_x + encoder_width + offset, y_start + encoder_height + offset],
-            radius=15, fill=None, outline=shadow_color, width=1)
-    
     draw_rounded_rectangle(draw, [text_enc_x, y_start, text_enc_x + encoder_width, y_start + encoder_height],
-                          radius=15, fill=(124, 58, 237), outline=(196, 181, 253), width=4)
+                          radius=10, fill=(235, 220, 245), outline=(100, 60, 150), width=3)
     
+    # 编码器标签
     # Encoder label
-    draw.text((text_enc_x + 58, y_start + encoder_height // 2 - 35), "Text",
-              fill=(233, 213, 255), font=font_label)
-    draw.text((text_enc_x + 35, y_start + encoder_height // 2 - 5), "Encoder",
-              fill=(233, 213, 255), font=font_label)
-    draw.text((text_enc_x + 15, y_start + encoder_height // 2 + 30), "(Transformer)",
-              fill=(196, 181, 253), font=font_small)
+    draw.text((text_enc_x + 58, y_start + encoder_height // 2 - 20), "Text",
+              fill=(60, 30, 90), font=font_label)
+    draw.text((text_enc_x + 35, y_start + encoder_height // 2 + 10), "Encoder",
+              fill=(60, 30, 90), font=font_label)
     
-    # Text embeddings
+    # 文本嵌入 (扁平化圆圈，无发光)
+    # Text embeddings (flat circles, no glow)
     text_emb_x = text_enc_x - 90
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
-        # Subtle glow effect
-        for offset in range(3, 0, -1):
-            draw.ellipse([text_emb_x + 20 - offset*3, y + 28 - offset*3, 
-                         text_emb_x + 20 + offset*3, y + 68 + offset*3],
-                        fill=None, outline=text_colors[i], width=1)
-        # Main embedding
         draw.ellipse([text_emb_x, y + 28, text_emb_x + 40, y + 68],
-                    fill=text_colors[i], outline=(255, 255, 255), width=3)
+                    fill=text_colors[i], outline=(0, 0, 0), width=2)
     
-    # Enhanced contrastive matrix in the center
+    # 中间的相似度矩阵 (扁平化)
+    # Contrastive matrix in the center (flat)
     matrix_size = 420
     matrix_x = canvas_size[0] // 2 - matrix_size // 2
     matrix_y = y_start + 80
     
-    draw.text((matrix_x + 110, matrix_y - 45), "Similarity Matrix",
-              fill=(71, 85, 105), font=font_label)
+    draw.text((matrix_x + 110, matrix_y - 40), "Similarity Matrix",
+              fill=(0, 0, 0), font=font_label)
     
     cell_size = matrix_size // batch_size
     
-    # Animation: highlight matching pairs with smooth effect
+    # 动画：高亮显示匹配的配对
+    # Animation: highlight matching pairs
     highlight_pair = (animation_step // 3) % batch_size
     
     for i in range(batch_size):
@@ -375,45 +377,33 @@ def create_clip_frame(
             x = matrix_x + j * cell_size
             y = matrix_y + i * cell_size
             
+            # 对角线是正样本对，非对角线是负样本
             # Diagonal are positive pairs, off-diagonal are negatives
             if i == j:
-                # Positive pair with vibrant green
+                # 正样本对 (绿色)
+                # Positive pair (green)
                 if i == highlight_pair:
-                    color = (34, 197, 94)  # Bright green
-                    alpha = 240
+                    color = (74, 222, 128)  # 亮绿色 / Bright green
                 else:
-                    color = (74, 222, 128)  # Light green
-                    alpha = 180
+                    color = (187, 247, 208)  # 浅绿色 / Light green
             else:
-                # Negative pair with red tones
+                # 负样本对 (红色)
+                # Negative pair (red)
                 if i == highlight_pair or j == highlight_pair:
-                    color = (239, 68, 68)  # Bright red
-                    alpha = 120
+                    color = (252, 165, 165)  # 亮红色 / Bright red
                 else:
-                    color = (252, 165, 165)  # Light red
-                    alpha = 80
-            
-            # Blend with background
-            bg = (248, 250, 252)
-            final_color = tuple(int(bg[k] * (1 - alpha/255) + color[k] * (alpha/255)) for k in range(3))
+                    color = (254, 226, 226)  # 浅红色 / Light red
             
             draw.rectangle([x + 1, y + 1, x + cell_size - 2, y + cell_size - 2],
-                         fill=final_color, outline=(203, 213, 225), width=1)
+                         fill=color, outline=(180, 180, 180), width=1)
     
-    # Enhanced info box at bottom
+    # 底部信息框 (扁平化)
+    # Info box at bottom (flat)
     info_y = y_start + encoder_height + 100
-    info_height = 160
-    
-    # Shadow for info box
-    for offset in range(6, 0, -2):
-        shadow_color = (200 - offset*8, 205 - offset*8, 215 - offset*8)
-        draw_rounded_rectangle(draw, 
-            [200 + offset, info_y + offset, 
-             canvas_size[0] - 200 + offset, info_y + info_height + offset],
-            radius=15, fill=None, outline=shadow_color, width=1)
+    info_height = 140
     
     draw_rounded_rectangle(draw, [200, info_y, canvas_size[0] - 200, info_y + info_height],
-                          radius=15, fill=(248, 250, 252), outline=(147, 197, 253), width=4)
+                          radius=10, fill=(245, 245, 250), outline=(120, 120, 150), width=2)
     
     info_lines = [
         f"⦿ Positive pairs: {batch_size} (diagonal - matching image-text pairs)",
@@ -423,7 +413,7 @@ def create_clip_frame(
     ]
     
     for i, line in enumerate(info_lines):
-        draw.text((240, info_y + 24 + i * 34), line, fill=(51, 65, 85), font=font_small)
+        draw.text((240, info_y + 18 + i * 30), line, fill=(40, 40, 40), font=font_small)
     
     return canvas
 
@@ -432,183 +422,141 @@ def create_global_frame(
     canvas_size: Tuple[int, int] = (1920, 1080),
     animation_step: int = 0
 ) -> Image.Image:
-    """Create a frame showing Global Contrastive Learning with publication-quality design."""
-    # Elegant gradient background
+    """
+    创建展示全局对比学习的扁平化帧 (CLIP/SAM论文风格)
+    Create a flat-style frame showing Global Contrastive Learning (CLIP/SAM paper style)
+    
+    Args:
+        canvas_size: 画布大小 / Canvas size (width, height)
+        animation_step: 动画步骤 / Animation step for highlighting
+    
+    Returns:
+        Image.Image: 全局对比学习帧图像 / Global contrastive frame image
+    """
+    # 纯白色背景 (扁平化)
+    # Pure white background (flat)
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    # Smooth gradient
-    for y in range(canvas_size[1]):
-        alpha = (y / canvas_size[1]) ** 0.6
-        r = int(250 + (255 - 250) * alpha)
-        g = int(251 + (255 - 251) * alpha)
-        b = int(254 + (255 - 254) * alpha)
-        draw.line([(0, y), (canvas_size[0], y)], fill=(r, g, b))
+    font_title = get_font(40, bold=True)
+    font_label = get_font(22, bold=False)
+    font_small = get_font(18, bold=False)
     
-    font_title = get_font(44, bold=True)
-    font_label = get_font(24, bold=False)
-    font_small = get_font(20, bold=False)
-    font_tiny = get_font(16, bold=False)
-    
-    # Title with shadow for depth
+    # 标题 (无阴影)
+    # Title (no shadow)
     title_text = "Global Contrastive Learning: 1M Concept Centers"
-    draw.text((53, 43), title_text, fill=(180, 190, 200), font=font_title)
-    draw.text((50, 40), title_text, fill=(30, 64, 175), font=font_title)
+    draw.text((50, 40), title_text, fill=(0, 0, 0), font=font_title)
     
-    # Layout
+    # 布局参数
+    # Layout parameters
     batch_size = 8
     sampled_negatives = 1024
     total_concepts = 1000000
     num_positive_centers = 10
     
-    draw.text((50, 105), f"Batch: {batch_size} images | Sampled Negatives: {sampled_negatives:,} | Total Concepts: {total_concepts:,}",
-              fill=(71, 85, 105), font=font_label)
+    draw.text((50, 100), f"Batch: {batch_size} images | Sampled Negatives: {sampled_negatives:,} | Total Concepts: {total_concepts:,}",
+              fill=(80, 80, 80), font=font_label)
     
-    # Left side: Images and encoder with improved layout
+    # 左侧：图像和编码器
+    # Left side: Images and encoder
     img_x = 150
-    y_start = 210
+    y_start = 200
     item_height = 75
     gap = 20
     
-    draw.text((img_x - 40, 165), "Images", fill=(30, 64, 175), font=font_label)
+    draw.text((img_x - 40, 155), "Images", fill=(0, 0, 0), font=font_label)
     
-    # Modern color palette matching CLIP
+    # 扁平化配色方案
+    # Flat color scheme
     image_colors = [
         (239, 68, 68), (34, 197, 94), (59, 130, 246), (251, 191, 36),
         (168, 85, 247), (20, 184, 166), (249, 115, 22), (236, 72, 153)
     ]
     
+    # 动画：循环遍历样本
     # Animation: cycle through samples
     current_sample = (animation_step // 6) % batch_size
     sample_phase = (animation_step % 6)
     
+    # 绘制图像框 (无阴影，扁平化)
+    # Draw image boxes (no shadows, flat)
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
         
+        # 高亮当前处理的样本
         # Highlight current sample being processed
         if i == current_sample and sample_phase >= 2:
-            outline_color = (251, 191, 36)  # Vibrant yellow
+            outline_color = (251, 191, 36)  # 鲜明黄色 / Vibrant yellow
             outline_width = 4
-            glow = True
         else:
-            outline_color = (203, 213, 225)
+            outline_color = (0, 0, 0)
             outline_width = 2
-            glow = False
-        
-        # Draw sophisticated glow effect
-        if glow:
-            for offset in range(6, 0, -2):
-                alpha = 120 - offset * 15
-                glow_alpha = alpha / 255
-                glow_r = int(255 * glow_alpha + 255 * (1 - glow_alpha))
-                glow_g = int(200 * glow_alpha + 255 * (1 - glow_alpha))
-                glow_b = int(0 * glow_alpha + 255 * (1 - glow_alpha))
-                draw_rounded_rectangle(draw, 
-                    [img_x - 60 - offset*2, y - offset*2, 
-                     img_x + 40 + offset*2, y + item_height + offset*2],
-                    radius=12, fill=None, outline=(glow_r, glow_g, glow_b), width=2)
-        
-        # Add shadow for depth
-        for offset in range(4, 0, -1):
-            shadow_color = (220 - offset*10, 220 - offset*10, 220 - offset*10)
-            draw_rounded_rectangle(draw, 
-                [img_x - 60 + offset, y + offset, 
-                 img_x + 40 + offset, y + item_height + offset],
-                radius=12, fill=None, outline=shadow_color, width=1)
         
         draw_rounded_rectangle(draw, [img_x - 60, y, img_x + 40, y + item_height],
-                              radius=12, fill=image_colors[i], outline=outline_color, width=outline_width)
+                              radius=8, fill=image_colors[i], outline=outline_color, width=outline_width)
         draw.text((img_x - 43, y + 22), f"I{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # Image Encoder with sophisticated styling
+    # 图像编码器 (扁平化，无阴影)
+    # Image Encoder (flat, no shadows)
     encoder_x = img_x + 190
     encoder_width = 200
     encoder_height = batch_size * (item_height + gap) - gap
     
-    # Shadow for depth
-    for offset in range(6, 0, -2):
-        shadow_color = (200 - offset*8, 205 - offset*8, 215 - offset*8)
-        draw_rounded_rectangle(draw, 
-            [encoder_x + offset, y_start + offset, 
-             encoder_x + encoder_width + offset, y_start + encoder_height + offset],
-            radius=15, fill=None, outline=shadow_color, width=1)
-    
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=15, fill=(30, 58, 138), outline=(59, 130, 246), width=4)
+                          radius=10, fill=(220, 220, 240), outline=(80, 80, 120), width=3)
     
-    # Add encoder details with better typography
-    draw.text((encoder_x + 48, y_start + encoder_height // 2 - 40), "Image",
-              fill=(191, 219, 254), font=font_label)
-    draw.text((encoder_x + 35, y_start + encoder_height // 2 - 10), "Encoder",
-              fill=(191, 219, 254), font=font_label)
-    draw.text((encoder_x + 40, y_start + encoder_height // 2 + 25), "(ViT-L/14)",
-              fill=(147, 197, 253), font=font_small)
+    # 编码器标签 (仅"Image Encoder"，不显示ViT-L/14)
+    # Encoder label (only "Image Encoder", no ViT-L/14)
+    draw.text((encoder_x + 48, y_start + encoder_height // 2 - 20), "Image",
+              fill=(40, 40, 80), font=font_label)
+    draw.text((encoder_x + 35, y_start + encoder_height // 2 + 10), "Encoder",
+              fill=(40, 40, 80), font=font_label)
     
-    # Image embeddings with sophisticated animation
+    # 图像嵌入 (扁平化圆圈，无发光)
+    # Image embeddings (flat circles, no glow)
     emb_x = encoder_x + encoder_width + 100
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
         
-        # Enhanced pulse effect for current sample
+        # 当前样本的脉冲效果 (扁平化版本)
+        # Pulse effect for current sample (flat version)
         if i == current_sample and sample_phase >= 2:
-            pulse = 1.0 + 0.15 * np.sin(animation_step * 0.5)
-            size = int(20 * pulse)
-            # Multi-layer glow
-            for offset in range(4, 0, -1):
-                glow_size = size + offset * 2
-                draw.ellipse([emb_x + 20 - glow_size, y + 12, 
-                            emb_x + 20 + glow_size, y + 52],
-                           fill=None, outline=(251, 191, 36), width=1)
-            draw.ellipse([emb_x + 20 - size, y + 12, emb_x + 20 + size, y + 52],
-                        fill=image_colors[i], outline=(251, 191, 36), width=4)
+            outline_color = (251, 191, 36)
+            outline_width = 3
         else:
-            # Normal state with subtle glow
-            for offset in range(2, 0, -1):
-                draw.ellipse([emb_x + 20 - offset*3, y + 12 - offset*3, 
-                            emb_x + 20 + offset*3, y + 52 + offset*3],
-                           fill=None, outline=image_colors[i], width=1)
-            draw.ellipse([emb_x, y + 12, emb_x + 40, y + 52],
-                        fill=image_colors[i], outline=(255, 255, 255), width=3)
+            outline_color = (0, 0, 0)
+            outline_width = 2
+        
+        draw.ellipse([emb_x, y + 12, emb_x + 40, y + 52],
+                    fill=image_colors[i], outline=outline_color, width=outline_width)
     
-    # Concept Bank visualization (right side) - Publication quality
+    # 概念中心库可视化 (右侧) - 扁平化风格
+    # Concept Bank visualization (right side) - Flat style
     bank_x = 1000
-    bank_y = 165
+    bank_y = 155
     bank_width = 820
     bank_height = 720
     
-    # Sophisticated gradient background
-    for i in range(bank_height):
-        alpha = (i / bank_height) ** 0.8
-        # Deep blue gradient
-        r = int(240 + (250 - 240) * alpha)
-        g = int(245 + (252 - 245) * alpha)
-        b = int(250 + (255 - 250) * alpha)
-        draw.line([(bank_x, bank_y + i), (bank_x + bank_width, bank_y + i)], fill=(r, g, b))
-    
-    # Shadow for depth
-    for offset in range(8, 0, -2):
-        shadow_color = (200 - offset*6, 205 - offset*6, 215 - offset*6)
-        draw_rounded_rectangle(draw, 
-            [bank_x + offset, bank_y + offset, 
-             bank_x + bank_width + offset, bank_y + bank_height + offset],
-            radius=20, fill=None, outline=shadow_color, width=1)
-    
+    # 简单的矩形边框 (无阴影，扁平化)
+    # Simple rectangle border (no shadows, flat)
     draw_rounded_rectangle(draw, [bank_x, bank_y, bank_x + bank_width, bank_y + bank_height],
-                          radius=20, fill=None, outline=(59, 130, 246), width=5)
+                          radius=15, fill=(245, 248, 252), outline=(100, 120, 150), width=3)
     
-    # Title with better styling
+    # 标题
+    # Title
     title_text = "Concept Centers Bank"
     bbox = draw.textbbox((0, 0), title_text, font=font_label)
     title_w = bbox[2] - bbox[0]
     draw.text((bank_x + (bank_width - title_w) // 2, bank_y + 25), title_text,
-              fill=(30, 64, 175), font=font_label)
+              fill=(0, 0, 0), font=font_label)
     
     subtitle_text = f"({total_concepts:,} centers from offline clustering)"
     bbox = draw.textbbox((0, 0), subtitle_text, font=font_small)
     subtitle_w = bbox[2] - bbox[0]
-    draw.text((bank_x + (bank_width - subtitle_w) // 2, bank_y + 60), subtitle_text,
-              fill=(71, 85, 105), font=font_small)
+    draw.text((bank_x + (bank_width - subtitle_w) // 2, bank_y + 55), subtitle_text,
+              fill=(80, 80, 80), font=font_small)
     
+    # 创建稳定的随机位置用于概念中心
     # Create stable random positions for concept centers
     rng = np.random.default_rng(42)
     num_visible_concepts = 320
@@ -618,30 +566,36 @@ def create_global_frame(
         cy = bank_y + 130 + rng.integers(0, bank_height - 240)
         concept_positions.append((cx, cy, i))
     
+    # 确定要高亮的概念（基于当前样本）
     # Determine which concepts to highlight based on current sample
     positive_centers = set()
     negative_centers = set()
     
     if sample_phase >= 3:
+        # 为当前样本选择10个正样本中心 - 聚集在一起
         # Select 10 positive centers for current sample - clustered together
         sample_seed = current_sample * 1000
         pos_rng = np.random.default_rng(sample_seed)
         
+        # 选择一个随机中心点作为正样本聚类中心
         # Pick a random center point for the positive cluster
         cluster_center_idx = pos_rng.integers(0, num_visible_concepts)
         cluster_cx, cluster_cy, _ = concept_positions[cluster_center_idx]
         
+        # 找到距离聚类中心最近的10个中心
         # Find the 10 closest centers to the cluster center
         distances = []
         for i, (cx, cy, idx) in enumerate(concept_positions):
             dist = (cx - cluster_cx)**2 + (cy - cluster_cy)**2
             distances.append((dist, i))
         
+        # 按距离排序并取最近的10个
         # Sort by distance and take the 10 closest
         distances.sort()
         positive_indices = [distances[i][1] for i in range(min(num_positive_centers, num_visible_concepts))]
         positive_centers = set(positive_indices)
         
+        # 选择随机负样本中心 - 占所有可见概念的20%，分散分布
         # Select random negative centers - 20% of all visible concepts, scattered
         neg_rng = np.random.default_rng(sample_seed + 1)
         available = [i for i in range(num_visible_concepts) if i not in positive_centers]
@@ -649,7 +603,8 @@ def create_global_frame(
         negative_indices = neg_rng.choice(len(available), size=min(num_visible_negatives, len(available)), replace=False)
         negative_centers = set(available[i] for i in negative_indices)
     
-    # Draw concept centers with publication-quality styling
+    # 绘制概念中心 (扁平化风格)
+    # Draw concept centers (flat style)
     modern_palette = [
         (239, 68, 68), (34, 197, 94), (59, 130, 246), (251, 191, 36),
         (168, 85, 247), (20, 184, 166), (249, 115, 22), (236, 72, 153),
@@ -657,91 +612,71 @@ def create_global_frame(
     ]
     
     for cx, cy, i in concept_positions:
+        # 使用现代调色板
         # Use modern color palette
         cluster_id = i % len(modern_palette)
         base_color = modern_palette[cluster_id]
         
         if i in positive_centers:
-            # Positive centers - vibrant green with sophisticated glow
-            color = (34, 197, 94)
-            size = 10
-            # Multi-layer glow
-            for offset in range(4, 0, -1):
-                glow_alpha = (5 - offset) * 30
-                glow_r = int(34 + (255 - 34) * (1 - glow_alpha/255))
-                glow_g = int(197 + (255 - 197) * (1 - glow_alpha/255))
-                glow_b = int(94 + (255 - 94) * (1 - glow_alpha/255))
-                draw.ellipse([cx - size - offset*3, cy - size - offset*3, 
-                            cx + size + offset*3, cy + size + offset*3],
-                           fill=None, outline=(glow_r, glow_g, glow_b), width=2)
-            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(255, 255, 255), width=2)
-        elif i in negative_centers:
-            # Negative centers - vibrant red/orange with glow
-            color = (239, 68, 68)
+            # 正样本中心 - 绿色 (扁平化，无发光)
+            # Positive centers - green (flat, no glow)
+            color = (74, 222, 128)
             size = 9
-            # Multi-layer glow
-            for offset in range(3, 0, -1):
-                glow_alpha = (4 - offset) * 30
-                glow_r = int(239 + (255 - 239) * (1 - glow_alpha/255))
-                glow_g = int(68 + (255 - 68) * (1 - glow_alpha/255))
-                glow_b = int(68 + (255 - 68) * (1 - glow_alpha/255))
-                draw.ellipse([cx - size - offset*2, cy - size - offset*2, 
-                            cx + size + offset*2, cy + size + offset*2],
-                           fill=None, outline=(glow_r, glow_g, glow_b), width=1)
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(255, 255, 255), width=2)
+                        fill=color, outline=(0, 0, 0), width=2)
+        elif i in negative_centers:
+            # 负样本中心 - 红色 (扁平化，无发光)
+            # Negative centers - red (flat, no glow)
+            color = (252, 165, 165)
+            size = 8
+            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
+                        fill=color, outline=(0, 0, 0), width=2)
         else:
-            # Regular centers with subtle styling
+            # 常规中心 (扁平化)
+            # Regular centers (flat)
             color = base_color
             size = 5
-            # Subtle border
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(255, 255, 255), width=1)
+                        fill=color, outline=(0, 0, 0), width=1)
     
-    # Draw elegant connection lines from current sample to centers
+    # 从当前样本到中心的连接线 (扁平化)
+    # Connection lines from current sample to centers (flat)
     if sample_phase >= 4 and current_sample < batch_size:
         start_x = emb_x + 40
         start_y = y_start + current_sample * (item_height + gap) + 32
         
-        # Lines to positive centers (green) with smooth curves
+        # 到正样本中心的线 (绿色)
+        # Lines to positive centers (green)
         for cx, cy, i in concept_positions:
             if i in positive_centers:
-                # Draw smooth animated line
                 draw.line([(start_x, start_y), (cx, cy)], 
                          fill=(74, 222, 128), width=2)
         
-        # Lines to negative centers (red/orange)
+        # 到负样本中心的线 (红色)
+        # Lines to negative centers (red)
         if sample_phase >= 5:
-            for cx, cy, i in concept_positions[:60]:  # Limit to avoid clutter
+            for cx, cy, i in concept_positions[:60]:  # 限制数量以避免混乱 / Limit to avoid clutter
                 if i in negative_centers:
-                    # Thinner lines for negatives
                     draw.line([(start_x, start_y), (cx, cy)], 
                              fill=(252, 165, 165), width=1)
     
-    # Publication-quality legend box
+    # 图例框 (扁平化)
+    # Legend box (flat)
     legend_x = bank_x + 60
-    legend_y = bank_y + bank_height - 140
+    legend_y = bank_y + bank_height - 130
     legend_width = bank_width - 120
-    legend_height = 120
-    
-    # Shadow for legend
-    for offset in range(4, 0, -1):
-        shadow_color = (200 - offset*10, 205 - offset*10, 215 - offset*10)
-        draw_rounded_rectangle(draw, 
-            [legend_x + offset, legend_y + offset, 
-             legend_x + legend_width + offset, legend_y + legend_height + offset],
-            radius=15, fill=None, outline=shadow_color, width=1)
+    legend_height = 110
     
     draw_rounded_rectangle(draw, [legend_x, legend_y, legend_x + legend_width, legend_y + legend_height],
-                          radius=15, fill=(248, 250, 252), outline=(147, 197, 253), width=4)
+                          radius=10, fill=(255, 255, 255), outline=(120, 120, 150), width=2)
     
-    # Legend items with visual indicators
+    # 图例项
+    # Legend items
     num_visible_negatives = int(num_visible_concepts * 0.2)
     legend_items = [
-        ("Selected Sample", (251, 191, 36), 10),
-        (f"{num_positive_centers} Positive Centers", (34, 197, 94), 10),
-        (f"{num_visible_negatives} Sampled Negatives", (239, 68, 68), 9),
+        ("Selected Sample", (251, 191, 36), 9),
+        (f"{num_positive_centers} Positive Centers", (74, 222, 128), 9),
+        (f"{num_visible_negatives} Sampled Negatives", (252, 165, 165), 8),
         ("Other Concepts", (148, 163, 184), 5)
     ]
     
@@ -752,29 +687,24 @@ def create_global_frame(
         row = idx // 2
         col = idx % 2
         x = item_x + col * item_width
-        y = legend_y + 25 + row * 45
+        y = legend_y + 20 + row * 40
         
+        # 绘制指示圆圈
         # Draw indicator circle
         draw.ellipse([x, y + 5, x + size*2, y + 5 + size*2],
-                    fill=color, outline=(255, 255, 255), width=2)
+                    fill=color, outline=(0, 0, 0), width=1)
         
+        # 绘制标签
         # Draw label
-        draw.text((x + 30, y + 3), label, fill=(51, 65, 85), font=font_small)
+        draw.text((x + 25, y + 3), label, fill=(40, 40, 40), font=font_small)
     
-    # Enhanced info box at bottom
-    info_y = y_start + encoder_height + 130
-    info_height = 140
-    
-    # Shadow for info box
-    for offset in range(6, 0, -2):
-        shadow_color = (200 - offset*8, 205 - offset*8, 215 - offset*8)
-        draw_rounded_rectangle(draw, 
-            [100 + offset, info_y + offset, 
-             canvas_size[0] - 100 + offset, info_y + info_height + offset],
-            radius=15, fill=None, outline=shadow_color, width=1)
+    # 底部信息框 (扁平化)
+    # Info box at bottom (flat)
+    info_y = y_start + encoder_height + 120
+    info_height = 120
     
     draw_rounded_rectangle(draw, [100, info_y, canvas_size[0] - 100, info_y + info_height],
-                          radius=15, fill=(248, 250, 252), outline=(59, 130, 246), width=4)
+                          radius=10, fill=(245, 245, 250), outline=(120, 120, 150), width=2)
     
     info_lines = [
         "✓ Pure visual representation learning without text encoder",
@@ -784,7 +714,7 @@ def create_global_frame(
     ]
     
     for i, line in enumerate(info_lines):
-        draw.text((140, info_y + 22 + i * 32), line, fill=(51, 65, 85), font=font_small)
+        draw.text((140, info_y + 16 + i * 28), line, fill=(40, 40, 40), font=font_small)
     
     return canvas
 
@@ -798,39 +728,55 @@ def generate_animation(
     canvas_size: Tuple[int, int] = (1920, 1080),
     as_video: bool = False
 ) -> None:
-    """Generate the comparison animation."""
+    """
+    生成对比动画 (扁平化CLIP/SAM论文风格)
+    Generate the comparison animation (flat CLIP/SAM paper style)
+    
+    Args:
+        output_path: 输出文件路径 / Output file path
+        fps: 每秒帧数 / Frames per second
+        canvas_size: 画布大小 / Canvas size (width, height)
+        as_video: 是否输出为视频格式 / Whether to output as video format
+    """
     frames: List[np.ndarray] = []
     
-    print("Generating frames...")
+    print("生成帧... / Generating frames...")
     
+    # 1. 标题帧 (3秒)
     # 1. Title frame (3 seconds)
-    print("  - Title frame")
+    print("  - 标题帧 / Title frame")
     title_frame = create_title_frame(canvas_size)
     for _ in range(fps * 3):
         frames.append(np.array(title_frame))
     
+    # 2. CLIP帧与动画 (8秒)
     # 2. CLIP frames with animation (8 seconds)
-    print("  - CLIP animation frames")
+    print("  - CLIP动画帧 / CLIP animation frames")
     clip_frames = fps * 8
     for i in range(clip_frames):
         frame = create_clip_frame(canvas_size, i)
         frames.append(np.array(frame))
     
+    # 3. 全局对比学习帧与增强采样动画 (12秒 - 更长以展示采样过程)
     # 3. Global frames with enhanced sampling animation (12 seconds - longer to show sampling)
-    print("  - Global contrastive animation frames")
+    print("  - 全局对比学习动画帧 / Global contrastive animation frames")
     global_frames = fps * 12
     for i in range(global_frames):
         frame = create_global_frame(canvas_size, i)
         frames.append(np.array(frame))
     
+    # 注意：按要求移除了对比帧
     # Note: Comparison frame removed as per requirements
     
+    # 保存输出
     # Save output
     if as_video:
+        # 确保输出路径有.mp4扩展名
+        # Ensure output path has .mp4 extension
         if not output_path.lower().endswith('.mp4'):
             output_path = output_path.rsplit('.', 1)[0] + '.mp4'
         
-        print(f"\nSaving video to: {output_path}")
+        print(f"\n保存视频到 / Saving video to: {output_path}")
         imageio.mimwrite(
             output_path,
             frames,
@@ -839,10 +785,12 @@ def generate_animation(
             pixelformat='yuv420p'
         )
     else:
+        # 确保输出路径有.gif扩展名
+        # Ensure output path has .gif extension
         if not output_path.lower().endswith('.gif'):
             output_path = output_path.rsplit('.', 1)[0] + '.gif'
         
-        print(f"\nSaving GIF to: {output_path}")
+        print(f"\n保存GIF到 / Saving GIF to: {output_path}")
         pil_frames = [Image.fromarray(f) for f in frames]
         pil_frames[0].save(
             output_path,
@@ -852,31 +800,39 @@ def generate_animation(
             loop=0
         )
     
-    print(f"✓ Animation saved successfully!")
-    print(f"  - Total frames: {len(frames)}")
-    print(f"  - Duration: {len(frames) / fps:.1f} seconds")
-    print(f"  - Resolution: {canvas_size[0]}x{canvas_size[1]}")
-    print(f"  - Enhanced with publication-quality design")
-    print(f"  - Removed: Key differences frame (as requested)")
+    # 输出统计信息
+    # Output statistics
+    print(f"✓ 动画保存成功! / Animation saved successfully!")
+    print(f"  - 总帧数 / Total frames: {len(frames)}")
+    print(f"  - 时长 / Duration: {len(frames) / fps:.1f} seconds")
+    print(f"  - 分辨率 / Resolution: {canvas_size[0]}x{canvas_size[1]}")
+    print(f"  - 扁平化CLIP/SAM论文风格 / Flat CLIP/SAM paper style")
+    print(f"  - 已移除关键差异帧 / Removed: Key differences frame")
 
 
 def main():
+    """
+    主函数：解析命令行参数并生成动画
+    Main function: parse command line arguments and generate animation
+    """
     parser = argparse.ArgumentParser(
-        description="Generate animated comparison of CLIP vs Global Contrastive Learning"
+        description="生成CLIP与全局对比学习的动画对比 / Generate animated comparison of CLIP vs Global Contrastive Learning"
     )
     parser.add_argument("--output", type=str, default="global_contrastive_comparison.gif",
-                       help="Output file path (default: global_contrastive_comparison.gif)")
+                       help="输出文件路径 / Output file path (default: global_contrastive_comparison.gif)")
     parser.add_argument("--video", action="store_true",
-                       help="Output as MP4 video instead of GIF")
+                       help="输出为MP4视频而非GIF / Output as MP4 video instead of GIF")
     parser.add_argument("--fps", type=int, default=2,
-                       help="Frames per second (default: 2)")
+                       help="每秒帧数 / Frames per second (default: 2)")
     parser.add_argument("--width", type=int, default=1920,
-                       help="Canvas width (default: 1920)")
+                       help="画布宽度 / Canvas width (default: 1920)")
     parser.add_argument("--height", type=int, default=1080,
-                       help="Canvas height (default: 1080)")
+                       help="画布高度 / Canvas height (default: 1080)")
     
     args = parser.parse_args()
     
+    # 生成动画
+    # Generate animation
     generate_animation(
         output_path=args.output,
         fps=args.fps,
