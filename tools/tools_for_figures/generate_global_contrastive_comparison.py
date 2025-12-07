@@ -52,9 +52,28 @@ FONT_PATHS = [
 # Animation configuration constants
 # 动画配置常量
 CLIP_ANIMATION_EXAMPLES = 3  # Number of examples to animate in CLIP (out of 8 total)
-CONCEPT_CENTER_GRAY = (180, 180, 180)  # Gray color for non-sampled concept centers
-CONCEPT_CENTER_GRAY_BORDER = (120, 120, 120)  # Border color for non-sampled centers
-FAINT_LINE_COLOR = (200, 200, 200)  # Color for faint connection lines
+CONCEPT_CENTER_GRAY = (220, 220, 225)  # Lighter gray for non-sampled concept centers
+CONCEPT_CENTER_GRAY_BORDER = (180, 180, 190)  # Lighter border color for non-sampled centers
+FAINT_LINE_COLOR = (210, 210, 215)  # Lighter color for faint connection lines
+
+# SAM-style color palette - more sophisticated and harmonious
+# SAM风格配色方案 - 更精致和谐
+IMAGE_COLORS_SAM = [
+    (255, 107, 107),  # Coral red - softer, more professional
+    (78, 205, 196),   # Turquoise - calming
+    (99, 110, 250),   # Indigo blue - modern
+    (255, 195, 113),  # Peach - warm
+    (162, 155, 254),  # Light purple - elegant
+    (69, 183, 209),   # Sky blue - fresh
+    (255, 159, 64),   # Orange - energetic
+    (255, 99, 164),   # Pink - vibrant
+]
+
+# Matrix colors - SAM-style with better contrast
+POSITIVE_COLOR_BRIGHT = (52, 211, 153)  # Emerald green - professional
+POSITIVE_COLOR_LIGHT = (209, 250, 229)  # Very light green
+NEGATIVE_COLOR_BRIGHT = (248, 113, 113)  # Modern red
+NEGATIVE_COLOR_LIGHT = (254, 242, 242)  # Very light red/pink
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -289,12 +308,9 @@ def create_clip_frame(
     # Left side images label
     draw.text((img_encoder_x - 90, 155), "Images", fill=(0, 0, 0), font=font_label)
     
-    # 扁平化配色方案
-    # Flat color scheme
-    image_colors = [
-        (239, 68, 68), (34, 197, 94), (59, 130, 246), (251, 191, 36),
-        (168, 85, 247), (20, 184, 166), (249, 115, 22), (236, 72, 153)
-    ]
+    # SAM风格配色方案 - 更专业和谐
+    # SAM-style color scheme - more professional and harmonious
+    image_colors = IMAGE_COLORS_SAM
     
     # 绘制图像框 (无阴影，扁平化)
     # Draw image boxes (no shadows, flat)
@@ -304,39 +320,43 @@ def create_clip_frame(
                               radius=8, fill=image_colors[i], outline=(0, 0, 0), width=2)
         draw.text((img_encoder_x - 63, y + 32), f"I{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # 图像编码器 (扁平化，无阴影，改进设计)
-    # Image Encoder (flat, no shadows, improved design)
+    # 图像编码器 (SAM风格，优雅设计)
+    # Image Encoder (SAM-style, elegant design)
     encoder_x = img_encoder_x + 180
     encoder_width = 180
     encoder_height = batch_size * (item_height + gap) - gap
     
-    # 绘制渐变效果的编码器背景
-    # Draw encoder with gradient-like effect
+    # 使用更优雅的渐变效果背景
+    # Use more elegant gradient-like background
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=12, fill=(200, 210, 240), outline=(60, 80, 140), width=4)
+                          radius=12, fill=(235, 240, 250), outline=(100, 120, 200), width=3)
     
-    # 添加内部装饰线条，模拟神经网络层
-    # Add internal decorative lines to simulate neural network layers
-    for i in range(3):
-        offset = encoder_height // 4 * (i + 1)
+    # 添加精致的内部装饰线条，模拟神经网络层
+    # Add refined internal decorative lines to simulate neural network layers
+    for i in range(4):
+        offset = encoder_height // 5 * (i + 1)
         y_line = y_start + offset
-        draw.line([(encoder_x + 20, y_line), (encoder_x + encoder_width - 20, y_line)],
-                 fill=(150, 160, 200), width=2)
+        draw.line([(encoder_x + 30, y_line), (encoder_x + encoder_width - 30, y_line)],
+                 fill=(180, 190, 220), width=2)
     
-    # 编码器标签 (改进的文字位置和样式)
-    # Encoder label (improved text position and style)
+    # 编码器标签 (优化的文字位置和样式)
+    # Encoder label (optimized text position and style)
     draw.text((encoder_x + 40, y_start + encoder_height // 2 - 25), "Image",
-              fill=(20, 40, 100), font=get_font(24, bold=True))
+              fill=(40, 60, 140), font=get_font(24, bold=True))
     draw.text((encoder_x + 30, y_start + encoder_height // 2 + 5), "Encoder",
-              fill=(20, 40, 100), font=get_font(24, bold=True))
+              fill=(40, 60, 140), font=get_font(24, bold=True))
     
-    # 图像嵌入 (扁平化圆圈，无发光)
-    # Image embeddings (flat circles, no glow)
+    # 图像嵌入 (SAM风格圆圈，优雅)
+    # Image embeddings (SAM-style circles, elegant)
     emb_x = encoder_x + encoder_width + 90
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
+        # 添加微妙的外圈以增强视觉层次
+        # Add subtle outer ring for visual hierarchy
+        draw.ellipse([emb_x - 2, y + 26, emb_x + 42, y + 70],
+                    fill=(240, 240, 245), outline=None)
         draw.ellipse([emb_x, y + 28, emb_x + 40, y + 68],
-                    fill=image_colors[i], outline=(0, 0, 0), width=3)
+                    fill=image_colors[i], outline=(255, 255, 255), width=2)
     
     # 右侧文本标签
     # Right side texts label
@@ -352,77 +372,96 @@ def create_clip_frame(
                               radius=8, fill=text_colors[i], outline=(0, 0, 0), width=2)
         draw.text((text_encoder_x + 107, y + 32), f"T{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # 文本编码器 (扁平化，无阴影，改进设计)
-    # Text Encoder (flat, no shadows, improved design)
+    # 文本编码器 (SAM风格，优雅设计)
+    # Text Encoder (SAM-style, elegant design)
     text_enc_x = text_encoder_x - 180
     
-    # 绘制渐变效果的编码器背景
-    # Draw encoder with gradient-like effect
+    # 使用更优雅的渐变效果背景
+    # Use more elegant gradient-like background
     draw_rounded_rectangle(draw, [text_enc_x, y_start, text_enc_x + encoder_width, y_start + encoder_height],
-                          radius=12, fill=(230, 210, 245), outline=(120, 60, 180), width=4)
+                          radius=12, fill=(248, 240, 252), outline=(160, 100, 200), width=3)
     
-    # 添加内部装饰线条，模拟神经网络层
-    # Add internal decorative lines to simulate neural network layers
-    for i in range(3):
-        offset = encoder_height // 4 * (i + 1)
+    # 添加精致的内部装饰线条，模拟神经网络层
+    # Add refined internal decorative lines to simulate neural network layers
+    for i in range(4):
+        offset = encoder_height // 5 * (i + 1)
         y_line = y_start + offset
-        draw.line([(text_enc_x + 20, y_line), (text_enc_x + encoder_width - 20, y_line)],
-                 fill=(190, 160, 215), width=2)
+        draw.line([(text_enc_x + 30, y_line), (text_enc_x + encoder_width - 30, y_line)],
+                 fill=(210, 180, 225), width=2)
     
-    # 编码器标签 (改进的文字位置和样式)
-    # Encoder label (improved text position and style)
+    # 编码器标签 (优化的文字位置和样式)
+    # Encoder label (optimized text position and style)
     draw.text((text_enc_x + 50, y_start + encoder_height // 2 - 25), "Text",
-              fill=(80, 30, 120), font=get_font(24, bold=True))
+              fill=(100, 50, 140), font=get_font(24, bold=True))
     draw.text((text_enc_x + 30, y_start + encoder_height // 2 + 5), "Encoder",
-              fill=(80, 30, 120), font=get_font(24, bold=True))
+              fill=(100, 50, 140), font=get_font(24, bold=True))
     
-    # 文本嵌入 (扁平化圆圈，无发光)
-    # Text embeddings (flat circles, no glow)
+    # 文本嵌入 (SAM风格圆圈，优雅)
+    # Text embeddings (SAM-style circles, elegant)
     text_emb_x = text_enc_x - 90
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
+        # 添加微妙的外圈以增强视觉层次
+        # Add subtle outer ring for visual hierarchy
+        draw.ellipse([text_emb_x - 2, y + 26, text_emb_x + 42, y + 70],
+                    fill=(240, 240, 245), outline=None)
         draw.ellipse([text_emb_x, y + 28, text_emb_x + 40, y + 68],
-                    fill=text_colors[i], outline=(0, 0, 0), width=3)
+                    fill=text_colors[i], outline=(255, 255, 255), width=2)
     
     # 中间的相似度矩阵 (扁平化，放大并居中在两个编码器之间)
     # Contrastive matrix in the center (flat, enlarged and centered between encoders)
     matrix_size = 480
+    # Better centering: position matrix exactly between left and right embeddings
+    left_embedding_center = emb_x + 20  # Center of left embeddings
+    right_embedding_center = text_emb_x + 20  # Center of right embeddings (will be defined later)
+    # For now, use canvas center with slight adjustment for visual balance
     matrix_x = canvas_size[0] // 2 - matrix_size // 2
-    matrix_y = y_start + 30
+    # Vertically center the matrix with the encoder height
+    matrix_y = y_start + (encoder_height - matrix_size) // 2
     
-    draw.text((matrix_x + 130, matrix_y - 45), "Similarity Matrix",
+    # Draw title with proper centering
+    title_text = "Similarity Matrix"
+    bbox = draw.textbbox((0, 0), title_text, font=get_font(26, bold=True))
+    title_width = bbox[2] - bbox[0]
+    title_x = matrix_x + (matrix_size - title_width) // 2
+    draw.text((title_x, matrix_y - 45), title_text,
               fill=(0, 0, 0), font=get_font(26, bold=True))
     
     cell_size = matrix_size // batch_size
     
     # 动画：只高亮显示前N个配对 (由CLIP_ANIMATION_EXAMPLES定义)
     # Animation: only highlight first N pairs (defined by CLIP_ANIMATION_EXAMPLES)
-    # Note: This intentionally limits highlighting to the first N pairs to simplify the visualization
+    # Note: This intentionally limits ANIMATION highlighting to first N pairs for clarity,
+    # but ALL samples are calculated and shown in the matrix
     highlight_pair = (animation_step // 3) % CLIP_ANIMATION_EXAMPLES  # Only cycle through first N
     
-    # 绘制从图像嵌入到矩阵列的连接线
-    # Draw connection lines from image embeddings to matrix columns
+    # 绘制从图像嵌入到矩阵列的连接线 (所有样本都显示，突出动画样本)
+    # Draw connection lines from image embeddings to matrix columns (all samples shown, animated ones highlighted)
     for i in range(batch_size):
         img_emb_y = y_start + i * (item_height + gap) + 48
         matrix_col_x = matrix_x + i * cell_size + cell_size // 2
-        # 轻度的连接线
+        # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
+        # All samples get lines: animated ones in color, others in light gray
         if i == highlight_pair:
             draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
                      fill=image_colors[i], width=3)
-        elif i < CLIP_ANIMATION_EXAMPLES:  # Show faint lines for first N
+        else:
+            # Show all connection lines to indicate all samples are calculated
             draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
                      fill=FAINT_LINE_COLOR, width=1)
     
-    # 绘制从文本嵌入到矩阵行的连接线
-    # Draw connection lines from text embeddings to matrix rows
+    # 绘制从文本嵌入到矩阵行的连接线 (所有样本都显示，突出动画样本)
+    # Draw connection lines from text embeddings to matrix rows (all samples shown, animated ones highlighted)
     for i in range(batch_size):
         text_emb_y = y_start + i * (item_height + gap) + 48
         matrix_row_y = matrix_y + i * cell_size + cell_size // 2
-        # 轻度的连接线
+        # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
+        # All samples get lines: animated ones in color, others in light gray
         if i == highlight_pair:
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
                      fill=text_colors[i], width=3)
-        elif i < CLIP_ANIMATION_EXAMPLES:  # Show faint lines for first N
+        else:
+            # Show all connection lines to indicate all samples are calculated
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
                      fill=FAINT_LINE_COLOR, width=1)
     
@@ -431,29 +470,45 @@ def create_clip_frame(
             x = matrix_x + j * cell_size
             y = matrix_y + i * cell_size
             
-            # 对角线是正样本对，非对角线是负样本
-            # Diagonal are positive pairs, off-diagonal are negatives
-            if i == j:
-                # 正样本对 (绿色)
-                # Positive pair (green)
-                if i == highlight_pair and i < CLIP_ANIMATION_EXAMPLES:
-                    color = (74, 222, 128)  # 亮绿色 / Bright green (only for first N)
-                else:
-                    color = (187, 247, 208)  # 浅绿色 / Light green
-            else:
-                # 负样本对 (红色)
-                # Negative pair (red)
-                # Only highlight negative pairs within the first NxN submatrix for clarity
-                is_within_animation_range = (i < CLIP_ANIMATION_EXAMPLES and j < CLIP_ANIMATION_EXAMPLES)
-                is_highlighted = (i == highlight_pair or j == highlight_pair)
-                
-                if is_highlighted and is_within_animation_range:
-                    color = (252, 165, 165)  # 亮红色 / Bright red (only for first NxN)
-                else:
-                    color = (254, 226, 226)  # 浅红色 / Light red
+            # 对角线是正样本对，非对角线是负样本 - 所有样本都要计算
+            # Diagonal are positive pairs, off-diagonal are negatives - ALL are calculated
             
-            draw.rectangle([x + 1, y + 1, x + cell_size - 2, y + cell_size - 2],
-                         fill=color, outline=(160, 160, 160), width=2)
+            # Calculate if this cell is highlighted (used for both color and border)
+            is_highlighted = (i == highlight_pair or j == highlight_pair)
+            
+            if i == j:
+                # 正样本对 (绿色) - 只有动画样本用亮绿色，使用SAM风格颜色
+                # Positive pair (green) - only animated samples use bright green, SAM-style colors
+                if i == highlight_pair and i < CLIP_ANIMATION_EXAMPLES:
+                    color = POSITIVE_COLOR_BRIGHT  # SAM风格亮绿色
+                else:
+                    color = POSITIVE_COLOR_LIGHT  # SAM风格浅绿色
+            else:
+                # 负样本对 (红色) - 所有负样本都显示，但只有动画相关的用亮色，使用SAM风格颜色
+                # Negative pair (red) - ALL negatives shown, SAM-style colors
+                if is_highlighted and highlight_pair < CLIP_ANIMATION_EXAMPLES:
+                    color = NEGATIVE_COLOR_BRIGHT  # SAM风格亮红色
+                else:
+                    color = NEGATIVE_COLOR_LIGHT  # SAM风格浅红色
+            
+            # SAM风格的边框样式 - 更精致
+            # SAM-style border styling - more refined
+            border_color = (200, 200, 205)  # 柔和的灰色边框
+            border_width = 1
+            
+            # 高亮单元格使用更明显的边框
+            # Highlighted cells use more prominent borders
+            if i == j and i == highlight_pair and i < CLIP_ANIMATION_EXAMPLES:
+                border_color = (16, 185, 129)  # 绿色边框 - 更深的emerald
+                border_width = 3
+            elif is_highlighted and highlight_pair < CLIP_ANIMATION_EXAMPLES and i != j:
+                border_color = (239, 68, 68)  # 红色边框 - 更鲜艳
+                border_width = 2
+            
+            # 绘制带圆角的矩形以获得更优雅的外观
+            # Draw with rounded corners for more elegant look
+            draw.rectangle([x + 2, y + 2, x + cell_size - 3, y + cell_size - 3],
+                         fill=color, outline=border_color, width=border_width)
     
     # 底部信息框 (扁平化)
     # Info box at bottom (flat)
@@ -524,12 +579,9 @@ def create_global_frame(
     
     draw.text((img_x - 40, 155), "Images", fill=(0, 0, 0), font=font_label)
     
-    # 扁平化配色方案
-    # Flat color scheme
-    image_colors = [
-        (239, 68, 68), (34, 197, 94), (59, 130, 246), (251, 191, 36),
-        (168, 85, 247), (20, 184, 166), (249, 115, 22), (236, 72, 153)
-    ]
+    # SAM风格配色方案
+    # SAM-style color scheme
+    image_colors = IMAGE_COLORS_SAM
     
     # 动画：循环遍历样本
     # Animation: cycle through samples
@@ -541,48 +593,59 @@ def create_global_frame(
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
         
-        # 高亮当前处理的样本
-        # Highlight current sample being processed
+        # 高亮当前处理的样本 - SAM风格
+        # Highlight current sample being processed - SAM-style
         if i == current_sample and sample_phase >= 2:
-            outline_color = (251, 191, 36)  # 鲜明黄色 / Vibrant yellow
-            outline_width = 4
+            outline_color = (255, 195, 113)  # SAM风格温暖的橙色高亮
+            outline_width = 3
         else:
-            outline_color = (0, 0, 0)
+            outline_color = (100, 100, 110)  # 柔和的灰色边框
             outline_width = 2
         
         draw_rounded_rectangle(draw, [img_x - 60, y, img_x + 40, y + item_height],
                               radius=8, fill=image_colors[i], outline=outline_color, width=outline_width)
         draw.text((img_x - 43, y + 22), f"I{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # 图像编码器 (扁平化，无阴影)
-    # Image Encoder (flat, no shadows)
+    # 图像编码器 (SAM风格)
+    # Image Encoder (SAM-style)
     encoder_x = img_x + 190
     encoder_width = 200
     encoder_height = batch_size * (item_height + gap) - gap
     
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=10, fill=(220, 220, 240), outline=(80, 80, 120), width=3)
+                          radius=12, fill=(235, 240, 250), outline=(100, 120, 200), width=3)
     
-    # 编码器标签 (仅"Image Encoder"，不显示ViT-L/14)
-    # Encoder label (only "Image Encoder", no ViT-L/14)
+    # 添加精致的内部装饰线条
+    # Add refined internal decorative lines
+    for i in range(4):
+        offset = encoder_height // 5 * (i + 1)
+        y_line = y_start + offset
+        draw.line([(encoder_x + 30, y_line), (encoder_x + encoder_width - 30, y_line)],
+                 fill=(180, 190, 220), width=2)
+    
+    # 编码器标签
+    # Encoder label
     draw.text((encoder_x + 48, y_start + encoder_height // 2 - 20), "Image",
-              fill=(40, 40, 80), font=font_label)
+              fill=(40, 60, 140), font=font_label)
     draw.text((encoder_x + 35, y_start + encoder_height // 2 + 10), "Encoder",
-              fill=(40, 40, 80), font=font_label)
+              fill=(40, 60, 140), font=font_label)
     
-    # 图像嵌入 (扁平化圆圈，无发光)
-    # Image embeddings (flat circles, no glow)
+    # 图像嵌入 (SAM风格圆圈)
+    # Image embeddings (SAM-style circles)
     emb_x = encoder_x + encoder_width + 100
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
         
-        # 当前样本的脉冲效果 (扁平化版本)
-        # Pulse effect for current sample (flat version)
+        # 当前样本的优雅高亮效果
+        # Elegant highlight effect for current sample
         if i == current_sample and sample_phase >= 2:
-            outline_color = (251, 191, 36)
+            outline_color = (255, 195, 113)
             outline_width = 3
+            # 添加外圈
+            draw.ellipse([emb_x - 3, y + 9, emb_x + 43, y + 55],
+                        fill=(255, 220, 160), outline=None)
         else:
-            outline_color = (0, 0, 0)
+            outline_color = (255, 255, 255)
             outline_width = 2
         
         draw.ellipse([emb_x, y + 12, emb_x + 40, y + 52],
@@ -661,57 +724,55 @@ def create_global_frame(
         negative_indices = neg_rng.choice(len(available), size=min(num_visible_negatives, len(available)), replace=False)
         negative_centers = set(available[i] for i in negative_indices)
     
-    # 绘制概念中心 (扁平化风格，未采样的为灰色)
-    # Draw concept centers (flat style, non-sampled in gray)
-    modern_palette = [
-        (239, 68, 68), (34, 197, 94), (59, 130, 246), (251, 191, 36),
-        (168, 85, 247), (20, 184, 166), (249, 115, 22), (236, 72, 153),
-        (220, 38, 38), (101, 163, 13), (29, 78, 216), (217, 119, 6)
-    ]
+    # 绘制概念中心 (SAM风格，未采样的为灰色)
+    # Draw concept centers (SAM-style, non-sampled in gray)
     
     for cx, cy, i in concept_positions:
         if i in positive_centers:
-            # 正样本中心 - 绿色 (扁平化，无发光)
-            # Positive centers - green (flat, no glow)
-            color = (74, 222, 128)
-            size = 9
-            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(0, 0, 0), width=2)
-        elif i in negative_centers:
-            # 负样本中心 - 红色 (扁平化，无发光)
-            # Negative centers - red (flat, no glow)
-            color = (252, 165, 165)
+            # 正样本中心 - SAM风格绿色
+            # Positive centers - SAM-style green
+            color = POSITIVE_COLOR_BRIGHT
             size = 8
+            # 添加外圈增强视觉效果
+            draw.ellipse([cx - size - 2, cy - size - 2, cx + size + 2, cy + size + 2],
+                        fill=(180, 240, 210), outline=None)
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(0, 0, 0), width=2)
+                        fill=color, outline=(255, 255, 255), width=2)
+        elif i in negative_centers:
+            # 负样本中心 - SAM风格红色
+            # Negative centers - SAM-style red
+            color = NEGATIVE_COLOR_BRIGHT
+            size = 7
+            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
+                        fill=color, outline=(255, 255, 255), width=1)
         else:
-            # 未采样的中心 - 灰色 (扁平化)
-            # Non-sampled centers - gray (flat)
-            color = CONCEPT_CENTER_GRAY  # 灰色替代彩色
+            # 未采样的中心 - SAM风格灰色
+            # Non-sampled centers - SAM-style gray
+            color = CONCEPT_CENTER_GRAY
             size = 5
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
                         fill=color, outline=CONCEPT_CENTER_GRAY_BORDER, width=1)
     
-    # 从当前样本到中心的连接线 (扁平化)
-    # Connection lines from current sample to centers (flat)
+    # 从当前样本到中心的连接线 (SAM风格)
+    # Connection lines from current sample to centers (SAM-style)
     if sample_phase >= 4 and current_sample < batch_size:
         start_x = emb_x + 40
         start_y = y_start + current_sample * (item_height + gap) + 32
         
-        # 到正样本中心的线 (绿色)
-        # Lines to positive centers (green)
+        # 到正样本中心的线 (SAM风格绿色)
+        # Lines to positive centers (SAM-style green)
         for cx, cy, i in concept_positions:
             if i in positive_centers:
                 draw.line([(start_x, start_y), (cx, cy)], 
-                         fill=(74, 222, 128), width=2)
+                         fill=POSITIVE_COLOR_BRIGHT, width=2)
         
-        # 到负样本中心的线 (红色)
-        # Lines to negative centers (red)
+        # 到负样本中心的线 (SAM风格红色)
+        # Lines to negative centers (SAM-style red)
         if sample_phase >= 5:
             for cx, cy, i in concept_positions[:60]:  # 限制数量以避免混乱 / Limit to avoid clutter
                 if i in negative_centers:
                     draw.line([(start_x, start_y), (cx, cy)], 
-                             fill=(252, 165, 165), width=1)
+                             fill=NEGATIVE_COLOR_BRIGHT, width=1)
     
     # 图例框 (扁平化)
     # Legend box (flat)
@@ -723,14 +784,14 @@ def create_global_frame(
     draw_rounded_rectangle(draw, [legend_x, legend_y, legend_x + legend_width, legend_y + legend_height],
                           radius=10, fill=(255, 255, 255), outline=(120, 120, 150), width=2)
     
-    # 图例项
-    # Legend items
+    # 图例项 - SAM风格颜色
+    # Legend items - SAM-style colors
     num_visible_negatives = int(num_visible_concepts * 0.2)
     legend_items = [
-        ("Selected Sample", (251, 191, 36), 9),
-        (f"{num_positive_centers} Positive Centers", (74, 222, 128), 9),
-        (f"{num_visible_negatives} Sampled Negatives", (252, 165, 165), 8),
-        ("Other Concepts", (148, 163, 184), 5)
+        ("Selected Sample", (255, 195, 113), 9),  # SAM风格橙色
+        (f"{num_positive_centers} Positive Centers", POSITIVE_COLOR_BRIGHT, 8),  # SAM风格绿色
+        (f"{num_visible_negatives} Sampled Negatives", NEGATIVE_COLOR_BRIGHT, 7),  # SAM风格红色
+        ("Other Concepts", CONCEPT_CENTER_GRAY, 5)  # SAM风格灰色
     ]
     
     item_x = legend_x + 40
@@ -742,10 +803,10 @@ def create_global_frame(
         x = item_x + col * item_width
         y = legend_y + 20 + row * 40
         
-        # 绘制指示圆圈
-        # Draw indicator circle
+        # 绘制指示圆圈 - SAM风格
+        # Draw indicator circle - SAM-style
         draw.ellipse([x, y + 5, x + size*2, y + 5 + size*2],
-                    fill=color, outline=(0, 0, 0), width=1)
+                    fill=color, outline=(255, 255, 255), width=1)
         
         # 绘制标签
         # Draw label
