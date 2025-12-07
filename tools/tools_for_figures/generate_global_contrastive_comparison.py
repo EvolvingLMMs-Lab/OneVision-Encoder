@@ -273,7 +273,7 @@ def create_clip_frame(
     # 布局参数
     # Layout parameters
     img_encoder_x = 200
-    text_encoder_x = 1500
+    text_encoder_x = 1620
     y_start = 200
     item_height = 95
     gap = 12
@@ -297,29 +297,39 @@ def create_clip_frame(
                               radius=8, fill=image_colors[i], outline=(0, 0, 0), width=2)
         draw.text((img_encoder_x - 63, y + 32), f"I{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # 图像编码器 (扁平化，无阴影)
-    # Image Encoder (flat, no shadows)
-    encoder_x = img_encoder_x + 160
-    encoder_width = 200
+    # 图像编码器 (扁平化，无阴影，改进设计)
+    # Image Encoder (flat, no shadows, improved design)
+    encoder_x = img_encoder_x + 180
+    encoder_width = 180
     encoder_height = batch_size * (item_height + gap) - gap
     
+    # 绘制渐变效果的编码器背景
+    # Draw encoder with gradient-like effect
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=10, fill=(220, 220, 240), outline=(80, 80, 120), width=3)
+                          radius=12, fill=(200, 210, 240), outline=(60, 80, 140), width=4)
     
-    # 编码器标签 (仅"Image Encoder"，不显示ViT-L)
-    # Encoder label (only "Image Encoder", no ViT-L)
-    draw.text((encoder_x + 48, y_start + encoder_height // 2 - 20), "Image",
-              fill=(40, 40, 80), font=font_label)
-    draw.text((encoder_x + 35, y_start + encoder_height // 2 + 10), "Encoder",
-              fill=(40, 40, 80), font=font_label)
+    # 添加内部装饰线条，模拟神经网络层
+    # Add internal decorative lines to simulate neural network layers
+    for i in range(3):
+        offset = encoder_height // 4 * (i + 1)
+        y_line = y_start + offset
+        draw.line([(encoder_x + 20, y_line), (encoder_x + encoder_width - 20, y_line)],
+                 fill=(150, 160, 200), width=2)
+    
+    # 编码器标签 (改进的文字位置和样式)
+    # Encoder label (improved text position and style)
+    draw.text((encoder_x + 40, y_start + encoder_height // 2 - 25), "Image",
+              fill=(20, 40, 100), font=get_font(24, bold=True))
+    draw.text((encoder_x + 30, y_start + encoder_height // 2 + 5), "Encoder",
+              fill=(20, 40, 100), font=get_font(24, bold=True))
     
     # 图像嵌入 (扁平化圆圈，无发光)
     # Image embeddings (flat circles, no glow)
-    emb_x = encoder_x + encoder_width + 110
+    emb_x = encoder_x + encoder_width + 90
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
         draw.ellipse([emb_x, y + 28, emb_x + 40, y + 68],
-                    fill=image_colors[i], outline=(0, 0, 0), width=2)
+                    fill=image_colors[i], outline=(0, 0, 0), width=3)
     
     # 右侧文本标签
     # Right side texts label
@@ -335,19 +345,29 @@ def create_clip_frame(
                               radius=8, fill=text_colors[i], outline=(0, 0, 0), width=2)
         draw.text((text_encoder_x + 107, y + 32), f"T{i+1}", fill=(255, 255, 255), font=font_label)
     
-    # 文本编码器 (扁平化，无阴影)
-    # Text Encoder (flat, no shadows)
-    text_enc_x = text_encoder_x - 160
+    # 文本编码器 (扁平化，无阴影，改进设计)
+    # Text Encoder (flat, no shadows, improved design)
+    text_enc_x = text_encoder_x - 180
     
+    # 绘制渐变效果的编码器背景
+    # Draw encoder with gradient-like effect
     draw_rounded_rectangle(draw, [text_enc_x, y_start, text_enc_x + encoder_width, y_start + encoder_height],
-                          radius=10, fill=(235, 220, 245), outline=(100, 60, 150), width=3)
+                          radius=12, fill=(230, 210, 245), outline=(120, 60, 180), width=4)
     
-    # 编码器标签
-    # Encoder label
-    draw.text((text_enc_x + 58, y_start + encoder_height // 2 - 20), "Text",
-              fill=(60, 30, 90), font=font_label)
-    draw.text((text_enc_x + 35, y_start + encoder_height // 2 + 10), "Encoder",
-              fill=(60, 30, 90), font=font_label)
+    # 添加内部装饰线条，模拟神经网络层
+    # Add internal decorative lines to simulate neural network layers
+    for i in range(3):
+        offset = encoder_height // 4 * (i + 1)
+        y_line = y_start + offset
+        draw.line([(text_enc_x + 20, y_line), (text_enc_x + encoder_width - 20, y_line)],
+                 fill=(190, 160, 215), width=2)
+    
+    # 编码器标签 (改进的文字位置和样式)
+    # Encoder label (improved text position and style)
+    draw.text((text_enc_x + 50, y_start + encoder_height // 2 - 25), "Text",
+              fill=(80, 30, 120), font=get_font(24, bold=True))
+    draw.text((text_enc_x + 30, y_start + encoder_height // 2 + 5), "Encoder",
+              fill=(80, 30, 120), font=get_font(24, bold=True))
     
     # 文本嵌入 (扁平化圆圈，无发光)
     # Text embeddings (flat circles, no glow)
@@ -355,22 +375,48 @@ def create_clip_frame(
     for i in range(batch_size):
         y = y_start + i * (item_height + gap)
         draw.ellipse([text_emb_x, y + 28, text_emb_x + 40, y + 68],
-                    fill=text_colors[i], outline=(0, 0, 0), width=2)
+                    fill=text_colors[i], outline=(0, 0, 0), width=3)
     
-    # 中间的相似度矩阵 (扁平化)
-    # Contrastive matrix in the center (flat)
-    matrix_size = 420
+    # 中间的相似度矩阵 (扁平化，放大并居中在两个编码器之间)
+    # Contrastive matrix in the center (flat, enlarged and centered between encoders)
+    matrix_size = 480
     matrix_x = canvas_size[0] // 2 - matrix_size // 2
-    matrix_y = y_start + 80
+    matrix_y = y_start + 30
     
-    draw.text((matrix_x + 110, matrix_y - 40), "Similarity Matrix",
-              fill=(0, 0, 0), font=font_label)
+    draw.text((matrix_x + 130, matrix_y - 45), "Similarity Matrix",
+              fill=(0, 0, 0), font=get_font(26, bold=True))
     
     cell_size = matrix_size // batch_size
     
-    # 动画：高亮显示匹配的配对
-    # Animation: highlight matching pairs
-    highlight_pair = (animation_step // 3) % batch_size
+    # 动画：只高亮显示前3个配对
+    # Animation: only highlight first 3 pairs
+    highlight_pair = (animation_step // 3) % 3  # Only cycle through first 3
+    
+    # 绘制从图像嵌入到矩阵列的连接线
+    # Draw connection lines from image embeddings to matrix columns
+    for i in range(batch_size):
+        img_emb_y = y_start + i * (item_height + gap) + 48
+        matrix_col_x = matrix_x + i * cell_size + cell_size // 2
+        # 轻度的连接线
+        if i == highlight_pair:
+            draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
+                     fill=image_colors[i], width=3)
+        elif i < 3:  # Show faint lines for first 3
+            draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
+                     fill=(200, 200, 200), width=1)
+    
+    # 绘制从文本嵌入到矩阵行的连接线
+    # Draw connection lines from text embeddings to matrix rows
+    for i in range(batch_size):
+        text_emb_y = y_start + i * (item_height + gap) + 48
+        matrix_row_y = matrix_y + i * cell_size + cell_size // 2
+        # 轻度的连接线
+        if i == highlight_pair:
+            draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
+                     fill=text_colors[i], width=3)
+        elif i < 3:  # Show faint lines for first 3
+            draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
+                     fill=(200, 200, 200), width=1)
     
     for i in range(batch_size):
         for j in range(batch_size):
@@ -382,20 +428,20 @@ def create_clip_frame(
             if i == j:
                 # 正样本对 (绿色)
                 # Positive pair (green)
-                if i == highlight_pair:
-                    color = (74, 222, 128)  # 亮绿色 / Bright green
+                if i == highlight_pair and i < 3:
+                    color = (74, 222, 128)  # 亮绿色 / Bright green (only for first 3)
                 else:
                     color = (187, 247, 208)  # 浅绿色 / Light green
             else:
                 # 负样本对 (红色)
                 # Negative pair (red)
-                if i == highlight_pair or j == highlight_pair:
-                    color = (252, 165, 165)  # 亮红色 / Bright red
+                if (i == highlight_pair or j == highlight_pair) and i < 3 and j < 3:
+                    color = (252, 165, 165)  # 亮红色 / Bright red (only for first 3)
                 else:
                     color = (254, 226, 226)  # 浅红色 / Light red
             
             draw.rectangle([x + 1, y + 1, x + cell_size - 2, y + cell_size - 2],
-                         fill=color, outline=(180, 180, 180), width=1)
+                         fill=color, outline=(160, 160, 160), width=2)
     
     # 底部信息框 (扁平化)
     # Info box at bottom (flat)
@@ -603,8 +649,8 @@ def create_global_frame(
         negative_indices = neg_rng.choice(len(available), size=min(num_visible_negatives, len(available)), replace=False)
         negative_centers = set(available[i] for i in negative_indices)
     
-    # 绘制概念中心 (扁平化风格)
-    # Draw concept centers (flat style)
+    # 绘制概念中心 (扁平化风格，未采样的为灰色)
+    # Draw concept centers (flat style, non-sampled in gray)
     modern_palette = [
         (239, 68, 68), (34, 197, 94), (59, 130, 246), (251, 191, 36),
         (168, 85, 247), (20, 184, 166), (249, 115, 22), (236, 72, 153),
@@ -612,11 +658,6 @@ def create_global_frame(
     ]
     
     for cx, cy, i in concept_positions:
-        # 使用现代调色板
-        # Use modern color palette
-        cluster_id = i % len(modern_palette)
-        base_color = modern_palette[cluster_id]
-        
         if i in positive_centers:
             # 正样本中心 - 绿色 (扁平化，无发光)
             # Positive centers - green (flat, no glow)
@@ -632,12 +673,12 @@ def create_global_frame(
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
                         fill=color, outline=(0, 0, 0), width=2)
         else:
-            # 常规中心 (扁平化)
-            # Regular centers (flat)
-            color = base_color
+            # 未采样的中心 - 灰色 (扁平化)
+            # Non-sampled centers - gray (flat)
+            color = (180, 180, 180)  # 灰色替代彩色
             size = 5
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(0, 0, 0), width=1)
+                        fill=color, outline=(120, 120, 120), width=1)
     
     # 从当前样本到中心的连接线 (扁平化)
     # Connection lines from current sample to centers (flat)
