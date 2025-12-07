@@ -15,43 +15,83 @@ Usage:
 """
 
 import argparse
-from manim import *
+import manim as mn
 import numpy as np
 
 
 # Color definitions (converted from hex to Manim compatible)
-BLUE_600 = "#2563eb"
-BLUE_700 = "#1d4ed8"
-BLUE_400 = "#60a5fa"
+mn.BLUE_600 = "#2563eb"
+mn.BLUE_700 = "#1d4ed8"
+mn.BLUE_400 = "#60a5fa"
 SLATE_600 = "#475569"
 SLATE_300 = "#cbd5e1"
 SLATE_50 = "#f8fafc"
-BLUE_50 = "#eff6ff"
+mn.BLUE_50 = "#eff6ff"
+
+# Constants for consistency
+DEFAULT_BATCH_SIZE = 8
+NUM_POSITIVE_CENTERS = 10
+NUM_VISIBLE_NEGATIVES = 25
 
 
-class TitleScene(Scene):
+def create_info_box(title_text, features, bg_color, title_color, position, width=5.5, height=4.0):
+    """Helper function to create an info box with title and features.
+    
+    Args:
+        title_text: Title text for the box
+        features: List of feature strings
+        bg_color: Background color
+        title_color: Title text color
+        position: Position of the box
+        width: Width of the box
+        height: Height of the box
+        
+    Returns:
+        VGroup containing the box, title, and feature texts
+    """
+    box = mn.RoundedRectangle(
+        corner_radius=0.2, width=width, height=height,
+        fill_color=bg_color, fill_opacity=0.9,
+        stroke_color=title_color, stroke_width=3
+    )
+    box.move_to(position)
+    
+    title = mn.Text(title_text, color=title_color, weight=mn.BOLD, font_size=28)
+    title.move_to(box.get_top() + mn.DOWN * 0.5)
+    
+    feature_texts = mn.VGroup()
+    for i, feature in enumerate(features):
+        text = mn.Text(feature, color=SLATE_600, font_size=18)
+        text.move_to(box.get_top() + mn.DOWN * (1.2 + i * 0.5))
+        text.align_to(box.get_left() + mn.RIGHT * 0.3, mn.LEFT)
+        feature_texts.add(text)
+    
+    return mn.VGroup(box, title, feature_texts)
+
+
+class TitleScene(mn.Scene):
     """Create an introduction title frame with webpage-matching colors."""
     
     def construct(self):
         # Set background color to white
-        self.camera.background_color = WHITE
+        self.camera.background_color = mn.WHITE
         
         # Title with blue gradient
-        title = Text("Cluster Discrimination Visualization", 
-                    color=BLUE_600, weight=BOLD, font_size=48)
-        title.move_to(UP * 2.5)
+        title = mn.Text("Cluster Discrimination Visualization", 
+                    color=mn.BLUE_600, weight=mn.BOLD, font_size=48)
+        title.move_to(mn.UP * 2.5)
         
         # Subtitle
-        subtitle = Text("CLIP vs. Global Contrastive Learning",
-                       color=BLUE_700, font_size=32)
-        subtitle.next_to(title, DOWN, buff=0.5)
+        subtitle = mn.Text("CLIP vs. Global Contrastive Learning",
+                       color=mn.BLUE_700, font_size=32)
+        subtitle.next_to(title, mn.DOWN, buff=0.5)
         
         # Divider line
-        divider = Line(LEFT * 5, RIGHT * 5, color=SLATE_300, stroke_width=2)
-        divider.next_to(subtitle, DOWN, buff=0.5)
+        divider = mn.Line(mn.LEFT * 5, mn.RIGHT * 5, color=SLATE_300, stroke_width=2)
+        divider.next_to(subtitle, mn.DOWN, buff=0.5)
         
-        # Content boxes
-        clip_box = self._create_info_box(
+        # Content boxes using utility function
+        clip_box = create_info_box(
             "CLIP",
             [
                 "• Image-Text pairs",
@@ -65,11 +105,11 @@ class TitleScene(Scene):
                 "• Cross-modal matching"
             ],
             SLATE_50,
-            BLUE_600,
-            LEFT * 3.5
+            mn.BLUE_600,
+            mn.LEFT * 3.5
         )
         
-        global_box = self._create_info_box(
+        global_box = create_info_box(
             "Global Contrastive",
             [
                 "• Image only (no text)",
@@ -81,165 +121,137 @@ class TitleScene(Scene):
                 "• Sample negatives from",
                 "  concept bank each batch"
             ],
-            BLUE_50,
-            BLUE_700,
-            RIGHT * 3.5
+            mn.BLUE_50,
+            mn.BLUE_700,
+            mn.RIGHT * 3.5
         )
         
-        clip_box.next_to(divider, DOWN, buff=1.0)
-        global_box.next_to(divider, DOWN, buff=1.0)
+        clip_box.next_to(divider, mn.DOWN, buff=1.0)
+        global_box.next_to(divider, mn.DOWN, buff=1.0)
         
         # Add all elements
         self.play(
-            Write(title),
-            Write(subtitle),
-            Create(divider),
+            mn.Write(title),
+            mn.Write(subtitle),
+            mn.Create(divider),
             run_time=1.5
         )
         self.play(
-            FadeIn(clip_box, shift=LEFT * 0.5),
-            FadeIn(global_box, shift=RIGHT * 0.5),
+            mn.FadeIn(clip_box, shift=mn.LEFT * 0.5),
+            mn.FadeIn(global_box, shift=mn.RIGHT * 0.5),
             run_time=1
         )
         self.wait(2)
-    
-    def _create_info_box(self, title_text, features, bg_color, title_color, position):
-        """Helper to create an info box with title and features."""
-        # Create box background
-        box = RoundedRectangle(
-            corner_radius=0.2,
-            width=5.5,
-            height=5.0,
-            fill_color=bg_color,
-            fill_opacity=0.9,
-            stroke_color=title_color,
-            stroke_width=3
-        )
-        box.move_to(position)
-        
-        # Create title
-        title = Text(title_text, color=title_color, weight=BOLD, font_size=28)
-        title.move_to(box.get_top() + DOWN * 0.5)
-        
-        # Create feature list
-        feature_texts = VGroup()
-        for i, feature in enumerate(features):
-            text = Text(feature, color=SLATE_600, font_size=16)
-            text.move_to(box.get_top() + DOWN * (1.2 + i * 0.35))
-            text.align_to(box.get_left() + RIGHT * 0.3, LEFT)
-            feature_texts.add(text)
-        
-        return VGroup(box, title, feature_texts)
 
 
-class CLIPScene(Scene):
+class CLIPScene(mn.Scene):
     """Create a frame showing CLIP's contrastive learning."""
     
     def construct(self):
-        self.camera.background_color = WHITE
-        batch_size = 8
+        self.camera.background_color = mn.WHITE
+        batch_size = DEFAULT_BATCH_SIZE
         
         # Title
-        title = Text("CLIP: Batch-Level Image-Text Contrastive Learning",
-                    color=BLUE_600, font_size=32, weight=BOLD)
-        title.to_edge(UP, buff=0.5)
-        self.play(Write(title))
+        title = mn.Text("CLIP: Batch-Level Image-Text Contrastive Learning",
+                    color=mn.BLUE_600, font_size=32, weight=mn.BOLD)
+        title.to_edge(mn.UP, buff=0.5)
+        self.play(mn.Write(title))
         
         # Batch info
-        batch_info = Text(f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
+        batch_info = mn.Text(f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
                          color=SLATE_600, font_size=20)
-        batch_info.next_to(title, DOWN, buff=0.3)
-        self.play(Write(batch_info))
+        batch_info.next_to(title, mn.DOWN, buff=0.3)
+        self.play(mn.Write(batch_info))
         
         # Create image boxes on the left
-        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL, ORANGE, PINK]
-        images = VGroup()
+        image_colors = [mn.RED, mn.GREEN, mn.BLUE, mn.YELLOW, mn.PURPLE, mn.TEAL, mn.ORANGE, mn.PINK]
+        images = mn.VGroup()
         for i in range(batch_size):
-            box = Square(side_length=0.6, fill_color=image_colors[i], 
-                        fill_opacity=0.7, stroke_color=GREY)
-            label = Text(f"I{i+1}", color=WHITE, font_size=16)
+            box = mn.Square(side_length=0.6, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=mn.GREY)
+            label = mn.Text(f"I{i+1}", color=mn.WHITE, font_size=16)
             label.move_to(box)
-            img_group = VGroup(box, label)
-            img_group.move_to(LEFT * 5.5 + UP * (2 - i * 0.6))
+            img_group = mn.VGroup(box, label)
+            img_group.move_to(mn.LEFT * 5.5 + mn.UP * (2 - i * 0.6))
             images.add(img_group)
         
-        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.1))
+        self.play(mn.LaggedStart(*[mn.FadeIn(img) for img in images], lag_ratio=0.1))
         
         # Image Encoder
-        img_encoder = RoundedRectangle(
+        img_encoder = mn.RoundedRectangle(
             corner_radius=0.1, width=1.2, height=4.5,
             fill_color="#283C50", fill_opacity=0.9,
             stroke_color="#6496C8", stroke_width=3
         )
-        img_encoder.move_to(LEFT * 3.5)
-        img_enc_label = Text("Image\nEncoder", color="#C8DCF0", font_size=18)
+        img_encoder.move_to(mn.LEFT * 3.5)
+        img_enc_label = mn.Text("Image\nEncoder", color="#C8DCF0", font_size=18)
         img_enc_label.move_to(img_encoder)
-        self.play(FadeIn(img_encoder), Write(img_enc_label))
+        self.play(mn.FadeIn(img_encoder), mn.Write(img_enc_label))
         
         # Image embeddings
-        img_embeddings = VGroup()
+        img_embeddings = mn.VGroup()
         for i in range(batch_size):
-            emb = Dot(radius=0.15, color=image_colors[i])
-            emb.move_to(LEFT * 2 + UP * (2 - i * 0.6))
+            emb = mn.Dot(radius=0.15, color=image_colors[i])
+            emb.move_to(mn.LEFT * 2 + mn.UP * (2 - i * 0.6))
             img_embeddings.add(emb)
-        self.play(LaggedStart(*[GrowFromCenter(emb) for emb in img_embeddings], lag_ratio=0.1))
+        self.play(mn.LaggedStart(*[mn.GrowFromCenter(emb) for emb in img_embeddings], lag_ratio=0.1))
         
         # Text boxes on the right
-        texts = VGroup()
+        texts = mn.VGroup()
         for i in range(batch_size):
-            box = Square(side_length=0.6, fill_color=image_colors[i],
-                        fill_opacity=0.7, stroke_color=GREY)
-            label = Text(f"T{i+1}", color=WHITE, font_size=16)
+            box = mn.Square(side_length=0.6, fill_color=image_colors[i],
+                        fill_opacity=0.7, stroke_color=mn.GREY)
+            label = mn.Text(f"T{i+1}", color=mn.WHITE, font_size=16)
             label.move_to(box)
-            text_group = VGroup(box, label)
-            text_group.move_to(RIGHT * 5.5 + UP * (2 - i * 0.6))
+            text_group = mn.VGroup(box, label)
+            text_group.move_to(mn.RIGHT * 5.5 + mn.UP * (2 - i * 0.6))
             texts.add(text_group)
         
-        self.play(LaggedStart(*[FadeIn(text) for text in texts], lag_ratio=0.1))
+        self.play(mn.LaggedStart(*[mn.FadeIn(text) for text in texts], lag_ratio=0.1))
         
         # Text Encoder
-        text_encoder = RoundedRectangle(
+        text_encoder = mn.RoundedRectangle(
             corner_radius=0.1, width=1.2, height=4.5,
             fill_color="#3C3228", fill_opacity=0.9,
             stroke_color="#FFB46E", stroke_width=3
         )
-        text_encoder.move_to(RIGHT * 3.5)
-        text_enc_label = Text("Text\nEncoder", color="#FFDCB4", font_size=18)
+        text_encoder.move_to(mn.RIGHT * 3.5)
+        text_enc_label = mn.Text("Text\nEncoder", color="#FFDCB4", font_size=18)
         text_enc_label.move_to(text_encoder)
-        self.play(FadeIn(text_encoder), Write(text_enc_label))
+        self.play(mn.FadeIn(text_encoder), mn.Write(text_enc_label))
         
         # Text embeddings
-        text_embeddings = VGroup()
+        text_embeddings = mn.VGroup()
         for i in range(batch_size):
-            emb = Dot(radius=0.15, color=image_colors[i])
-            emb.move_to(RIGHT * 2 + UP * (2 - i * 0.6))
+            emb = mn.Dot(radius=0.15, color=image_colors[i])
+            emb.move_to(mn.RIGHT * 2 + mn.UP * (2 - i * 0.6))
             text_embeddings.add(emb)
-        self.play(LaggedStart(*[GrowFromCenter(emb) for emb in text_embeddings], lag_ratio=0.1))
+        self.play(mn.LaggedStart(*[mn.GrowFromCenter(emb) for emb in text_embeddings], lag_ratio=0.1))
         
         # Similarity Matrix in center
-        matrix_label = Text("Similarity Matrix", color=GREY, font_size=20)
-        matrix_label.move_to(UP * 3.2)
-        self.play(Write(matrix_label))
+        matrix_label = mn.Text("Similarity Matrix", color=mn.GREY, font_size=20)
+        matrix_label.move_to(mn.UP * 3.2)
+        self.play(mn.Write(matrix_label))
         
-        matrix = VGroup()
+        matrix = mn.VGroup()
         cell_size = 0.35
         for i in range(batch_size):
             for j in range(batch_size):
                 if i == j:
                     # Positive pair
-                    cell = Square(side_length=cell_size, fill_color=GREEN,
-                                fill_opacity=0.6, stroke_color=GREY, stroke_width=1)
+                    cell = mn.Square(side_length=cell_size, fill_color=mn.GREEN,
+                                fill_opacity=0.6, stroke_color=mn.GREY, stroke_width=1)
                 else:
                     # Negative pair
-                    cell = Square(side_length=cell_size, fill_color=RED,
-                                fill_opacity=0.3, stroke_color=GREY, stroke_width=1)
+                    cell = mn.Square(side_length=cell_size, fill_color=mn.RED,
+                                fill_opacity=0.3, stroke_color=mn.GREY, stroke_width=1)
                 cell.move_to(
-                    (j - batch_size/2 + 0.5) * cell_size * RIGHT +
-                    (i - batch_size/2 + 0.5) * cell_size * DOWN + UP * 0.5
+                    (j - batch_size/2 + 0.5) * cell_size * mn.RIGHT +
+                    (i - batch_size/2 + 0.5) * cell_size * mn.DOWN + mn.UP * 0.5
                 )
                 matrix.add(cell)
         
-        self.play(LaggedStart(*[FadeIn(cell) for cell in matrix], lag_ratio=0.02))
+        self.play(mn.LaggedStart(*[mn.FadeIn(cell) for cell in matrix], lag_ratio=0.02))
         
         # Animate highlighting different pairs
         for k in range(batch_size):
@@ -249,7 +261,7 @@ class CLIPScene(Scene):
                     idx = i * batch_size + j
                     cell = matrix[idx]
                     if i == k and j == k:
-                        animations.append(cell.animate.set_fill(color=GREEN, opacity=0.9))
+                        animations.append(cell.animate.set_fill(color=mn.GREEN, opacity=0.9))
                     elif i == k or j == k:
                         animations.append(cell.animate.set_fill(opacity=0.5))
                     else:
@@ -264,101 +276,101 @@ class CLIPScene(Scene):
                 idx = i * batch_size + j
                 cell = matrix[idx]
                 if i == j:
-                    animations.append(cell.animate.set_fill(color=GREEN, opacity=0.6))
+                    animations.append(cell.animate.set_fill(color=mn.GREEN, opacity=0.6))
                 else:
-                    animations.append(cell.animate.set_fill(color=RED, opacity=0.3))
+                    animations.append(cell.animate.set_fill(color=mn.RED, opacity=0.3))
         self.play(*animations, run_time=0.5)
         
         # Info box at bottom
-        info_text = VGroup(
-            Text(f"• Positive pairs: {batch_size} (diagonal elements)", 
+        info_text = mn.VGroup(
+            mn.Text(f"• Positive pairs: {batch_size} (diagonal elements)", 
                  color=SLATE_600, font_size=16),
-            Text(f"• Negative pairs: {batch_size * (batch_size - 1)} (off-diagonal)", 
+            mn.Text(f"• Negative pairs: {batch_size * (batch_size - 1)} (off-diagonal)", 
                  color=SLATE_600, font_size=16),
-            Text(f"• Total comparisons: {batch_size * batch_size}", 
+            mn.Text(f"• Total comparisons: {batch_size * batch_size}", 
                  color=SLATE_600, font_size=16),
-            Text("• Challenge: Limited negatives scale with batch size", 
+            mn.Text("• Challenge: Limited negatives scale with batch size", 
                  color=SLATE_600, font_size=16)
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2)
-        info_text.to_edge(DOWN, buff=0.5)
-        self.play(FadeIn(info_text))
+        ).arrange(mn.DOWN, aligned_edge=mn.LEFT, buff=0.2)
+        info_text.to_edge(mn.DOWN, buff=0.5)
+        self.play(mn.FadeIn(info_text))
         
         self.wait(2)
 
 
-class GlobalContrastiveScene(Scene):
+class GlobalContrastiveScene(mn.Scene):
     """Create a frame showing Global Contrastive Learning with sampling animation."""
     
     def construct(self):
-        self.camera.background_color = WHITE
-        batch_size = 8
+        self.camera.background_color = mn.WHITE
+        batch_size = DEFAULT_BATCH_SIZE
         num_positive_centers = 10
         
         # Title
-        title = Text("Global Contrastive Learning: 1M Concept Centers",
-                    color=BLUE_700, font_size=32, weight=BOLD)
-        title.to_edge(UP, buff=0.5)
-        self.play(Write(title))
+        title = mn.Text("Global Contrastive Learning: 1M Concept Centers",
+                    color=mn.BLUE_700, font_size=32, weight=mn.BOLD)
+        title.to_edge(mn.UP, buff=0.5)
+        self.play(mn.Write(title))
         
         # Batch info
-        batch_info = Text(f"Batch: {batch_size} images | Sampled Negatives: 1,024 | Total Concepts: 1,000,000",
+        batch_info = mn.Text(f"Batch: {batch_size} images | Sampled Negatives: 1,024 | Total Concepts: 1,000,000",
                          color=SLATE_600, font_size=18)
-        batch_info.next_to(title, DOWN, buff=0.3)
-        self.play(Write(batch_info))
+        batch_info.next_to(title, mn.DOWN, buff=0.3)
+        self.play(mn.Write(batch_info))
         
         # Create image boxes on the left
-        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL, ORANGE, PINK]
-        images = VGroup()
+        image_colors = [mn.RED, mn.GREEN, mn.BLUE, mn.YELLOW, mn.PURPLE, mn.TEAL, mn.ORANGE, mn.PINK]
+        images = mn.VGroup()
         for i in range(batch_size):
-            box = Square(side_length=0.5, fill_color=image_colors[i], 
-                        fill_opacity=0.7, stroke_color=GREY)
-            label = Text(f"I{i+1}", color=WHITE, font_size=14)
+            box = mn.Square(side_length=0.5, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=mn.GREY)
+            label = mn.Text(f"I{i+1}", color=mn.WHITE, font_size=14)
             label.move_to(box)
-            img_group = VGroup(box, label)
-            img_group.move_to(LEFT * 6 + UP * (2.5 - i * 0.5))
+            img_group = mn.VGroup(box, label)
+            img_group.move_to(mn.LEFT * 6 + mn.UP * (2.5 - i * 0.5))
             images.add(img_group)
         
-        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.1))
+        self.play(mn.LaggedStart(*[mn.FadeIn(img) for img in images], lag_ratio=0.1))
         
         # Image Encoder
-        img_encoder = RoundedRectangle(
+        img_encoder = mn.RoundedRectangle(
             corner_radius=0.1, width=1.0, height=3.8,
             fill_color="#322D28", fill_opacity=0.9,
             stroke_color="#FFC878", stroke_width=3
         )
-        img_encoder.move_to(LEFT * 4.5)
-        img_enc_label = Text("Image\nEncoder", color="#FFE6C8", font_size=16)
+        img_encoder.move_to(mn.LEFT * 4.5)
+        img_enc_label = mn.Text("Image\nEncoder", color="#FFE6C8", font_size=16)
         img_enc_label.move_to(img_encoder)
-        self.play(FadeIn(img_encoder), Write(img_enc_label))
+        self.play(mn.FadeIn(img_encoder), mn.Write(img_enc_label))
         
         # Image embeddings
-        img_embeddings = VGroup()
+        img_embeddings = mn.VGroup()
         for i in range(batch_size):
-            emb = Dot(radius=0.12, color=image_colors[i])
-            emb.move_to(LEFT * 3.2 + UP * (2.5 - i * 0.5))
+            emb = mn.Dot(radius=0.12, color=image_colors[i])
+            emb.move_to(mn.LEFT * 3.2 + mn.UP * (2.5 - i * 0.5))
             img_embeddings.add(emb)
-        self.play(LaggedStart(*[GrowFromCenter(emb) for emb in img_embeddings], lag_ratio=0.1))
+        self.play(mn.LaggedStart(*[mn.GrowFromCenter(emb) for emb in img_embeddings], lag_ratio=0.1))
         
         # Concept Bank visualization (right side)
-        bank_border = RoundedRectangle(
+        bank_border = mn.RoundedRectangle(
             corner_radius=0.15, width=8, height=6,
             fill_color="#191E23", fill_opacity=0.3,
             stroke_color="#C8A064", stroke_width=4
         )
-        bank_border.move_to(RIGHT * 2)
+        bank_border.move_to(mn.RIGHT * 2)
         
-        bank_title = Text("Concept Centers Bank", color="#FFDC8C", font_size=20, weight=BOLD)
-        bank_title.move_to(bank_border.get_top() + DOWN * 0.4)
-        bank_subtitle = Text("(1,000,000 centers from offline clustering)", 
+        bank_title = mn.Text("Concept Centers Bank", color="#FFDC8C", font_size=20, weight=mn.BOLD)
+        bank_title.move_to(bank_border.get_top() + mn.DOWN * 0.4)
+        bank_subtitle = mn.Text("(1,000,000 centers from offline clustering)", 
                             color="#C8B48C", font_size=14)
-        bank_subtitle.next_to(bank_title, DOWN, buff=0.2)
+        bank_subtitle.next_to(bank_title, mn.DOWN, buff=0.2)
         
-        self.play(Create(bank_border), Write(bank_title), Write(bank_subtitle))
+        self.play(mn.Create(bank_border), mn.Write(bank_title), mn.Write(bank_subtitle))
         
         # Create stable random positions for concept centers
         rng = np.random.default_rng(42)
         num_visible_concepts = 200
-        concept_dots = VGroup()
+        concept_dots = mn.VGroup()
         
         for i in range(num_visible_concepts):
             # Random position within the bank
@@ -372,18 +384,18 @@ class GlobalContrastiveScene(Scene):
                 "#B4FFFF", "#DCC8B4", "#C8B4DC", "#B4DCC8", "#F0C8DC"
             ]
             
-            dot = Dot(radius=0.04, color=colors[cluster_id], fill_opacity=0.7)
+            dot = mn.Dot(radius=0.04, color=colors[cluster_id], fill_opacity=0.7)
             dot.move_to([x, y, 0])
             concept_dots.add(dot)
         
-        self.play(LaggedStart(*[FadeIn(dot) for dot in concept_dots], lag_ratio=0.005))
+        self.play(mn.LaggedStart(*[mn.FadeIn(dot) for dot in concept_dots], lag_ratio=0.005))
         
         # Animate sampling process for multiple samples
         for sample_idx in range(min(3, batch_size)):
             # Highlight current sample
             current_img = images[sample_idx]
-            highlight = SurroundingRectangle(current_img, color=YELLOW, buff=0.1, stroke_width=4)
-            self.play(Create(highlight))
+            highlight = mn.SurroundingRectangle(current_img, color=mn.YELLOW, buff=0.1, stroke_width=4)
+            self.play(mn.Create(highlight))
             
             # Select positive centers (clustered together)
             sample_seed = sample_idx * 1000
@@ -402,17 +414,17 @@ class GlobalContrastiveScene(Scene):
             # Highlight positive centers in green
             positive_anims = []
             for idx in positive_indices:
-                positive_anims.append(concept_dots[idx].animate.set_color(GREEN).scale(2))
+                positive_anims.append(concept_dots[idx].animate.set_color(mn.GREEN).scale(2))
             self.play(*positive_anims, run_time=0.5)
             
             # Draw connection lines to positive centers
-            lines = VGroup()
+            lines = mn.VGroup()
             start_pos = img_embeddings[sample_idx].get_center()
             for idx in positive_indices[:5]:  # Show only a few lines to avoid clutter
                 end_pos = concept_dots[idx].get_center()
-                line = DashedLine(start_pos, end_pos, color=GREEN, stroke_width=2, dash_length=0.1)
+                line = Dashedmn.Line(start_pos, end_pos, color=mn.GREEN, stroke_width=2, dash_length=0.1)
                 lines.add(line)
-            self.play(Create(lines), run_time=0.5)
+            self.play(mn.Create(lines), run_time=0.5)
             
             # Select random negative centers (scattered)
             neg_rng = np.random.default_rng(sample_seed + 1)
@@ -426,29 +438,29 @@ class GlobalContrastiveScene(Scene):
             # Highlight negative centers in orange/red
             negative_anims = []
             for idx in negative_indices:
-                negative_anims.append(concept_dots[idx].animate.set_color(ORANGE).scale(1.5))
+                negative_anims.append(concept_dots[idx].animate.set_color(mn.ORANGE).scale(1.5))
             self.play(*negative_anims, run_time=0.5)
             
             self.wait(0.5)
             
             # Reset for next sample
-            reset_anims = [FadeOut(highlight), FadeOut(lines)]
+            reset_anims = [mn.FadeOut(highlight), mn.FadeOut(lines)]
             for idx in positive_indices:
-                reset_anims.append(concept_dots[idx].animate.set_color(WHITE).scale(0.5))
+                reset_anims.append(concept_dots[idx].animate.set_color(mn.WHITE).scale(0.5))
             for idx in negative_indices:
-                reset_anims.append(concept_dots[idx].animate.set_color(WHITE).scale(1/1.5))
+                reset_anims.append(concept_dots[idx].animate.set_color(mn.WHITE).scale(1/1.5))
             self.play(*reset_anims, run_time=0.3)
         
         # Legend box at bottom
-        legend = VGroup(
-            VGroup(Dot(radius=0.08, color=YELLOW), Text("Selected Sample", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2),
-            VGroup(Dot(radius=0.08, color=GREEN), Text(f"{num_positive_centers} Positive Centers (Clustered)", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2),
-            VGroup(Dot(radius=0.08, color=ORANGE), Text("Sampled Negatives (Scattered)", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2),
-            VGroup(Dot(radius=0.08, color=WHITE), Text("Other Concepts", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2)
-        ).arrange(RIGHT, buff=0.5)
-        legend.to_edge(DOWN, buff=0.3)
+        legend = mn.VGroup(
+            mn.VGroup(mn.Dot(radius=0.08, color=mn.YELLOW), mn.Text("Selected Sample", color=SLATE_600, font_size=14)).arrange(mn.RIGHT, buff=0.2),
+            mn.VGroup(mn.Dot(radius=0.08, color=mn.GREEN), mn.Text(f"{num_positive_centers} Positive Centers (Clustered)", color=SLATE_600, font_size=14)).arrange(mn.RIGHT, buff=0.2),
+            mn.VGroup(mn.Dot(radius=0.08, color=mn.ORANGE), mn.Text("Sampled Negatives (Scattered)", color=SLATE_600, font_size=14)).arrange(mn.RIGHT, buff=0.2),
+            mn.VGroup(mn.Dot(radius=0.08, color=mn.WHITE), mn.Text("Other Concepts", color=SLATE_600, font_size=14)).arrange(mn.RIGHT, buff=0.2)
+        ).arrange(mn.RIGHT, buff=0.5)
+        legend.to_edge(mn.DOWN, buff=0.3)
         
-        legend_box = RoundedRectangle(
+        legend_box = mn.RoundedRectangle(
             corner_radius=0.1,
             width=legend.width + 0.5,
             height=legend.height + 0.3,
@@ -457,28 +469,28 @@ class GlobalContrastiveScene(Scene):
         )
         legend_box.move_to(legend)
         
-        self.play(FadeIn(legend_box), FadeIn(legend))
+        self.play(mn.FadeIn(legend_box), mn.FadeIn(legend))
         self.wait(2)
 
 
-class ComparisonScene(Scene):
+class ComparisonScene(mn.Scene):
     """Create a side-by-side comparison summary frame."""
     
     def construct(self):
-        self.camera.background_color = WHITE
+        self.camera.background_color = mn.WHITE
         
         # Title
-        title = Text("Key Differences", color=BLUE_600, font_size=44, weight=BOLD)
-        title.to_edge(UP, buff=0.5)
-        self.play(Write(title))
+        title = mn.Text("Key Differences", color=mn.BLUE_600, font_size=44, weight=mn.BOLD)
+        title.to_edge(mn.UP, buff=0.5)
+        self.play(mn.Write(title))
         
         # Divider
-        divider = Line(UP * 2.5, DOWN * 3, color=SLATE_300, stroke_width=3)
-        self.play(Create(divider))
+        divider = mn.Line(mn.UP * 2.5, mn.DOWN * 3, color=SLATE_300, stroke_width=3)
+        self.play(mn.Create(divider))
         
         # CLIP side
-        clip_title = Text("CLIP Approach", color=BLUE_600, font_size=28, weight=BOLD)
-        clip_title.move_to(LEFT * 3.5 + UP * 2)
+        clip_title = mn.Text("CLIP Approach", color=mn.BLUE_600, font_size=28, weight=mn.BOLD)
+        clip_title.move_to(mn.LEFT * 3.5 + mn.UP * 2)
         
         clip_points = [
             ("Architecture", "Dual encoders (Image + Text)"),
@@ -489,24 +501,24 @@ class ComparisonScene(Scene):
             ("Scale", "~400M pairs training"),
         ]
         
-        clip_items = VGroup()
+        clip_items = mn.VGroup()
         for i, (label, value) in enumerate(clip_points):
-            label_text = Text(label + ":", color=SLATE_600, font_size=18, weight=BOLD)
-            value_box = RoundedRectangle(
+            label_text = mn.Text(label + ":", color=SLATE_600, font_size=18, weight=mn.BOLD)
+            value_box = mn.RoundedRectangle(
                 corner_radius=0.08, width=5, height=0.5,
                 fill_color=SLATE_50, fill_opacity=0.8,
-                stroke_color=BLUE_400, stroke_width=2
+                stroke_color=mn.BLUE_400, stroke_width=2
             )
-            value_text = Text(value, color="#1E293B", font_size=16)
+            value_text = mn.Text(value, color="#1E293B", font_size=16)
             value_text.move_to(value_box)
             
-            item = VGroup(label_text, VGroup(value_box, value_text)).arrange(DOWN, buff=0.15, aligned_edge=LEFT)
-            item.move_to(LEFT * 3.5 + UP * (1 - i * 0.9))
+            item = mn.VGroup(label_text, mn.VGroup(value_box, value_text)).arrange(mn.DOWN, buff=0.15, aligned_edge=mn.LEFT)
+            item.move_to(mn.LEFT * 3.5 + mn.UP * (1 - i * 0.9))
             clip_items.add(item)
         
         # Global side
-        global_title = Text("Global Contrastive", color=BLUE_700, font_size=28, weight=BOLD)
-        global_title.move_to(RIGHT * 3.5 + UP * 2)
+        global_title = mn.Text("Global Contrastive", color=mn.BLUE_700, font_size=28, weight=mn.BOLD)
+        global_title.move_to(mn.RIGHT * 3.5 + mn.UP * 2)
         
         global_points = [
             ("Architecture", "Single encoder (Image only)"),
@@ -517,37 +529,37 @@ class ComparisonScene(Scene):
             ("Scale", "~1M concept centers"),
         ]
         
-        global_items = VGroup()
+        global_items = mn.VGroup()
         for i, (label, value) in enumerate(global_points):
-            label_text = Text(label + ":", color=SLATE_600, font_size=18, weight=BOLD)
-            value_box = RoundedRectangle(
+            label_text = mn.Text(label + ":", color=SLATE_600, font_size=18, weight=mn.BOLD)
+            value_box = mn.RoundedRectangle(
                 corner_radius=0.08, width=5, height=0.5,
-                fill_color=BLUE_50, fill_opacity=0.8,
-                stroke_color=BLUE_400, stroke_width=2
+                fill_color=mn.BLUE_50, fill_opacity=0.8,
+                stroke_color=mn.BLUE_400, stroke_width=2
             )
-            value_text = Text(value, color="#1E3A5F", font_size=16)
+            value_text = mn.Text(value, color="#1E3A5F", font_size=16)
             value_text.move_to(value_box)
             
-            item = VGroup(label_text, VGroup(value_box, value_text)).arrange(DOWN, buff=0.15, aligned_edge=LEFT)
-            item.move_to(RIGHT * 3.5 + UP * (1 - i * 0.9))
+            item = mn.VGroup(label_text, mn.VGroup(value_box, value_text)).arrange(mn.DOWN, buff=0.15, aligned_edge=mn.LEFT)
+            item.move_to(mn.RIGHT * 3.5 + mn.UP * (1 - i * 0.9))
             global_items.add(item)
         
         # Animate everything
-        self.play(Write(clip_title), Write(global_title))
+        self.play(mn.Write(clip_title), mn.Write(global_title))
         self.play(
-            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in clip_items], lag_ratio=0.2),
-            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in global_items], lag_ratio=0.2),
+            mn.LaggedStart(*[mn.FadeIn(item, shift=mn.DOWN * 0.2) for item in clip_items], lag_ratio=0.2),
+            mn.LaggedStart(*[mn.FadeIn(item, shift=mn.DOWN * 0.2) for item in global_items], lag_ratio=0.2),
             run_time=3
         )
         self.wait(3)
 
 
-class ComparisonVideo(Scene):
+class ComparisonVideo(mn.Scene):
     """Main scene that combines all scenes into one video."""
     
     def construct(self):
         # Set white background
-        self.camera.background_color = WHITE
+        self.camera.background_color = mn.WHITE
         
         # Scene 1: Title Scene
         self._render_title_scene()
@@ -570,16 +582,16 @@ class ComparisonVideo(Scene):
     def _render_title_scene(self):
         """Render title scene content."""
         # Title
-        title = Text("Cluster Discrimination Visualization", 
-                    color=BLUE_600, weight=BOLD, font_size=48)
-        title.move_to(UP * 2.5)
+        title = mn.Text("Cluster Discrimination Visualization", 
+                    color=mn.BLUE_600, weight=mn.BOLD, font_size=48)
+        title.move_to(mn.UP * 2.5)
         
-        subtitle = Text("CLIP vs. Global Contrastive Learning",
-                       color=BLUE_700, font_size=32)
-        subtitle.next_to(title, DOWN, buff=0.5)
+        subtitle = mn.Text("CLIP vs. Global Contrastive Learning",
+                       color=mn.BLUE_700, font_size=32)
+        subtitle.next_to(title, mn.DOWN, buff=0.5)
         
-        divider = Line(LEFT * 5, RIGHT * 5, color=SLATE_300, stroke_width=2)
-        divider.next_to(subtitle, DOWN, buff=0.5)
+        divider = mn.Line(mn.LEFT * 5, mn.RIGHT * 5, color=SLATE_300, stroke_width=2)
+        divider.next_to(subtitle, mn.DOWN, buff=0.5)
         
         # Create info boxes using helper
         clip_box = self._create_info_box(
@@ -592,8 +604,8 @@ class ComparisonVideo(Scene):
                 "• Cross-modal matching"
             ],
             SLATE_50,
-            BLUE_600,
-            LEFT * 3.5
+            mn.BLUE_600,
+            mn.LEFT * 3.5
         )
         
         global_box = self._create_info_box(
@@ -605,84 +617,84 @@ class ComparisonVideo(Scene):
                 "• Single encoder",
                 "• Sample from concept bank"
             ],
-            BLUE_50,
-            BLUE_700,
-            RIGHT * 3.5
+            mn.BLUE_50,
+            mn.BLUE_700,
+            mn.RIGHT * 3.5
         )
         
-        clip_box.next_to(divider, DOWN, buff=1.0)
-        global_box.next_to(divider, DOWN, buff=1.0)
+        clip_box.next_to(divider, mn.DOWN, buff=1.0)
+        global_box.next_to(divider, mn.DOWN, buff=1.0)
         
-        self.play(Write(title), Write(subtitle), Create(divider), run_time=1.5)
-        self.play(FadeIn(clip_box, shift=LEFT * 0.5), FadeIn(global_box, shift=RIGHT * 0.5), run_time=1)
+        self.play(mn.Write(title), mn.Write(subtitle), mn.Create(divider), run_time=1.5)
+        self.play(mn.FadeIn(clip_box, shift=mn.LEFT * 0.5), mn.FadeIn(global_box, shift=mn.RIGHT * 0.5), run_time=1)
         self.wait(2)
     
     def _create_info_box(self, title_text, features, bg_color, title_color, position):
         """Helper to create an info box."""
-        box = RoundedRectangle(
+        box = mn.RoundedRectangle(
             corner_radius=0.2, width=5.5, height=4.0,
             fill_color=bg_color, fill_opacity=0.9,
             stroke_color=title_color, stroke_width=3
         )
         box.move_to(position)
         
-        title = Text(title_text, color=title_color, weight=BOLD, font_size=28)
-        title.move_to(box.get_top() + DOWN * 0.5)
+        title = mn.Text(title_text, color=title_color, weight=mn.BOLD, font_size=28)
+        title.move_to(box.get_top() + mn.DOWN * 0.5)
         
-        feature_texts = VGroup()
+        feature_texts = mn.VGroup()
         for i, feature in enumerate(features):
-            text = Text(feature, color=SLATE_600, font_size=18)
-            text.move_to(box.get_top() + DOWN * (1.2 + i * 0.5))
-            text.align_to(box.get_left() + RIGHT * 0.3, LEFT)
+            text = mn.Text(feature, color=SLATE_600, font_size=18)
+            text.move_to(box.get_top() + mn.DOWN * (1.2 + i * 0.5))
+            text.align_to(box.get_left() + mn.RIGHT * 0.3, mn.LEFT)
             feature_texts.add(text)
         
-        return VGroup(box, title, feature_texts)
+        return mn.VGroup(box, title, feature_texts)
     
     def _render_clip_scene(self):
         """Render CLIP scene content."""
-        batch_size = 8
+        batch_size = DEFAULT_BATCH_SIZE
         
-        title = Text("CLIP: Batch-Level Image-Text Contrastive Learning",
-                    color=BLUE_600, font_size=28, weight=BOLD)
-        title.to_edge(UP, buff=0.3)
-        self.play(Write(title), run_time=0.8)
+        title = mn.Text("CLIP: Batch-Level Image-Text Contrastive Learning",
+                    color=mn.BLUE_600, font_size=28, weight=mn.BOLD)
+        title.to_edge(mn.UP, buff=0.3)
+        self.play(mn.Write(title), run_time=0.8)
         
         # Simplified CLIP visualization
-        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL, ORANGE, PINK]
-        images = VGroup()
+        image_colors = [mn.RED, mn.GREEN, mn.BLUE, mn.YELLOW, mn.PURPLE, mn.TEAL, mn.ORANGE, mn.PINK]
+        images = mn.VGroup()
         for i in range(batch_size):
-            box = Square(side_length=0.5, fill_color=image_colors[i], 
-                        fill_opacity=0.7, stroke_color=GREY)
-            label = Text(f"I{i+1}", color=WHITE, font_size=14)
+            box = mn.Square(side_length=0.5, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=mn.GREY)
+            label = mn.Text(f"I{i+1}", color=mn.WHITE, font_size=14)
             label.move_to(box)
-            img_group = VGroup(box, label)
-            img_group.move_to(LEFT * 5.5 + UP * (2 - i * 0.5))
+            img_group = mn.VGroup(box, label)
+            img_group.move_to(mn.LEFT * 5.5 + mn.UP * (2 - i * 0.5))
             images.add(img_group)
         
-        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.05), run_time=1.5)
+        self.play(mn.LaggedStart(*[mn.FadeIn(img) for img in images], lag_ratio=0.05), run_time=1.5)
         
         # Show similarity matrix
-        matrix_label = Text("Similarity Matrix", color=GREY, font_size=18)
-        matrix_label.move_to(UP * 2.8)
-        self.play(Write(matrix_label), run_time=0.5)
+        matrix_label = mn.Text("Similarity Matrix", color=mn.GREY, font_size=18)
+        matrix_label.move_to(mn.UP * 2.8)
+        self.play(mn.Write(matrix_label), run_time=0.5)
         
-        matrix = VGroup()
+        matrix = mn.VGroup()
         cell_size = 0.3
         for i in range(batch_size):
             for j in range(batch_size):
                 if i == j:
-                    cell = Square(side_length=cell_size, fill_color=GREEN,
-                                fill_opacity=0.6, stroke_color=GREY, stroke_width=1)
+                    cell = mn.Square(side_length=cell_size, fill_color=mn.GREEN,
+                                fill_opacity=0.6, stroke_color=mn.GREY, stroke_width=1)
                 else:
-                    cell = Square(side_length=cell_size, fill_color=RED,
-                                fill_opacity=0.3, stroke_color=GREY, stroke_width=1)
+                    cell = mn.Square(side_length=cell_size, fill_color=mn.RED,
+                                fill_opacity=0.3, stroke_color=mn.GREY, stroke_width=1)
                 cell.move_to(
-                    (j - batch_size/2 + 0.5) * cell_size * RIGHT +
-                    (i - batch_size/2 + 0.5) * cell_size * DOWN + UP * 0.3
+                    (j - batch_size/2 + 0.5) * cell_size * mn.RIGHT +
+                    (i - batch_size/2 + 0.5) * cell_size * mn.DOWN + mn.UP * 0.3
                 )
                 matrix.add(cell)
         
-        self.play(LaggedStart(*[FadeIn(cell) for cell in matrix], lag_ratio=0.01), run_time=1.5)
+        self.play(mn.LaggedStart(*[mn.FadeIn(cell) for cell in matrix], lag_ratio=0.01), run_time=1.5)
         
         # Animate a few highlights
         for k in [0, 3, 7]:
@@ -692,7 +704,7 @@ class ComparisonVideo(Scene):
                     idx = i * batch_size + j
                     cell = matrix[idx]
                     if i == k and j == k:
-                        animations.append(cell.animate.set_fill(color=GREEN, opacity=0.9))
+                        animations.append(cell.animate.set_fill(color=mn.GREEN, opacity=0.9))
                     elif i == k or j == k:
                         animations.append(cell.animate.set_fill(opacity=0.5))
                     else:
@@ -700,119 +712,119 @@ class ComparisonVideo(Scene):
             self.play(*animations, run_time=0.3)
         
         # Info text
-        info_text = Text(f"Limited to {batch_size}x{batch_size} = {batch_size*batch_size} comparisons per batch", 
+        info_text = mn.Text(f"Limited to {batch_size}x{batch_size} = {batch_size*batch_size} comparisons per batch", 
                         color=SLATE_600, font_size=16)
-        info_text.to_edge(DOWN, buff=0.5)
-        self.play(FadeIn(info_text), run_time=0.5)
+        info_text.to_edge(mn.DOWN, buff=0.5)
+        self.play(mn.FadeIn(info_text), run_time=0.5)
         self.wait(2)
     
     def _render_global_scene(self):
         """Render global contrastive scene content."""
-        batch_size = 6
+        batch_size = 6  # Reduced for clearer visualization
         
-        title = Text("Global Contrastive Learning: 1M Concept Centers",
-                    color=BLUE_700, font_size=28, weight=BOLD)
-        title.to_edge(UP, buff=0.3)
-        self.play(Write(title), run_time=0.8)
+        title = mn.Text("Global Contrastive Learning: 1M Concept Centers",
+                    color=mn.BLUE_700, font_size=28, weight=mn.BOLD)
+        title.to_edge(mn.UP, buff=0.3)
+        self.play(mn.Write(title), run_time=0.8)
         
         # Images on left
-        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL]
-        images = VGroup()
+        image_colors = [mn.RED, mn.GREEN, mn.BLUE, mn.YELLOW, mn.PURPLE, mn.TEAL]
+        images = mn.VGroup()
         for i in range(batch_size):
-            box = Square(side_length=0.4, fill_color=image_colors[i], 
-                        fill_opacity=0.7, stroke_color=GREY)
-            label = Text(f"I{i+1}", color=WHITE, font_size=12)
+            box = mn.Square(side_length=0.4, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=mn.GREY)
+            label = mn.Text(f"I{i+1}", color=mn.WHITE, font_size=12)
             label.move_to(box)
-            img_group = VGroup(box, label)
-            img_group.move_to(LEFT * 6 + UP * (2 - i * 0.6))
+            img_group = mn.VGroup(box, label)
+            img_group.move_to(mn.LEFT * 6 + mn.UP * (2 - i * 0.6))
             images.add(img_group)
         
-        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.05), run_time=1)
+        self.play(mn.LaggedStart(*[mn.FadeIn(img) for img in images], lag_ratio=0.05), run_time=1)
         
         # Concept bank
-        bank_border = RoundedRectangle(
+        bank_border = mn.RoundedRectangle(
             corner_radius=0.15, width=9, height=5.5,
             fill_color="#191E23", fill_opacity=0.2,
             stroke_color="#C8A064", stroke_width=4
         )
-        bank_border.move_to(RIGHT * 1.5)
+        bank_border.move_to(mn.RIGHT * 1.5)
         
-        bank_title = Text("Concept Centers Bank (1M centers)", 
-                         color="#FFDC8C", font_size=18, weight=BOLD)
-        bank_title.move_to(bank_border.get_top() + DOWN * 0.4)
+        bank_title = mn.Text("Concept Centers Bank (1M centers)", 
+                         color="#FFDC8C", font_size=18, weight=mn.BOLD)
+        bank_title.move_to(bank_border.get_top() + mn.DOWN * 0.4)
         
-        self.play(Create(bank_border), Write(bank_title), run_time=1)
+        self.play(mn.Create(bank_border), mn.Write(bank_title), run_time=1)
         
         # Create concept dots
         rng = np.random.default_rng(42)
         num_visible_concepts = 150
-        concept_dots = VGroup()
+        concept_dots = mn.VGroup()
         
         for i in range(num_visible_concepts):
             x = bank_border.get_left()[0] + 0.5 + rng.random() * 8
             y = bank_border.get_bottom()[1] + 0.5 + rng.random() * 4.5
             
-            dot = Dot(radius=0.04, color=WHITE, fill_opacity=0.5)
+            dot = mn.Dot(radius=0.04, color=mn.WHITE, fill_opacity=0.5)
             dot.move_to([x, y, 0])
             concept_dots.add(dot)
         
-        self.play(LaggedStart(*[FadeIn(dot) for dot in concept_dots], lag_ratio=0.003), run_time=1.5)
+        self.play(mn.LaggedStart(*[mn.FadeIn(dot) for dot in concept_dots], lag_ratio=0.003), run_time=1.5)
         
         # Demonstrate sampling for one image
-        highlight = SurroundingRectangle(images[2], color=YELLOW, buff=0.1, stroke_width=4)
-        self.play(Create(highlight), run_time=0.5)
+        highlight = mn.SurroundingRectangle(images[2], color=mn.YELLOW, buff=0.1, stroke_width=4)
+        self.play(mn.Create(highlight), run_time=0.5)
         
         # Highlight some positive centers (green)
         positive_anims = []
         for i in range(10):
-            positive_anims.append(concept_dots[20+i*3].animate.set_color(GREEN).scale(2))
+            positive_anims.append(concept_dots[20+i*3].animate.set_color(mn.GREEN).scale(2))
         self.play(*positive_anims, run_time=0.7)
         
         # Highlight some negative centers (orange)
         negative_anims = []
         for i in range(25):
-            negative_anims.append(concept_dots[i*6].animate.set_color(ORANGE).scale(1.5))
+            negative_anims.append(concept_dots[i*6].animate.set_color(mn.ORANGE).scale(1.5))
         self.play(*negative_anims, run_time=0.7)
         
         self.wait(2)
     
     def _render_comparison_scene(self):
         """Render comparison scene content."""
-        title = Text("Key Differences", color=BLUE_600, font_size=40, weight=BOLD)
-        title.to_edge(UP, buff=0.5)
-        self.play(Write(title), run_time=0.8)
+        title = mn.Text("Key Differences", color=mn.BLUE_600, font_size=40, weight=mn.BOLD)
+        title.to_edge(mn.UP, buff=0.5)
+        self.play(mn.Write(title), run_time=0.8)
         
-        divider = Line(UP * 2.5, DOWN * 3, color=SLATE_300, stroke_width=3)
-        self.play(Create(divider), run_time=0.5)
+        divider = mn.Line(mn.UP * 2.5, mn.DOWN * 3, color=SLATE_300, stroke_width=3)
+        self.play(mn.Create(divider), run_time=0.5)
         
         # CLIP side
-        clip_title = Text("CLIP", color=BLUE_600, font_size=32, weight=BOLD)
-        clip_title.move_to(LEFT * 3.5 + UP * 2.2)
+        clip_title = mn.Text("CLIP", color=mn.BLUE_600, font_size=32, weight=mn.BOLD)
+        clip_title.move_to(mn.LEFT * 3.5 + mn.UP * 2.2)
         
-        clip_items = VGroup(
-            Text("• Dual encoders", color=SLATE_600, font_size=18),
-            Text("• Image-Text pairs", color=SLATE_600, font_size=18),
-            Text("• Batch-limited negatives", color=SLATE_600, font_size=18),
-            Text("• Cross-modal alignment", color=SLATE_600, font_size=18),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.4)
-        clip_items.move_to(LEFT * 3.5 + DOWN * 0.2)
+        clip_items = mn.VGroup(
+            mn.Text("• Dual encoders", color=SLATE_600, font_size=18),
+            mn.Text("• Image-Text pairs", color=SLATE_600, font_size=18),
+            mn.Text("• Batch-limited negatives", color=SLATE_600, font_size=18),
+            mn.Text("• Cross-modal alignment", color=SLATE_600, font_size=18),
+        ).arrange(mn.DOWN, aligned_edge=mn.LEFT, buff=0.4)
+        clip_items.move_to(mn.LEFT * 3.5 + mn.DOWN * 0.2)
         
         # Global side
-        global_title = Text("Global Contrastive", color=BLUE_700, font_size=32, weight=BOLD)
-        global_title.move_to(RIGHT * 3.5 + UP * 2.2)
+        global_title = mn.Text("Global Contrastive", color=mn.BLUE_700, font_size=32, weight=mn.BOLD)
+        global_title.move_to(mn.RIGHT * 3.5 + mn.UP * 2.2)
         
-        global_items = VGroup(
-            Text("• Single encoder", color=SLATE_600, font_size=18),
-            Text("• Images only", color=SLATE_600, font_size=18),
-            Text("• 1M concept centers", color=SLATE_600, font_size=18),
-            Text("• Massive negative pool", color=SLATE_600, font_size=18),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.4)
-        global_items.move_to(RIGHT * 3.5 + DOWN * 0.2)
+        global_items = mn.VGroup(
+            mn.Text("• Single encoder", color=SLATE_600, font_size=18),
+            mn.Text("• Images only", color=SLATE_600, font_size=18),
+            mn.Text("• 1M concept centers", color=SLATE_600, font_size=18),
+            mn.Text("• Massive negative pool", color=SLATE_600, font_size=18),
+        ).arrange(mn.DOWN, aligned_edge=mn.LEFT, buff=0.4)
+        global_items.move_to(mn.RIGHT * 3.5 + mn.DOWN * 0.2)
         
-        self.play(Write(clip_title), Write(global_title), run_time=0.8)
+        self.play(mn.Write(clip_title), mn.Write(global_title), run_time=0.8)
         self.play(
-            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in clip_items], lag_ratio=0.2),
-            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in global_items], lag_ratio=0.2),
+            mn.LaggedStart(*[mn.FadeIn(item, shift=mn.DOWN * 0.2) for item in clip_items], lag_ratio=0.2),
+            mn.LaggedStart(*[mn.FadeIn(item, shift=mn.DOWN * 0.2) for item in global_items], lag_ratio=0.2),
             run_time=2
         )
         self.wait(3)

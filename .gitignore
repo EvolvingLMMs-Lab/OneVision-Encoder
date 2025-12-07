@@ -496,4 +496,5 @@ cache/
 
 list_*
 tmp
-*.jsontools/tools_for_figures/media/
+*.json
+tools/tools_for_figures/media/
