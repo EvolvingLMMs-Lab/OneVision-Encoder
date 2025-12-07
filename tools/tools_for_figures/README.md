@@ -47,56 +47,82 @@ python generate_vit_residual_gif.py --demo --output custom.mp4 \
 Generates animations comparing CLIP's batch-level contrastive learning with global contrastive learning using 1M concept centers.
 
 **Features:**
-- Publication-quality visual design (Meta/Nature standards)
-- Side-by-side comparison of CLIP vs Global Contrastive Learning
+- Publication-quality visual design (CLIP/SAM paper style)
+- Generates separate animations for CLIP and Global Contrastive Learning
+- Option to create combined animation or individual GIFs
+- All hyperparameters centralized at the top of the file for easy customization
 - Animated sampling process showing how samples are selected
 - Highlights 10 positive class centers for each selected sample
 - Displays randomly sampled negative centers with visual emphasis
-- Multiple samples processed in sequence (similar to CLIP's approach)
-- Sophisticated visual aesthetics with multi-layer shadows and glow effects
-- Smooth gradient backgrounds and modern color palette
-- Shows connection lines from samples to positive/negative centers
-- Professional legend box explaining different types of centers
-- CLIP section updated to mention 32K negative samples capability
+- Multiple samples processed in sequence
+- Sophisticated visual aesthetics with multi-layer glow effects
+- Enhanced color palette with Chinese and English documentation
+- Professional flat design without title frame (direct to content)
 
 **Usage:**
 ```bash
-# Generate GIF (default)
+# Generate two separate GIF files (recommended)
+python generate_global_contrastive_comparison.py --output comparison --separate
+
+# Generate CLIP animation only
+python generate_global_contrastive_comparison.py --output clip --clip-only
+
+# Generate Global animation only
+python generate_global_contrastive_comparison.py --output global --global-only
+
+# Generate combined animation (backward compatible)
 python generate_global_contrastive_comparison.py --output comparison.gif
 
-# Generate MP4 video (better quality)
-python generate_global_contrastive_comparison.py --output comparison.mp4 --video
+# Generate as MP4 video with separate files
+python generate_global_contrastive_comparison.py --output comparison --separate --video
 
 # Customize parameters
 python generate_global_contrastive_comparison.py \
-    --output custom_comparison.gif \
+    --output custom \
+    --separate \
     --fps 3 --width 1920 --height 1080
 ```
 
 **Parameters:**
-- `--output`: Output file path (default: global_contrastive_comparison.gif)
+- `--output`: Output file path (without extension) or prefix (default: comparison)
 - `--video`: Output as MP4 video instead of GIF
 - `--fps`: Frames per second (default: 2)
 - `--width`: Canvas width (default: 1920)
 - `--height`: Canvas height (default: 1080)
+- `--separate`: Generate two separate GIF/video files (CLIP and Global)
+- `--clip-only`: Generate CLIP animation only
+- `--global-only`: Generate Global animation only
 
-**Animation Phases:**
-1. **Title Frame (3s):** Professional introduction with elegant gradient background and side-by-side overview
-2. **CLIP Animation (8s):** Shows batch-level contrastive learning with enhanced similarity matrix and modern styling
-3. **Global Contrastive Animation (12s):** Publication-quality sampling animation featuring:
-   - Sequential sample selection with sophisticated highlight effects
-   - 10 positive centers highlighted in vibrant green with multi-layer glow
-   - ~64 sampled negative centers highlighted in red with elegant glow effects
+**Output Files (with --separate flag):**
+- `{output}_clip.gif` or `{output}_clip.mp4` - CLIP contrastive learning animation
+- `{output}_global.gif` or `{output}_global.mp4` - Global contrastive learning animation
+
+**Animation Details:**
+1. **CLIP Animation (8s):** Shows batch-level contrastive learning with similarity matrix
+2. **Global Contrastive Animation (12s):** Shows sampling from 1M concept centers with:
+   - Sequential sample selection with elegant highlight effects
+   - 10 positive centers clustered together with multi-layer glow effects
+   - ~64 sampled negative centers scattered across concept space
    - Smooth animated connection lines from samples to centers
-   - Multiple samples processed with professional transitions
    - Enhanced concept bank visualization with depth effects
 
-**Design Enhancements:**
-- **Modern Color Palette:** Vibrant, consistent colors (#ef4444, #22c55e, #3b82f6, etc.)
-- **Typography:** Professional hierarchy with larger, clearer fonts (64px title, 36px subtitle)
-- **Depth Effects:** Multi-layer shadows on all major elements for 3D appearance
-- **Gradients:** Smooth background gradients for elegant, clean look
-- **Visual Polish:** Rounded corners (15-20px), enhanced borders, sophisticated glow effects
+**Customizable Hyperparameters (at top of file):**
+All parameters are now centralized at the top of the script for easy modification:
+- Animation timing (CLIP_ANIMATION_DURATION, GLOBAL_ANIMATION_DURATION)
+- Batch sizes (CLIP_BATCH_SIZE, GLOBAL_BATCH_SIZE)
+- Concept center settings (GLOBAL_TOTAL_CONCEPTS, GLOBAL_NUM_POSITIVE_CENTERS)
+- Layout dimensions (item heights, gaps, encoder widths)
+- Color palette (IMAGE_COLORS_SAM, positive/negative colors)
+- Typography (font sizes for title, label, small text)
+- Visual enhancements (border radius, border widths, glow effects)
+
+**Design Updates:**
+- **Title Frame Removed:** Direct entry into content without title slide
+- **Enhanced Color Palette:** More vibrant and harmonious SAM-style colors with bilingual comments
+- **Multi-layer Glow Effects:** Positive centers have 3 layers, negatives have subtle glow
+- **Better Visual Hierarchy:** Improved sizing and spacing throughout
+- **Flat Design:** Clean, modern aesthetic without unnecessary shadows
+- **Improved Connection Lines:** Smoother curves and better visual flow
 
 **Key Differences Visualized:**
 
