@@ -417,7 +417,7 @@ def create_clip_frame(
         # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
         # All samples get lines: animated ones in color, others in light gray
         if i == highlight_pair:
-            # Draw with slight curve for elegance / 使用轻微的曲线增加优雅感
+            # Draw emphasized connection line / 绘制强调的连接线
             draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
                      fill=image_colors[i], width=3)
         else:
@@ -433,7 +433,7 @@ def create_clip_frame(
         # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
         # All samples get lines: animated ones in color, others in light gray
         if i == highlight_pair:
-            # Draw with slight curve for elegance / 使用轻微的曲线增加优雅感
+            # Draw emphasized connection line / 绘制强调的连接线
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
                      fill=text_colors[i], width=3)
         else:
@@ -974,6 +974,12 @@ def generate_animation(
         canvas_size: 画布大小 / Canvas size (width, height)
         as_video: 是否输出为视频格式 / Whether to output as video format
     """
+    # Print deprecation warning
+    print("\n" + "!"*60)
+    print("WARNING: generate_animation() is deprecated!")
+    print("Consider using --separate flag to generate CLIP and Global animations separately.")
+    print("!"*60 + "\n")
+    
     frames: List[np.ndarray] = []
     
     print("生成帧... / Generating frames...")
