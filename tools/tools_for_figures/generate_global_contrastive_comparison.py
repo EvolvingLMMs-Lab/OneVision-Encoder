@@ -1,772 +1,827 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Generate an animated GIF to visualize the comparison between CLIP's contrastive learning
-and the global contrastive learning approach.
+Generate an animated video to visualize the comparison between CLIP's contrastive learning
+and the global contrastive learning approach using Manim.
 
 Key differences:
 1. CLIP: Image-Text pairs within a batch (limited negative samples)
 2. Global: No text encoder, 1M concept centers from offline clustering as negatives
 
 Usage:
-    python generate_global_contrastive_comparison.py --output comparison.gif
-    python generate_global_contrastive_comparison.py --output comparison.mp4 --video
+    manim generate_global_contrastive_comparison.py -pql  # Preview low quality
+    manim generate_global_contrastive_comparison.py -pqh  # Preview high quality
+    manim generate_global_contrastive_comparison.py ComparisonVideo --format mp4 -qh
 """
 
 import argparse
-import os
-from pathlib import Path
-from typing import Optional, Tuple, List
-
-import imageio
+from manim import *
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-
-# Cross-platform font paths
-FONT_PATHS = [
-    # Linux
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    # macOS
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/Library/Fonts/Arial.ttf",
-    # Windows
-    "C:/Windows/Fonts/arial.ttf",
-    "C:/Windows/Fonts/arialbd.ttf",
-]
 
 
-def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """Get a font with cross-platform support."""
-    for font_path in FONT_PATHS:
-        if os.path.exists(font_path):
-            if bold and ("Bold" in font_path or "bd" in font_path.lower()):
-                try:
-                    return ImageFont.truetype(font_path, size)
-                except OSError:
-                    continue
-            elif not bold and ("Bold" not in font_path and "bd" not in font_path.lower()):
-                try:
-                    return ImageFont.truetype(font_path, size)
-                except OSError:
-                    continue
-    # Fallback
-    for font_path in FONT_PATHS:
-        if os.path.exists(font_path):
-            try:
-                return ImageFont.truetype(font_path, size)
-            except OSError:
-                continue
-    return ImageFont.load_default()
+# Color definitions (converted from hex to Manim compatible)
+BLUE_600 = "#2563eb"
+BLUE_700 = "#1d4ed8"
+BLUE_400 = "#60a5fa"
+SLATE_600 = "#475569"
+SLATE_300 = "#cbd5e1"
+SLATE_50 = "#f8fafc"
+BLUE_50 = "#eff6ff"
 
 
-def draw_rounded_rectangle(
-    draw: ImageDraw.Draw,
-    xy: List[int],
-    radius: int = 10,
-    fill: Optional[Tuple[int, int, int]] = None,
-    outline: Optional[Tuple[int, int, int]] = None,
-    width: int = 1
-) -> None:
-    """Draw a rounded rectangle with fallback for older Pillow versions."""
-    try:
-        draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
-    except AttributeError:
-        draw.rectangle(xy, fill=fill, outline=outline, width=width)
-
-
-def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Image:
+class TitleScene(Scene):
     """Create an introduction title frame with webpage-matching colors."""
-    # Light background matching webpage (#eff6ff to #ffffff)
-    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
     
-    font_title = get_font(56, bold=True)
-    font_subtitle = get_font(32, bold=False)
-    font_text = get_font(24, bold=False)
+    def construct(self):
+        # Set background color to white
+        self.camera.background_color = WHITE
+        
+        # Title with blue gradient
+        title = Text("Cluster Discrimination Visualization", 
+                    color=BLUE_600, weight=BOLD, font_size=48)
+        title.move_to(UP * 2.5)
+        
+        # Subtitle
+        subtitle = Text("CLIP vs. Global Contrastive Learning",
+                       color=BLUE_700, font_size=32)
+        subtitle.next_to(title, DOWN, buff=0.5)
+        
+        # Divider line
+        divider = Line(LEFT * 5, RIGHT * 5, color=SLATE_300, stroke_width=2)
+        divider.next_to(subtitle, DOWN, buff=0.5)
+        
+        # Content boxes
+        clip_box = self._create_info_box(
+            "CLIP",
+            [
+                "• Image-Text pairs",
+                "• Batch-level contrastive",
+                "• Limited negative samples",
+                "  (batch size: 32-1024,",
+                "   max ~32K negatives)",
+                "• Dual encoders:",
+                "  - Image Encoder",
+                "  - Text Encoder",
+                "• Cross-modal matching"
+            ],
+            SLATE_50,
+            BLUE_600,
+            LEFT * 3.5
+        )
+        
+        global_box = self._create_info_box(
+            "Global Contrastive",
+            [
+                "• Image only (no text)",
+                "• Global negative sampling",
+                "• 1M concept centers",
+                "  (from offline clustering)",
+                "• Single encoder:",
+                "  - Image Encoder only",
+                "• Sample negatives from",
+                "  concept bank each batch"
+            ],
+            BLUE_50,
+            BLUE_700,
+            RIGHT * 3.5
+        )
+        
+        clip_box.next_to(divider, DOWN, buff=1.0)
+        global_box.next_to(divider, DOWN, buff=1.0)
+        
+        # Add all elements
+        self.play(
+            Write(title),
+            Write(subtitle),
+            Create(divider),
+            run_time=1.5
+        )
+        self.play(
+            FadeIn(clip_box, shift=LEFT * 0.5),
+            FadeIn(global_box, shift=RIGHT * 0.5),
+            run_time=1
+        )
+        self.wait(2)
     
-    # Gradient background (light blue to white)
-    for y in range(canvas_size[1]):
-        alpha = y / canvas_size[1]
-        # From #eff6ff (239, 246, 255) to white (255, 255, 255)
-        r = int(239 + (255 - 239) * alpha)
-        g = int(246 + (255 - 246) * alpha)
-        b = int(255)
-        draw.line([(0, y), (canvas_size[0], y)], fill=(r, g, b))
-    
-    # Title with blue gradient (#2563eb to #4f46e5)
-    title = "Cluster Discrimination Visualization"
-    title_w = len(title) * 35
-    draw.text((canvas_size[0] // 2 - title_w // 2, 200), title, 
-              fill=(37, 99, 235), font=font_title)  # #2563eb
-    
-    # Subtitle
-    subtitle = "CLIP vs. Global Contrastive Learning"
-    subtitle_w = len(subtitle) * 20
-    draw.text((canvas_size[0] // 2 - subtitle_w // 2, 280), subtitle,
-              fill=(79, 70, 229), font=font_subtitle)  # #4f46e5
-    
-    # Divider line
-    draw.line([(canvas_size[0] // 2 - 400, 350), (canvas_size[0] // 2 + 400, 350)],
-              fill=(203, 213, 225), width=2)  # slate-300
-    
-    # Content boxes
-    y_start = 420
-    box_width = 700
-    box_height = 500
-    gap = 120
-    
-    # CLIP box with blue theme
-    clip_x = canvas_size[0] // 2 - box_width - gap // 2
-    draw_rounded_rectangle(draw, [clip_x, y_start, clip_x + box_width, y_start + box_height],
-                          radius=15, fill=(248, 250, 252), outline=(148, 163, 184), width=3)  # slate-50, slate-400
-    
-    draw.text((clip_x + 250, y_start + 30), "CLIP", fill=(37, 99, 235), font=font_subtitle)  # #2563eb
-    
-    clip_features = [
-        "• Image-Text pairs",
-        "• Batch-level contrastive",
-        "• Limited negative samples",
-        "  (batch size: 32-1024,",
-        "   max ~32K negatives)",
-        "• Dual encoders:",
-        "  - Image Encoder",
-        "  - Text Encoder",
-        "• Cross-modal matching"
-    ]
-    
-    for i, feature in enumerate(clip_features):
-        draw.text((clip_x + 50, y_start + 120 + i * 48), feature,
-                 fill=(71, 85, 105), font=font_text)  # slate-600
-    
-    # Global box with blue theme
-    global_x = canvas_size[0] // 2 + gap // 2
-    draw_rounded_rectangle(draw, [global_x, y_start, global_x + box_width, y_start + box_height],
-                          radius=15, fill=(239, 246, 255), outline=(96, 165, 250), width=3)  # blue-50, blue-400
-    
-    draw.text((global_x + 150, y_start + 30), "Global Contrastive",
-              fill=(29, 78, 216), font=font_subtitle)  # blue-700
-    
-    global_features = [
-        "• Image only (no text)",
-        "• Global negative sampling",
-        "• 1M concept centers",
-        "  (from offline clustering)",
-        "• Single encoder:",
-        "  - Image Encoder only",
-        "• Sample negatives from",
-        "  concept bank each batch"
-    ]
-    
-    for i, feature in enumerate(global_features):
-        draw.text((global_x + 50, y_start + 120 + i * 48), feature,
-                 fill=(30, 58, 138), font=font_text)  # blue-900
-    
-    return canvas
+    def _create_info_box(self, title_text, features, bg_color, title_color, position):
+        """Helper to create an info box with title and features."""
+        # Create box background
+        box = RoundedRectangle(
+            corner_radius=0.2,
+            width=5.5,
+            height=5.0,
+            fill_color=bg_color,
+            fill_opacity=0.9,
+            stroke_color=title_color,
+            stroke_width=3
+        )
+        box.move_to(position)
+        
+        # Create title
+        title = Text(title_text, color=title_color, weight=BOLD, font_size=28)
+        title.move_to(box.get_top() + DOWN * 0.5)
+        
+        # Create feature list
+        feature_texts = VGroup()
+        for i, feature in enumerate(features):
+            text = Text(feature, color=SLATE_600, font_size=16)
+            text.move_to(box.get_top() + DOWN * (1.2 + i * 0.35))
+            text.align_to(box.get_left() + RIGHT * 0.3, LEFT)
+            feature_texts.add(text)
+        
+        return VGroup(box, title, feature_texts)
 
 
-def create_clip_frame(
-    canvas_size: Tuple[int, int] = (1920, 1080),
-    animation_step: int = 0
-) -> Image.Image:
-    """Create a frame showing CLIP's contrastive learning with light theme."""
-    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
+class CLIPScene(Scene):
+    """Create a frame showing CLIP's contrastive learning."""
     
-    font_title = get_font(40, bold=True)
-    font_label = get_font(22, bold=False)
-    font_small = get_font(18, bold=False)
-    
-    # Title
-    draw.text((50, 40), "CLIP: Batch-Level Image-Text Contrastive Learning",
-              fill=(37, 99, 235), font=font_title)  # #2563eb
-    
-    # Batch size indicator - Updated to mention 32K negatives
-    batch_size = 8
-    draw.text((50, 100), f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
-              fill=(71, 85, 105), font=font_label)  # slate-600
-    
-    # Layout
-    img_encoder_x = 200
-    text_encoder_x = 1500
-    y_start = 200
-    item_height = 100
-    gap = 10
-    
-    # Draw images on the left
-    draw.text((img_encoder_x - 100, 160), "Images", fill=(100, 200, 255), font=font_label)
-    
-    image_colors = [
-        (255, 100, 100), (100, 255, 100), (100, 100, 255), (255, 255, 100),
-        (255, 100, 255), (100, 255, 255), (200, 150, 100), (150, 100, 200)
-    ]
-    
-    for i in range(batch_size):
-        y = y_start + i * (item_height + gap)
-        # Image box
-        draw_rounded_rectangle(draw, [img_encoder_x - 80, y, img_encoder_x + 20, y + item_height],
-                              radius=8, fill=image_colors[i], outline=(200, 200, 200), width=2)
-        draw.text((img_encoder_x - 65, y + 35), f"I{i+1}", fill=(255, 255, 255), font=font_label)
-    
-    # Image Encoder
-    encoder_x = img_encoder_x + 150
-    encoder_width = 180
-    encoder_height = batch_size * (item_height + gap) - gap
-    draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=10, fill=(40, 60, 80), outline=(100, 150, 200), width=3)
-    draw.text((encoder_x + 20, y_start + encoder_height // 2 - 20), "Image\nEncoder",
-              fill=(200, 220, 255), font=font_label)
-    
-    # Image embeddings
-    emb_x = encoder_x + encoder_width + 100
-    for i in range(batch_size):
-        y = y_start + i * (item_height + gap)
-        # Embedding representation
-        draw.ellipse([emb_x, y + 30, emb_x + 40, y + 70],
-                    fill=image_colors[i], outline=(200, 200, 200), width=2)
-    
-    # Draw texts on the right
-    draw.text((text_encoder_x + 100, 160), "Texts", fill=(255, 180, 100), font=font_label)
-    
-    text_colors = image_colors  # Same colors for matching pairs
-    
-    for i in range(batch_size):
-        y = y_start + i * (item_height + gap)
-        # Text box
-        draw_rounded_rectangle(draw, [text_encoder_x + 80, y, text_encoder_x + 180, y + item_height],
-                              radius=8, fill=text_colors[i], outline=(200, 200, 200), width=2)
-        draw.text((text_encoder_x + 105, y + 35), f"T{i+1}", fill=(255, 255, 255), font=font_label)
-    
-    # Text Encoder
-    text_enc_x = text_encoder_x - 150
-    draw_rounded_rectangle(draw, [text_enc_x, y_start, text_enc_x + encoder_width, y_start + encoder_height],
-                          radius=10, fill=(60, 50, 40), outline=(255, 180, 100), width=3)
-    draw.text((text_enc_x + 30, y_start + encoder_height // 2 - 20), "Text\nEncoder",
-              fill=(255, 220, 180), font=font_label)
-    
-    # Text embeddings
-    text_emb_x = text_enc_x - 80
-    for i in range(batch_size):
-        y = y_start + i * (item_height + gap)
-        draw.ellipse([text_emb_x, y + 30, text_emb_x + 40, y + 70],
-                    fill=text_colors[i], outline=(200, 200, 200), width=2)
-    
-    # Contrastive matrix in the center
-    matrix_size = 400
-    matrix_x = canvas_size[0] // 2 - matrix_size // 2
-    matrix_y = y_start + 50
-    
-    draw.text((matrix_x + 100, matrix_y - 40), "Similarity Matrix",
-              fill=(200, 200, 200), font=font_label)
-    
-    cell_size = matrix_size // batch_size
-    
-    # Animation: highlight matching pairs
-    highlight_pair = (animation_step // 3) % batch_size
-    
-    for i in range(batch_size):
-        for j in range(batch_size):
-            x = matrix_x + j * cell_size
-            y = matrix_y + i * cell_size
-            
-            # Diagonal are positive pairs, off-diagonal are negatives
-            if i == j:
-                # Positive pair
-                if i == highlight_pair:
-                    color = (0, 255, 0)
-                    alpha = 220
+    def construct(self):
+        self.camera.background_color = WHITE
+        batch_size = 8
+        
+        # Title
+        title = Text("CLIP: Batch-Level Image-Text Contrastive Learning",
+                    color=BLUE_600, font_size=32, weight=BOLD)
+        title.to_edge(UP, buff=0.5)
+        self.play(Write(title))
+        
+        # Batch info
+        batch_info = Text(f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
+                         color=SLATE_600, font_size=20)
+        batch_info.next_to(title, DOWN, buff=0.3)
+        self.play(Write(batch_info))
+        
+        # Create image boxes on the left
+        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL, ORANGE, PINK]
+        images = VGroup()
+        for i in range(batch_size):
+            box = Square(side_length=0.6, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=GREY)
+            label = Text(f"I{i+1}", color=WHITE, font_size=16)
+            label.move_to(box)
+            img_group = VGroup(box, label)
+            img_group.move_to(LEFT * 5.5 + UP * (2 - i * 0.6))
+            images.add(img_group)
+        
+        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.1))
+        
+        # Image Encoder
+        img_encoder = RoundedRectangle(
+            corner_radius=0.1, width=1.2, height=4.5,
+            fill_color="#283C50", fill_opacity=0.9,
+            stroke_color="#6496C8", stroke_width=3
+        )
+        img_encoder.move_to(LEFT * 3.5)
+        img_enc_label = Text("Image\nEncoder", color="#C8DCF0", font_size=18)
+        img_enc_label.move_to(img_encoder)
+        self.play(FadeIn(img_encoder), Write(img_enc_label))
+        
+        # Image embeddings
+        img_embeddings = VGroup()
+        for i in range(batch_size):
+            emb = Dot(radius=0.15, color=image_colors[i])
+            emb.move_to(LEFT * 2 + UP * (2 - i * 0.6))
+            img_embeddings.add(emb)
+        self.play(LaggedStart(*[GrowFromCenter(emb) for emb in img_embeddings], lag_ratio=0.1))
+        
+        # Text boxes on the right
+        texts = VGroup()
+        for i in range(batch_size):
+            box = Square(side_length=0.6, fill_color=image_colors[i],
+                        fill_opacity=0.7, stroke_color=GREY)
+            label = Text(f"T{i+1}", color=WHITE, font_size=16)
+            label.move_to(box)
+            text_group = VGroup(box, label)
+            text_group.move_to(RIGHT * 5.5 + UP * (2 - i * 0.6))
+            texts.add(text_group)
+        
+        self.play(LaggedStart(*[FadeIn(text) for text in texts], lag_ratio=0.1))
+        
+        # Text Encoder
+        text_encoder = RoundedRectangle(
+            corner_radius=0.1, width=1.2, height=4.5,
+            fill_color="#3C3228", fill_opacity=0.9,
+            stroke_color="#FFB46E", stroke_width=3
+        )
+        text_encoder.move_to(RIGHT * 3.5)
+        text_enc_label = Text("Text\nEncoder", color="#FFDCB4", font_size=18)
+        text_enc_label.move_to(text_encoder)
+        self.play(FadeIn(text_encoder), Write(text_enc_label))
+        
+        # Text embeddings
+        text_embeddings = VGroup()
+        for i in range(batch_size):
+            emb = Dot(radius=0.15, color=image_colors[i])
+            emb.move_to(RIGHT * 2 + UP * (2 - i * 0.6))
+            text_embeddings.add(emb)
+        self.play(LaggedStart(*[GrowFromCenter(emb) for emb in text_embeddings], lag_ratio=0.1))
+        
+        # Similarity Matrix in center
+        matrix_label = Text("Similarity Matrix", color=GREY, font_size=20)
+        matrix_label.move_to(UP * 3.2)
+        self.play(Write(matrix_label))
+        
+        matrix = VGroup()
+        cell_size = 0.35
+        for i in range(batch_size):
+            for j in range(batch_size):
+                if i == j:
+                    # Positive pair
+                    cell = Square(side_length=cell_size, fill_color=GREEN,
+                                fill_opacity=0.6, stroke_color=GREY, stroke_width=1)
                 else:
-                    color = (0, 200, 0)
-                    alpha = 150
-            else:
-                # Negative pair
-                if i == highlight_pair or j == highlight_pair:
-                    color = (255, 0, 0)
-                    alpha = 100
+                    # Negative pair
+                    cell = Square(side_length=cell_size, fill_color=RED,
+                                fill_opacity=0.3, stroke_color=GREY, stroke_width=1)
+                cell.move_to(
+                    (j - batch_size/2 + 0.5) * cell_size * RIGHT +
+                    (i - batch_size/2 + 0.5) * cell_size * DOWN + UP * 0.5
+                )
+                matrix.add(cell)
+        
+        self.play(LaggedStart(*[FadeIn(cell) for cell in matrix], lag_ratio=0.02))
+        
+        # Animate highlighting different pairs
+        for k in range(batch_size):
+            animations = []
+            for i in range(batch_size):
+                for j in range(batch_size):
+                    idx = i * batch_size + j
+                    cell = matrix[idx]
+                    if i == k and j == k:
+                        animations.append(cell.animate.set_fill(color=GREEN, opacity=0.9))
+                    elif i == k or j == k:
+                        animations.append(cell.animate.set_fill(opacity=0.5))
+                    else:
+                        animations.append(cell.animate.set_fill(opacity=0.2))
+            
+            self.play(*animations, run_time=0.4)
+        
+        # Reset matrix
+        animations = []
+        for i in range(batch_size):
+            for j in range(batch_size):
+                idx = i * batch_size + j
+                cell = matrix[idx]
+                if i == j:
+                    animations.append(cell.animate.set_fill(color=GREEN, opacity=0.6))
                 else:
-                    color = (150, 0, 0)
-                    alpha = 60
-            
-            fill_color = color + (alpha,)
-            # PIL doesn't support alpha directly, so we approximate
-            dark_bg = (20, 25, 35)
-            final_color = tuple(int(dark_bg[k] * (1 - alpha/255) + color[k] * (alpha/255)) for k in range(3))
-            
-            draw.rectangle([x, y, x + cell_size - 2, y + cell_size - 2],
-                         fill=final_color, outline=(100, 100, 100), width=1)
-    
-    # Info box
-    info_y = y_start + encoder_height + 80
-    draw_rounded_rectangle(draw, [200, info_y, canvas_size[0] - 200, info_y + 150],
-                          radius=10, fill=(30, 35, 45), outline=(100, 120, 150), width=2)
-    
-    info_lines = [
-        f"• Positive pairs: {batch_size} (diagonal elements)",
-        f"• Negative pairs: {batch_size * (batch_size - 1)} (off-diagonal elements)",
-        f"• Total comparisons: {batch_size * batch_size}",
-        "• Challenge: Limited negative samples scale with batch size (max ~32K in large batches)"
-    ]
-    
-    for i, line in enumerate(info_lines):
-        draw.text((230, info_y + 20 + i * 32), line, fill=(200, 220, 240), font=font_small)
-    
-    return canvas
+                    animations.append(cell.animate.set_fill(color=RED, opacity=0.3))
+        self.play(*animations, run_time=0.5)
+        
+        # Info box at bottom
+        info_text = VGroup(
+            Text(f"• Positive pairs: {batch_size} (diagonal elements)", 
+                 color=SLATE_600, font_size=16),
+            Text(f"• Negative pairs: {batch_size * (batch_size - 1)} (off-diagonal)", 
+                 color=SLATE_600, font_size=16),
+            Text(f"• Total comparisons: {batch_size * batch_size}", 
+                 color=SLATE_600, font_size=16),
+            Text("• Challenge: Limited negatives scale with batch size", 
+                 color=SLATE_600, font_size=16)
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+        info_text.to_edge(DOWN, buff=0.5)
+        self.play(FadeIn(info_text))
+        
+        self.wait(2)
 
 
-def create_global_frame(
-    canvas_size: Tuple[int, int] = (1920, 1080),
-    animation_step: int = 0
-) -> Image.Image:
-    """Create a frame showing Global Contrastive Learning with sampling animation and light theme."""
-    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
+class GlobalContrastiveScene(Scene):
+    """Create a frame showing Global Contrastive Learning with sampling animation."""
     
-    font_title = get_font(40, bold=True)
-    font_label = get_font(22, bold=False)
-    font_small = get_font(18, bold=False)
-    font_tiny = get_font(14, bold=False)
-    
-    # Title with blue color
-    draw.text((50, 40), "Global Contrastive Learning: 1M Concept Centers",
-              fill=(29, 78, 216), font=font_title)  # blue-700
-    
-    # Layout
-    batch_size = 8
-    sampled_negatives = 1024
-    total_concepts = 1000000
-    num_positive_centers = 10
-    
-    draw.text((50, 100), f"Batch: {batch_size} images | Sampled Negatives: {sampled_negatives:,} | Total Concepts: {total_concepts:,}",
-              fill=(71, 85, 105), font=font_label)  # slate-600
-    
-    # Left side: Images and encoder
-    img_x = 150
-    y_start = 200
-    item_height = 70
-    gap = 18
-    
-    draw.text((img_x - 50, 160), "Images", fill=(255, 200, 120), font=font_label)
-    
-    image_colors = [
-        (255, 100, 100), (100, 255, 100), (100, 100, 255), (255, 255, 100),
-        (255, 100, 255), (100, 255, 255), (200, 150, 100), (150, 100, 200)
-    ]
-    
-    # Animation: cycle through samples
-    current_sample = (animation_step // 6) % batch_size
-    sample_phase = (animation_step % 6)
-    
-    for i in range(batch_size):
-        y = y_start + i * (item_height + gap)
+    def construct(self):
+        self.camera.background_color = WHITE
+        batch_size = 8
+        num_positive_centers = 10
         
-        # Highlight current sample being processed
-        if i == current_sample and sample_phase >= 2:
-            outline_color = (255, 255, 100)
-            outline_width = 4
-            glow = True
-        else:
-            outline_color = (180, 180, 180)
-            outline_width = 2
-            glow = False
+        # Title
+        title = Text("Global Contrastive Learning: 1M Concept Centers",
+                    color=BLUE_700, font_size=32, weight=BOLD)
+        title.to_edge(UP, buff=0.5)
+        self.play(Write(title))
         
-        # Draw glow effect for selected sample
-        if glow:
-            for offset in range(3, 0, -1):
-                alpha = 80 - offset * 20
-                glow_color = tuple(int(c * alpha / 255) for c in outline_color)
-                draw_rounded_rectangle(draw, 
-                    [img_x - 60 - offset*2, y - offset*2, 
-                     img_x + 40 + offset*2, y + item_height + offset*2],
-                    radius=10, fill=None, outline=glow_color, width=1)
+        # Batch info
+        batch_info = Text(f"Batch: {batch_size} images | Sampled Negatives: 1,024 | Total Concepts: 1,000,000",
+                         color=SLATE_600, font_size=18)
+        batch_info.next_to(title, DOWN, buff=0.3)
+        self.play(Write(batch_info))
         
-        draw_rounded_rectangle(draw, [img_x - 60, y, img_x + 40, y + item_height],
-                              radius=8, fill=image_colors[i], outline=outline_color, width=outline_width)
-        draw.text((img_x - 45, y + 20), f"I{i+1}", fill=(255, 255, 255), font=font_label)
-    
-    # Image Encoder with enhanced styling
-    encoder_x = img_x + 180
-    encoder_width = 180
-    encoder_height = batch_size * (item_height + gap) - gap
-    draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=12, fill=(50, 45, 40), outline=(255, 200, 120), width=3)
-    
-    # Add encoder details
-    draw.text((encoder_x + 35, y_start + encoder_height // 2 - 30), "Image",
-              fill=(255, 230, 200), font=font_label)
-    draw.text((encoder_x + 25, y_start + encoder_height // 2 - 5), "Encoder",
-              fill=(255, 230, 200), font=font_label)
-    draw.text((encoder_x + 15, y_start + encoder_height // 2 + 25), "(ViT-L/14)",
-              fill=(180, 160, 140), font=font_small)
-    
-    # Image embeddings with animation
-    emb_x = encoder_x + encoder_width + 80
-    for i in range(batch_size):
-        y = y_start + i * (item_height + gap)
+        # Create image boxes on the left
+        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL, ORANGE, PINK]
+        images = VGroup()
+        for i in range(batch_size):
+            box = Square(side_length=0.5, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=GREY)
+            label = Text(f"I{i+1}", color=WHITE, font_size=14)
+            label.move_to(box)
+            img_group = VGroup(box, label)
+            img_group.move_to(LEFT * 6 + UP * (2.5 - i * 0.5))
+            images.add(img_group)
         
-        # Pulse effect for current sample
-        if i == current_sample and sample_phase >= 2:
-            pulse = 1.0 + 0.2 * np.sin(animation_step * 0.5)
-            size = int(20 * pulse)
-            draw.ellipse([emb_x + 20 - size, y + 15, emb_x + 20 + size, y + 55],
-                        fill=image_colors[i], outline=(255, 255, 100), width=3)
-        else:
-            draw.ellipse([emb_x, y + 15, emb_x + 40, y + 55],
-                        fill=image_colors[i], outline=(180, 180, 180), width=2)
-    
-    # Concept Bank visualization (right side) - Enhanced
-    bank_x = 1000
-    bank_y = 160
-    bank_width = 800
-    bank_height = 700
-    
-    # Bank background with gradient
-    for i in range(bank_height):
-        alpha = 0.3 + 0.7 * (i / bank_height)
-        color = tuple(int(25 + 15 * alpha) for _ in range(3))
-        draw.line([(bank_x, bank_y + i), (bank_x + bank_width, bank_y + i)], fill=color)
-    
-    draw_rounded_rectangle(draw, [bank_x, bank_y, bank_x + bank_width, bank_y + bank_height],
-                          radius=15, fill=None, outline=(200, 160, 100), width=4)
-    
-    draw.text((bank_x + 220, bank_y + 20), "Concept Centers Bank",
-              fill=(255, 220, 140), font=font_label)
-    draw.text((bank_x + 180, bank_y + 55), f"({total_concepts:,} centers from offline clustering)",
-              fill=(200, 180, 140), font=font_small)
-    
-    # Create stable random positions for concept centers
-    rng = np.random.default_rng(42)
-    num_visible_concepts = 300
-    concept_positions = []
-    for i in range(num_visible_concepts):
-        cx = bank_x + 80 + rng.integers(0, bank_width - 160)
-        cy = bank_y + 120 + rng.integers(0, bank_height - 200)
-        concept_positions.append((cx, cy, i))
-    
-    # Determine which concepts to highlight based on current sample
-    positive_centers = set()
-    negative_centers = set()
-    
-    if sample_phase >= 3:
-        # Select 10 positive centers for current sample - clustered together
-        sample_seed = current_sample * 1000
-        pos_rng = np.random.default_rng(sample_seed)
+        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.1))
         
-        # Pick a random center point for the positive cluster
-        cluster_center_idx = pos_rng.integers(0, num_visible_concepts)
-        cluster_cx, cluster_cy, _ = concept_positions[cluster_center_idx]
+        # Image Encoder
+        img_encoder = RoundedRectangle(
+            corner_radius=0.1, width=1.0, height=3.8,
+            fill_color="#322D28", fill_opacity=0.9,
+            stroke_color="#FFC878", stroke_width=3
+        )
+        img_encoder.move_to(LEFT * 4.5)
+        img_enc_label = Text("Image\nEncoder", color="#FFE6C8", font_size=16)
+        img_enc_label.move_to(img_encoder)
+        self.play(FadeIn(img_encoder), Write(img_enc_label))
         
-        # Find the 10 closest centers to the cluster center
-        distances = []
-        for i, (cx, cy, idx) in enumerate(concept_positions):
-            dist = (cx - cluster_cx)**2 + (cy - cluster_cy)**2
-            distances.append((dist, i))
+        # Image embeddings
+        img_embeddings = VGroup()
+        for i in range(batch_size):
+            emb = Dot(radius=0.12, color=image_colors[i])
+            emb.move_to(LEFT * 3.2 + UP * (2.5 - i * 0.5))
+            img_embeddings.add(emb)
+        self.play(LaggedStart(*[GrowFromCenter(emb) for emb in img_embeddings], lag_ratio=0.1))
         
-        # Sort by distance and take the 10 closest
-        distances.sort()
-        positive_indices = [distances[i][1] for i in range(min(num_positive_centers, num_visible_concepts))]
-        positive_centers = set(positive_indices)
+        # Concept Bank visualization (right side)
+        bank_border = RoundedRectangle(
+            corner_radius=0.15, width=8, height=6,
+            fill_color="#191E23", fill_opacity=0.3,
+            stroke_color="#C8A064", stroke_width=4
+        )
+        bank_border.move_to(RIGHT * 2)
         
-        # Select random negative centers - 20% of all visible concepts, scattered
-        neg_rng = np.random.default_rng(sample_seed + 1)
-        available = [i for i in range(num_visible_concepts) if i not in positive_centers]
-        num_visible_negatives = int(num_visible_concepts * 0.2)  # 20% of all visible concepts
-        negative_indices = neg_rng.choice(len(available), size=min(num_visible_negatives, len(available)), replace=False)
-        negative_centers = set(available[i] for i in negative_indices)
+        bank_title = Text("Concept Centers Bank", color="#FFDC8C", font_size=20, weight=BOLD)
+        bank_title.move_to(bank_border.get_top() + DOWN * 0.4)
+        bank_subtitle = Text("(1,000,000 centers from offline clustering)", 
+                            color="#C8B48C", font_size=14)
+        bank_subtitle.next_to(bank_title, DOWN, buff=0.2)
+        
+        self.play(Create(bank_border), Write(bank_title), Write(bank_subtitle))
+        
+        # Create stable random positions for concept centers
+        rng = np.random.default_rng(42)
+        num_visible_concepts = 200
+        concept_dots = VGroup()
+        
+        for i in range(num_visible_concepts):
+            # Random position within the bank
+            x = bank_border.get_left()[0] + 0.5 + rng.random() * 7
+            y = bank_border.get_bottom()[1] + 0.5 + rng.random() * 4.5
+            
+            # Different colors for different concept clusters
+            cluster_id = i % 10
+            colors = [
+                "#FFB4B4", "#B4FFB4", "#B4B4FF", "#FFFFB4", "#FFB4FF",
+                "#B4FFFF", "#DCC8B4", "#C8B4DC", "#B4DCC8", "#F0C8DC"
+            ]
+            
+            dot = Dot(radius=0.04, color=colors[cluster_id], fill_opacity=0.7)
+            dot.move_to([x, y, 0])
+            concept_dots.add(dot)
+        
+        self.play(LaggedStart(*[FadeIn(dot) for dot in concept_dots], lag_ratio=0.005))
+        
+        # Animate sampling process for multiple samples
+        for sample_idx in range(min(3, batch_size)):
+            # Highlight current sample
+            current_img = images[sample_idx]
+            highlight = SurroundingRectangle(current_img, color=YELLOW, buff=0.1, stroke_width=4)
+            self.play(Create(highlight))
+            
+            # Select positive centers (clustered together)
+            sample_seed = sample_idx * 1000
+            pos_rng = np.random.default_rng(sample_seed)
+            cluster_center_idx = pos_rng.integers(0, num_visible_concepts)
+            
+            # Find closest dots for positive centers
+            center_pos = concept_dots[cluster_center_idx].get_center()
+            distances = []
+            for i, dot in enumerate(concept_dots):
+                dist = np.linalg.norm(dot.get_center() - center_pos)
+                distances.append((dist, i))
+            distances.sort()
+            positive_indices = [distances[i][1] for i in range(min(num_positive_centers, num_visible_concepts))]
+            
+            # Highlight positive centers in green
+            positive_anims = []
+            for idx in positive_indices:
+                positive_anims.append(concept_dots[idx].animate.set_color(GREEN).scale(2))
+            self.play(*positive_anims, run_time=0.5)
+            
+            # Draw connection lines to positive centers
+            lines = VGroup()
+            start_pos = img_embeddings[sample_idx].get_center()
+            for idx in positive_indices[:5]:  # Show only a few lines to avoid clutter
+                end_pos = concept_dots[idx].get_center()
+                line = DashedLine(start_pos, end_pos, color=GREEN, stroke_width=2, dash_length=0.1)
+                lines.add(line)
+            self.play(Create(lines), run_time=0.5)
+            
+            # Select random negative centers (scattered)
+            neg_rng = np.random.default_rng(sample_seed + 1)
+            available = [i for i in range(num_visible_concepts) if i not in positive_indices]
+            num_visible_negatives = 30
+            negative_indices = neg_rng.choice(len(available), 
+                                             size=min(num_visible_negatives, len(available)), 
+                                             replace=False)
+            negative_indices = [available[i] for i in negative_indices]
+            
+            # Highlight negative centers in orange/red
+            negative_anims = []
+            for idx in negative_indices:
+                negative_anims.append(concept_dots[idx].animate.set_color(ORANGE).scale(1.5))
+            self.play(*negative_anims, run_time=0.5)
+            
+            self.wait(0.5)
+            
+            # Reset for next sample
+            reset_anims = [FadeOut(highlight), FadeOut(lines)]
+            for idx in positive_indices:
+                reset_anims.append(concept_dots[idx].animate.set_color(WHITE).scale(0.5))
+            for idx in negative_indices:
+                reset_anims.append(concept_dots[idx].animate.set_color(WHITE).scale(1/1.5))
+            self.play(*reset_anims, run_time=0.3)
+        
+        # Legend box at bottom
+        legend = VGroup(
+            VGroup(Dot(radius=0.08, color=YELLOW), Text("Selected Sample", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2),
+            VGroup(Dot(radius=0.08, color=GREEN), Text(f"{num_positive_centers} Positive Centers (Clustered)", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2),
+            VGroup(Dot(radius=0.08, color=ORANGE), Text("Sampled Negatives (Scattered)", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2),
+            VGroup(Dot(radius=0.08, color=WHITE), Text("Other Concepts", color=SLATE_600, font_size=14)).arrange(RIGHT, buff=0.2)
+        ).arrange(RIGHT, buff=0.5)
+        legend.to_edge(DOWN, buff=0.3)
+        
+        legend_box = RoundedRectangle(
+            corner_radius=0.1,
+            width=legend.width + 0.5,
+            height=legend.height + 0.3,
+            fill_color="#141923", fill_opacity=0.3,
+            stroke_color="#FFB46E", stroke_width=2
+        )
+        legend_box.move_to(legend)
+        
+        self.play(FadeIn(legend_box), FadeIn(legend))
+        self.wait(2)
+
+
+class ComparisonScene(Scene):
+    """Create a side-by-side comparison summary frame."""
     
-    # Draw concept centers with enhanced styling
-    for cx, cy, i in concept_positions:
-        # Different colors for different concept clusters
-        cluster_id = i % 10
-        base_colors = [
-            (255, 180, 180), (180, 255, 180), (180, 180, 255),
-            (255, 255, 180), (255, 180, 255), (180, 255, 255),
-            (220, 200, 180), (200, 180, 220), (180, 220, 200),
-            (240, 200, 220)
+    def construct(self):
+        self.camera.background_color = WHITE
+        
+        # Title
+        title = Text("Key Differences", color=BLUE_600, font_size=44, weight=BOLD)
+        title.to_edge(UP, buff=0.5)
+        self.play(Write(title))
+        
+        # Divider
+        divider = Line(UP * 2.5, DOWN * 3, color=SLATE_300, stroke_width=3)
+        self.play(Create(divider))
+        
+        # CLIP side
+        clip_title = Text("CLIP Approach", color=BLUE_600, font_size=28, weight=BOLD)
+        clip_title.move_to(LEFT * 3.5 + UP * 2)
+        
+        clip_points = [
+            ("Architecture", "Dual encoders (Image + Text)"),
+            ("Input", "Image-Text pairs"),
+            ("Negatives", "Within batch (32-1024 pairs)"),
+            ("Limitation", "Limited by batch size"),
+            ("Benefit", "Cross-modal alignment"),
+            ("Scale", "~400M pairs training"),
         ]
         
-        if i in positive_centers:
-            # Positive centers - green with glow
-            color = (100, 255, 100)
-            size = 9
-            glow_color = (150, 255, 150)
-            # Draw glow
-            for offset in range(2, 0, -1):
-                draw.ellipse([cx - size - offset*2, cy - size - offset*2, 
-                            cx + size + offset*2, cy + size + offset*2],
-                           fill=None, outline=glow_color, width=1)
-            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(50, 200, 50), width=2)
-        elif i in negative_centers:
-            # Negative centers - red/orange with glow
-            color = (255, 100, 50)
-            size = 8
-            glow_color = (255, 150, 100)
-            # Draw glow
-            for offset in range(2, 0, -1):
-                draw.ellipse([cx - size - offset*2, cy - size - offset*2, 
-                            cx + size + offset*2, cy + size + offset*2],
-                           fill=None, outline=glow_color, width=1)
-            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(200, 50, 0), width=2)
-        else:
-            # Regular centers
-            color = base_colors[cluster_id]
-            size = 4
-            draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(120, 120, 120), width=1)
-    
-    # Draw connection lines from current sample to positive/negative centers
-    if sample_phase >= 4 and current_sample < batch_size:
-        start_x = emb_x + 40
-        start_y = y_start + current_sample * (item_height + gap) + 35
+        clip_items = VGroup()
+        for i, (label, value) in enumerate(clip_points):
+            label_text = Text(label + ":", color=SLATE_600, font_size=18, weight=BOLD)
+            value_box = RoundedRectangle(
+                corner_radius=0.08, width=5, height=0.5,
+                fill_color=SLATE_50, fill_opacity=0.8,
+                stroke_color=BLUE_400, stroke_width=2
+            )
+            value_text = Text(value, color="#1E293B", font_size=16)
+            value_text.move_to(value_box)
+            
+            item = VGroup(label_text, VGroup(value_box, value_text)).arrange(DOWN, buff=0.15, aligned_edge=LEFT)
+            item.move_to(LEFT * 3.5 + UP * (1 - i * 0.9))
+            clip_items.add(item)
         
-        # Lines to positive centers (green)
-        for cx, cy, i in concept_positions:
-            if i in positive_centers:
-                # Draw animated dashed line
-                dash_length = 10
-                gap_length = 5
-                total_length = np.sqrt((cx - start_x)**2 + (cy - start_y)**2)
-                num_dashes = int(total_length / (dash_length + gap_length))
-                
-                for d in range(num_dashes):
-                    t1 = d * (dash_length + gap_length) / total_length
-                    t2 = (d * (dash_length + gap_length) + dash_length) / total_length
-                    x1 = int(start_x + t1 * (cx - start_x))
-                    y1 = int(start_y + t1 * (cy - start_y))
-                    x2 = int(start_x + t2 * (cx - start_x))
-                    y2 = int(start_y + t2 * (cy - start_y))
-                    draw.line([(x1, y1), (x2, y2)], fill=(100, 255, 100), width=2)
+        # Global side
+        global_title = Text("Global Contrastive", color=BLUE_700, font_size=28, weight=BOLD)
+        global_title.move_to(RIGHT * 3.5 + UP * 2)
         
-        # Lines to negative centers (red/orange)
-        if sample_phase >= 5:
-            for cx, cy, i in concept_positions[:50]:  # Limit to avoid clutter
-                if i in negative_centers:
-                    draw.line([(start_x, start_y), (cx, cy)], 
-                            fill=(255, 100, 50), width=1)
-    
-    # Legend box - Enhanced
-    legend_x = bank_x + 50
-    legend_y = bank_y + bank_height - 130
-    legend_width = bank_width - 100
-    legend_height = 110
-    
-    draw_rounded_rectangle(draw, [legend_x, legend_y, legend_x + legend_width, legend_y + legend_height],
-                          radius=10, fill=(20, 25, 35), outline=(255, 180, 100), width=3)
-    
-    # Legend items with visual indicators
-    num_visible_negatives = int(num_visible_concepts * 0.2)  # Calculate 20%
-    legend_items = [
-        ("Selected Sample", (255, 255, 100), "circle"),
-        (f"{num_positive_centers} Positive Centers (Clustered)", (100, 255, 100), "circle"),
-        (f"{num_visible_negatives} Sampled Negatives (20%)", (255, 100, 50), "circle"),
-        ("Other Concepts", (180, 180, 200), "circle")
-    ]
-    
-    item_x = legend_x + 30
-    item_width = legend_width // 2 - 20
-    
-    for idx, (label, color, shape) in enumerate(legend_items):
-        row = idx // 2
-        col = idx % 2
-        x = item_x + col * item_width
-        y = legend_y + 20 + row * 40
+        global_points = [
+            ("Architecture", "Single encoder (Image only)"),
+            ("Input", "Images only"),
+            ("Negatives", "Sampled from 1M concept centers"),
+            ("Limitation", "No text alignment"),
+            ("Benefit", "Massive negative pool"),
+            ("Scale", "~1M concept centers"),
+        ]
         
-        # Draw indicator
-        if shape == "circle":
-            size = 8
-            draw.ellipse([x, y + 5, x + size*2, y + 5 + size*2],
-                        fill=color, outline=(200, 200, 200), width=1)
+        global_items = VGroup()
+        for i, (label, value) in enumerate(global_points):
+            label_text = Text(label + ":", color=SLATE_600, font_size=18, weight=BOLD)
+            value_box = RoundedRectangle(
+                corner_radius=0.08, width=5, height=0.5,
+                fill_color=BLUE_50, fill_opacity=0.8,
+                stroke_color=BLUE_400, stroke_width=2
+            )
+            value_text = Text(value, color="#1E3A5F", font_size=16)
+            value_text.move_to(value_box)
+            
+            item = VGroup(label_text, VGroup(value_box, value_text)).arrange(DOWN, buff=0.15, aligned_edge=LEFT)
+            item.move_to(RIGHT * 3.5 + UP * (1 - i * 0.9))
+            global_items.add(item)
         
-        # Draw label
-        draw.text((x + 25, y + 3), label, fill=(220, 220, 240), font=font_small)
-    
-    # Info box at bottom - Enhanced
-    info_y = y_start + encoder_height + 120
-    info_height = 130
-    draw_rounded_rectangle(draw, [80, info_y, canvas_size[0] - 80, info_y + info_height],
-                          radius=12, fill=(25, 30, 40), outline=(200, 160, 100), width=3)
-    
-    info_lines = [
-        "✓ No text encoder - pure visual representation learning",
-        f"✓ Each sample matched with {num_positive_centers} clustered positive centers + {sampled_negatives:,} sampled negatives",
-        f"✓ Positive centers clustered together; negatives scattered (20% of visible concepts)",
-        "✓ Concept centers from offline clustering (e.g., K-means on large-scale dataset)"
-    ]
-    
-    for i, line in enumerate(info_lines):
-        draw.text((110, info_y + 20 + i * 28), line, fill=(220, 230, 240), font=font_small)
-    
-    return canvas
-
-
-def create_comparison_frame(
-    canvas_size: Tuple[int, int] = (1920, 1080)
-) -> Image.Image:
-    """Create a side-by-side comparison summary frame with light theme."""
-    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
-    
-    font_title = get_font(48, bold=True)
-    font_subtitle = get_font(28, bold=True)
-    font_text = get_font(22, bold=False)
-    
-    # Title
-    draw.text((canvas_size[0] // 2 - 250, 50), "Key Differences",
-              fill=(37, 99, 235), font=font_title)  # #2563eb
-    
-    # Divider
-    draw.line([(canvas_size[0] // 2, 150), (canvas_size[0] // 2, canvas_size[1] - 100)],
-              fill=(203, 213, 225), width=4)  # slate-300
-    
-    # CLIP side
-    clip_x = 100
-    y_start = 180
-    
-    draw.text((clip_x + 200, y_start), "CLIP Approach",
-              fill=(37, 99, 235), font=font_subtitle)  # #2563eb
-    
-    clip_points = [
-        ("Architecture", "Dual encoders (Image + Text)"),
-        ("Input", "Image-Text pairs"),
-        ("Negatives", "Within batch (32-1024 pairs)"),
-        ("Limitation", "Limited by batch size"),
-        ("Benefit", "Cross-modal alignment"),
-        ("Scale", "~400M pairs training"),
-    ]
-    
-    for i, (label, value) in enumerate(clip_points):
-        y = y_start + 80 + i * 120
-        draw.text((clip_x, y), label + ":", fill=(71, 85, 105), font=font_text)  # slate-600
-        
-        # Value box
-        draw_rounded_rectangle(draw, [clip_x, y + 35, clip_x + 750, y + 90],
-                              radius=8, fill=(248, 250, 252), outline=(148, 163, 184), width=2)  # slate-50, slate-400
-        draw.text((clip_x + 20, y + 47), value, fill=(30, 41, 59), font=font_text)  # slate-800
-    
-    # Global side
-    global_x = canvas_size[0] // 2 + 100
-    
-    draw.text((global_x + 100, y_start), "Global Contrastive",
-              fill=(29, 78, 216), font=font_subtitle)  # blue-700
-    
-    global_points = [
-        ("Architecture", "Single encoder (Image only)"),
-        ("Input", "Images only"),
-        ("Negatives", "Sampled from 1M concept centers"),
-        ("Limitation", "No text alignment"),
-        ("Benefit", "Massive negative pool"),
-        ("Scale", "~1M concept centers"),
-    ]
-    
-    for i, (label, value) in enumerate(global_points):
-        y = y_start + 80 + i * 120
-        draw.text((global_x, y), label + ":", fill=(71, 85, 105), font=font_text)  # slate-600
-        
-        # Value box
-        draw_rounded_rectangle(draw, [global_x, y + 35, global_x + 750, y + 90],
-                              radius=8, fill=(239, 246, 255), outline=(96, 165, 250), width=2)  # blue-50, blue-400
-        draw.text((global_x + 20, y + 47), value, fill=(30, 58, 138), font=font_text)  # blue-900
-    
-    return canvas
-
-
-def generate_animation(
-    output_path: str,
-    fps: int = 2,
-    canvas_size: Tuple[int, int] = (1920, 1080),
-    as_video: bool = False
-) -> None:
-    """Generate the comparison animation."""
-    frames: List[np.ndarray] = []
-    
-    print("Generating frames...")
-    
-    # 1. Title frame (3 seconds)
-    print("  - Title frame")
-    title_frame = create_title_frame(canvas_size)
-    for _ in range(fps * 3):
-        frames.append(np.array(title_frame))
-    
-    # 2. CLIP frames with animation (8 seconds)
-    print("  - CLIP animation frames")
-    clip_frames = fps * 8
-    for i in range(clip_frames):
-        frame = create_clip_frame(canvas_size, i)
-        frames.append(np.array(frame))
-    
-    # 3. Global frames with enhanced sampling animation (12 seconds - longer to show sampling)
-    print("  - Global contrastive animation frames")
-    global_frames = fps * 12
-    for i in range(global_frames):
-        frame = create_global_frame(canvas_size, i)
-        frames.append(np.array(frame))
-    
-    # 4. Comparison frame (4 seconds)
-    print("  - Comparison summary frame")
-    comparison_frame = create_comparison_frame(canvas_size)
-    for _ in range(fps * 4):
-        frames.append(np.array(comparison_frame))
-    
-    # Save output
-    if as_video:
-        if not output_path.lower().endswith('.mp4'):
-            output_path = output_path.rsplit('.', 1)[0] + '.mp4'
-        
-        print(f"\nSaving video to: {output_path}")
-        imageio.mimwrite(
-            output_path,
-            frames,
-            fps=fps,
-            codec='libx264',
-            pixelformat='yuv420p'
+        # Animate everything
+        self.play(Write(clip_title), Write(global_title))
+        self.play(
+            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in clip_items], lag_ratio=0.2),
+            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in global_items], lag_ratio=0.2),
+            run_time=3
         )
-    else:
-        if not output_path.lower().endswith('.gif'):
-            output_path = output_path.rsplit('.', 1)[0] + '.gif'
+        self.wait(3)
+
+
+class ComparisonVideo(Scene):
+    """Main scene that combines all scenes into one video."""
+    
+    def construct(self):
+        # Set white background
+        self.camera.background_color = WHITE
         
-        print(f"\nSaving GIF to: {output_path}")
-        pil_frames = [Image.fromarray(f) for f in frames]
-        pil_frames[0].save(
-            output_path,
-            save_all=True,
-            append_images=pil_frames[1:],
-            duration=int(1000 / fps),
-            loop=0
+        # Scene 1: Title Scene
+        self._render_title_scene()
+        self.clear()
+        self.wait(0.5)
+        
+        # Scene 2: CLIP Scene
+        self._render_clip_scene()
+        self.clear()
+        self.wait(0.5)
+        
+        # Scene 3: Global Contrastive Scene
+        self._render_global_scene()
+        self.clear()
+        self.wait(0.5)
+        
+        # Scene 4: Comparison Scene
+        self._render_comparison_scene()
+    
+    def _render_title_scene(self):
+        """Render title scene content."""
+        # Title
+        title = Text("Cluster Discrimination Visualization", 
+                    color=BLUE_600, weight=BOLD, font_size=48)
+        title.move_to(UP * 2.5)
+        
+        subtitle = Text("CLIP vs. Global Contrastive Learning",
+                       color=BLUE_700, font_size=32)
+        subtitle.next_to(title, DOWN, buff=0.5)
+        
+        divider = Line(LEFT * 5, RIGHT * 5, color=SLATE_300, stroke_width=2)
+        divider.next_to(subtitle, DOWN, buff=0.5)
+        
+        # Create info boxes using helper
+        clip_box = self._create_info_box(
+            "CLIP",
+            [
+                "• Image-Text pairs",
+                "• Batch-level contrastive",
+                "• Limited negative samples",
+                "• Dual encoders",
+                "• Cross-modal matching"
+            ],
+            SLATE_50,
+            BLUE_600,
+            LEFT * 3.5
         )
+        
+        global_box = self._create_info_box(
+            "Global Contrastive",
+            [
+                "• Image only (no text)",
+                "• Global negative sampling",
+                "• 1M concept centers",
+                "• Single encoder",
+                "• Sample from concept bank"
+            ],
+            BLUE_50,
+            BLUE_700,
+            RIGHT * 3.5
+        )
+        
+        clip_box.next_to(divider, DOWN, buff=1.0)
+        global_box.next_to(divider, DOWN, buff=1.0)
+        
+        self.play(Write(title), Write(subtitle), Create(divider), run_time=1.5)
+        self.play(FadeIn(clip_box, shift=LEFT * 0.5), FadeIn(global_box, shift=RIGHT * 0.5), run_time=1)
+        self.wait(2)
     
-    print(f"✓ Animation saved successfully!")
-    print(f"  - Total frames: {len(frames)}")
-    print(f"  - Duration: {len(frames) / fps:.1f} seconds")
-    print(f"  - Resolution: {canvas_size[0]}x{canvas_size[1]}")
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Generate animated comparison of CLIP vs Global Contrastive Learning"
-    )
-    parser.add_argument("--output", type=str, default="global_contrastive_comparison.gif",
-                       help="Output file path (default: global_contrastive_comparison.gif)")
-    parser.add_argument("--video", action="store_true",
-                       help="Output as MP4 video instead of GIF")
-    parser.add_argument("--fps", type=int, default=2,
-                       help="Frames per second (default: 2)")
-    parser.add_argument("--width", type=int, default=1920,
-                       help="Canvas width (default: 1920)")
-    parser.add_argument("--height", type=int, default=1080,
-                       help="Canvas height (default: 1080)")
+    def _create_info_box(self, title_text, features, bg_color, title_color, position):
+        """Helper to create an info box."""
+        box = RoundedRectangle(
+            corner_radius=0.2, width=5.5, height=4.0,
+            fill_color=bg_color, fill_opacity=0.9,
+            stroke_color=title_color, stroke_width=3
+        )
+        box.move_to(position)
+        
+        title = Text(title_text, color=title_color, weight=BOLD, font_size=28)
+        title.move_to(box.get_top() + DOWN * 0.5)
+        
+        feature_texts = VGroup()
+        for i, feature in enumerate(features):
+            text = Text(feature, color=SLATE_600, font_size=18)
+            text.move_to(box.get_top() + DOWN * (1.2 + i * 0.5))
+            text.align_to(box.get_left() + RIGHT * 0.3, LEFT)
+            feature_texts.add(text)
+        
+        return VGroup(box, title, feature_texts)
     
-    args = parser.parse_args()
+    def _render_clip_scene(self):
+        """Render CLIP scene content."""
+        batch_size = 8
+        
+        title = Text("CLIP: Batch-Level Image-Text Contrastive Learning",
+                    color=BLUE_600, font_size=28, weight=BOLD)
+        title.to_edge(UP, buff=0.3)
+        self.play(Write(title), run_time=0.8)
+        
+        # Simplified CLIP visualization
+        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL, ORANGE, PINK]
+        images = VGroup()
+        for i in range(batch_size):
+            box = Square(side_length=0.5, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=GREY)
+            label = Text(f"I{i+1}", color=WHITE, font_size=14)
+            label.move_to(box)
+            img_group = VGroup(box, label)
+            img_group.move_to(LEFT * 5.5 + UP * (2 - i * 0.5))
+            images.add(img_group)
+        
+        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.05), run_time=1.5)
+        
+        # Show similarity matrix
+        matrix_label = Text("Similarity Matrix", color=GREY, font_size=18)
+        matrix_label.move_to(UP * 2.8)
+        self.play(Write(matrix_label), run_time=0.5)
+        
+        matrix = VGroup()
+        cell_size = 0.3
+        for i in range(batch_size):
+            for j in range(batch_size):
+                if i == j:
+                    cell = Square(side_length=cell_size, fill_color=GREEN,
+                                fill_opacity=0.6, stroke_color=GREY, stroke_width=1)
+                else:
+                    cell = Square(side_length=cell_size, fill_color=RED,
+                                fill_opacity=0.3, stroke_color=GREY, stroke_width=1)
+                cell.move_to(
+                    (j - batch_size/2 + 0.5) * cell_size * RIGHT +
+                    (i - batch_size/2 + 0.5) * cell_size * DOWN + UP * 0.3
+                )
+                matrix.add(cell)
+        
+        self.play(LaggedStart(*[FadeIn(cell) for cell in matrix], lag_ratio=0.01), run_time=1.5)
+        
+        # Animate a few highlights
+        for k in [0, 3, 7]:
+            animations = []
+            for i in range(batch_size):
+                for j in range(batch_size):
+                    idx = i * batch_size + j
+                    cell = matrix[idx]
+                    if i == k and j == k:
+                        animations.append(cell.animate.set_fill(color=GREEN, opacity=0.9))
+                    elif i == k or j == k:
+                        animations.append(cell.animate.set_fill(opacity=0.5))
+                    else:
+                        animations.append(cell.animate.set_fill(opacity=0.2))
+            self.play(*animations, run_time=0.3)
+        
+        # Info text
+        info_text = Text(f"Limited to {batch_size}x{batch_size} = {batch_size*batch_size} comparisons per batch", 
+                        color=SLATE_600, font_size=16)
+        info_text.to_edge(DOWN, buff=0.5)
+        self.play(FadeIn(info_text), run_time=0.5)
+        self.wait(2)
     
-    generate_animation(
-        output_path=args.output,
-        fps=args.fps,
-        canvas_size=(args.width, args.height),
-        as_video=args.video
-    )
+    def _render_global_scene(self):
+        """Render global contrastive scene content."""
+        batch_size = 6
+        
+        title = Text("Global Contrastive Learning: 1M Concept Centers",
+                    color=BLUE_700, font_size=28, weight=BOLD)
+        title.to_edge(UP, buff=0.3)
+        self.play(Write(title), run_time=0.8)
+        
+        # Images on left
+        image_colors = [RED, GREEN, BLUE, YELLOW, PURPLE, TEAL]
+        images = VGroup()
+        for i in range(batch_size):
+            box = Square(side_length=0.4, fill_color=image_colors[i], 
+                        fill_opacity=0.7, stroke_color=GREY)
+            label = Text(f"I{i+1}", color=WHITE, font_size=12)
+            label.move_to(box)
+            img_group = VGroup(box, label)
+            img_group.move_to(LEFT * 6 + UP * (2 - i * 0.6))
+            images.add(img_group)
+        
+        self.play(LaggedStart(*[FadeIn(img) for img in images], lag_ratio=0.05), run_time=1)
+        
+        # Concept bank
+        bank_border = RoundedRectangle(
+            corner_radius=0.15, width=9, height=5.5,
+            fill_color="#191E23", fill_opacity=0.2,
+            stroke_color="#C8A064", stroke_width=4
+        )
+        bank_border.move_to(RIGHT * 1.5)
+        
+        bank_title = Text("Concept Centers Bank (1M centers)", 
+                         color="#FFDC8C", font_size=18, weight=BOLD)
+        bank_title.move_to(bank_border.get_top() + DOWN * 0.4)
+        
+        self.play(Create(bank_border), Write(bank_title), run_time=1)
+        
+        # Create concept dots
+        rng = np.random.default_rng(42)
+        num_visible_concepts = 150
+        concept_dots = VGroup()
+        
+        for i in range(num_visible_concepts):
+            x = bank_border.get_left()[0] + 0.5 + rng.random() * 8
+            y = bank_border.get_bottom()[1] + 0.5 + rng.random() * 4.5
+            
+            dot = Dot(radius=0.04, color=WHITE, fill_opacity=0.5)
+            dot.move_to([x, y, 0])
+            concept_dots.add(dot)
+        
+        self.play(LaggedStart(*[FadeIn(dot) for dot in concept_dots], lag_ratio=0.003), run_time=1.5)
+        
+        # Demonstrate sampling for one image
+        highlight = SurroundingRectangle(images[2], color=YELLOW, buff=0.1, stroke_width=4)
+        self.play(Create(highlight), run_time=0.5)
+        
+        # Highlight some positive centers (green)
+        positive_anims = []
+        for i in range(10):
+            positive_anims.append(concept_dots[20+i*3].animate.set_color(GREEN).scale(2))
+        self.play(*positive_anims, run_time=0.7)
+        
+        # Highlight some negative centers (orange)
+        negative_anims = []
+        for i in range(25):
+            negative_anims.append(concept_dots[i*6].animate.set_color(ORANGE).scale(1.5))
+        self.play(*negative_anims, run_time=0.7)
+        
+        self.wait(2)
+    
+    def _render_comparison_scene(self):
+        """Render comparison scene content."""
+        title = Text("Key Differences", color=BLUE_600, font_size=40, weight=BOLD)
+        title.to_edge(UP, buff=0.5)
+        self.play(Write(title), run_time=0.8)
+        
+        divider = Line(UP * 2.5, DOWN * 3, color=SLATE_300, stroke_width=3)
+        self.play(Create(divider), run_time=0.5)
+        
+        # CLIP side
+        clip_title = Text("CLIP", color=BLUE_600, font_size=32, weight=BOLD)
+        clip_title.move_to(LEFT * 3.5 + UP * 2.2)
+        
+        clip_items = VGroup(
+            Text("• Dual encoders", color=SLATE_600, font_size=18),
+            Text("• Image-Text pairs", color=SLATE_600, font_size=18),
+            Text("• Batch-limited negatives", color=SLATE_600, font_size=18),
+            Text("• Cross-modal alignment", color=SLATE_600, font_size=18),
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.4)
+        clip_items.move_to(LEFT * 3.5 + DOWN * 0.2)
+        
+        # Global side
+        global_title = Text("Global Contrastive", color=BLUE_700, font_size=32, weight=BOLD)
+        global_title.move_to(RIGHT * 3.5 + UP * 2.2)
+        
+        global_items = VGroup(
+            Text("• Single encoder", color=SLATE_600, font_size=18),
+            Text("• Images only", color=SLATE_600, font_size=18),
+            Text("• 1M concept centers", color=SLATE_600, font_size=18),
+            Text("• Massive negative pool", color=SLATE_600, font_size=18),
+        ).arrange(DOWN, aligned_edge=LEFT, buff=0.4)
+        global_items.move_to(RIGHT * 3.5 + DOWN * 0.2)
+        
+        self.play(Write(clip_title), Write(global_title), run_time=0.8)
+        self.play(
+            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in clip_items], lag_ratio=0.2),
+            LaggedStart(*[FadeIn(item, shift=DOWN * 0.2) for item in global_items], lag_ratio=0.2),
+            run_time=2
+        )
+        self.wait(3)
 
 
 if __name__ == "__main__":
-    main()
+    # This script is meant to be run with manim command
+    # Example: manim generate_global_contrastive_comparison.py ComparisonVideo -pql
+    print("Please run this script with manim command:")
+    print("  manim generate_global_contrastive_comparison.py ComparisonVideo -pql  # Preview low quality")
+    print("  manim generate_global_contrastive_comparison.py ComparisonVideo -pqh  # Preview high quality")
+    print("  manim generate_global_contrastive_comparison.py ComparisonVideo --format mp4 -qh  # Render high quality MP4")
