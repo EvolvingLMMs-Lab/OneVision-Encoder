@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 生成动画GIF来可视化CLIP对比学习和全局对比学习方法的比较
-Generate an animated GIF to visualize the comparison between CLIP's contrastive learning
+Generate animated GIFs to visualize the comparison between CLIP's contrastive learning
 and the global contrastive learning approach.
 
 主要区别 / Key differences:
@@ -10,8 +10,26 @@ and the global contrastive learning approach.
 2. Global: 无文本编码器，使用离线聚类得到的100万概念中心作为负样本 / No text encoder, 1M concept centers from offline clustering as negatives
 
 使用方法 / Usage:
+    # 生成两个独立的GIF文件 / Generate two separate GIF files
+    python generate_global_contrastive_comparison.py --output comparison --separate
+    
+    # 仅生成CLIP动画 / Generate CLIP animation only
+    python generate_global_contrastive_comparison.py --output clip --clip-only
+    
+    # 仅生成全局对比学习动画 / Generate Global animation only
+    python generate_global_contrastive_comparison.py --output global --global-only
+    
+    # 生成包含两者的组合动画（向后兼容） / Generate combined animation (backward compatible)
     python generate_global_contrastive_comparison.py --output comparison.gif
-    python generate_global_contrastive_comparison.py --output comparison.mp4 --video
+    
+    # 生成视频格式 / Generate as video format
+    python generate_global_contrastive_comparison.py --output comparison --separate --video
+
+更新内容 / Updates:
+- 移除了标题帧 / Removed title frame
+- 支持生成独立的CLIP和Global动画 / Support separate CLIP and Global animations
+- 所有超参数集中在文件顶部，便于修改 / All hyperparameters centralized at top for easy modification
+- 优化了视觉效果和配色 / Optimized visual effects and color scheme
 """
 
 import argparse
@@ -23,8 +41,103 @@ import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# 跨平台字体路径 (CVPR风格：优先使用Times/Serif字体)
+
+# ============================================================================
+# HYPERPARAMETERS CONFIGURATION / 超参数配置
+# ============================================================================
+# These parameters can be easily modified to adjust the animation appearance
+# 这些参数可以轻松修改以调整动画外观
+
+# Canvas and Animation Settings / 画布和动画设置
+# ----------------------------------------------------------------------------
+DEFAULT_CANVAS_WIDTH = 1920  # Canvas width in pixels / 画布宽度（像素）
+DEFAULT_CANVAS_HEIGHT = 1080  # Canvas height in pixels / 画布高度（像素）
+DEFAULT_FPS = 2  # Frames per second for animation / 动画帧率（每秒帧数）
+
+# Animation Timing / 动画时长
+# ----------------------------------------------------------------------------
+CLIP_ANIMATION_DURATION = 8  # Duration in seconds for CLIP animation / CLIP动画时长（秒）
+GLOBAL_ANIMATION_DURATION = 12  # Duration in seconds for Global animation / Global动画时长（秒）
+
+# CLIP Animation Settings / CLIP动画设置
+# ----------------------------------------------------------------------------
+CLIP_BATCH_SIZE = 8  # Number of image-text pairs in CLIP batch / CLIP批次中的图像-文本对数量
+CLIP_ANIMATION_EXAMPLES = 3  # Number of examples to animate in CLIP / CLIP中动画展示的样本数量
+
+# Global Contrastive Settings / 全局对比学习设置
+# ----------------------------------------------------------------------------
+GLOBAL_BATCH_SIZE = 8  # Number of images in Global batch / Global批次中的图像数量
+GLOBAL_SAMPLED_NEGATIVES = 1024  # Number of sampled negative centers / 采样的负样本中心数量
+GLOBAL_TOTAL_CONCEPTS = 1000000  # Total concept centers in bank / 概念库中总的概念中心数量
+GLOBAL_NUM_POSITIVE_CENTERS = 10  # Number of positive centers per sample / 每个样本的正样本中心数量
+GLOBAL_NUM_VISIBLE_CONCEPTS = 320  # Number of visible concept centers / 可见的概念中心数量
+GLOBAL_VISIBLE_NEGATIVES_RATIO = 0.2  # Ratio of visible negatives to display / 可见负样本显示比例
+
+# Layout and Sizing / 布局和尺寸
+# ----------------------------------------------------------------------------
+# CLIP layout
+CLIP_ITEM_HEIGHT = 95  # Height of each image/text item in CLIP / CLIP中每个图像/文本项的高度
+CLIP_ITEM_GAP = 12  # Gap between items in CLIP / CLIP中项之间的间隙
+CLIP_ENCODER_WIDTH = 180  # Width of encoder boxes / 编码器框的宽度
+
+# Global layout
+GLOBAL_ITEM_HEIGHT = 75  # Height of each image item in Global / Global中每个图像项的高度
+GLOBAL_ITEM_GAP = 20  # Gap between items in Global / Global中项之间的间隙
+GLOBAL_ENCODER_WIDTH = 200  # Width of encoder box / 编码器框的宽度
+GLOBAL_BANK_WIDTH = 820  # Width of concept bank visualization / 概念库可视化的宽度
+GLOBAL_BANK_HEIGHT = 720  # Height of concept bank visualization / 概念库可视化的高度
+
+# Color Palette - SAM-style / 配色方案 - SAM风格
+# ----------------------------------------------------------------------------
+# SAM-style color palette for images - more sophisticated and harmonious
+# SAM风格配色方案 - 更精致和谐
+IMAGE_COLORS_SAM = [
+    (255, 107, 107),  # Coral red - softer, more professional
+    (78, 205, 196),   # Turquoise - calming
+    (99, 110, 250),   # Indigo blue - modern
+    (255, 195, 113),  # Peach - warm
+    (162, 155, 254),  # Light purple - elegant
+    (69, 183, 209),   # Sky blue - fresh
+    (255, 159, 64),   # Orange - energetic
+    (255, 99, 164),   # Pink - vibrant
+]
+
+# Matrix colors - SAM-style with better contrast
+POSITIVE_COLOR_BRIGHT = (52, 211, 153)  # Emerald green - professional
+POSITIVE_COLOR_LIGHT = (209, 250, 229)  # Very light green
+NEGATIVE_COLOR_BRIGHT = (248, 113, 113)  # Modern red
+NEGATIVE_COLOR_LIGHT = (254, 242, 242)  # Very light red/pink
+
+# Concept center colors
+CONCEPT_CENTER_GRAY = (220, 220, 225)  # Lighter gray for non-sampled concept centers
+CONCEPT_CENTER_GRAY_BORDER = (180, 180, 190)  # Lighter border color for non-sampled centers
+FAINT_LINE_COLOR = (210, 210, 215)  # Lighter color for faint connection lines
+
+# Typography / 字体设置
+# ----------------------------------------------------------------------------
+FONT_SIZE_TITLE = 40  # Main title font size / 主标题字体大小
+FONT_SIZE_LABEL = 22  # Label font size / 标签字体大小
+FONT_SIZE_SMALL = 18  # Small text font size / 小字体大小
+
+# Visual Enhancement / 视觉增强
+# ----------------------------------------------------------------------------
+BORDER_RADIUS = 12  # Radius for rounded corners / 圆角半径
+HIGHLIGHT_BORDER_WIDTH = 3  # Width of highlight borders / 高亮边框宽度
+STANDARD_BORDER_WIDTH = 2  # Width of standard borders / 标准边框宽度
+SHADOW_OFFSET = 2  # Offset for subtle shadow effects / 微妙阴影效果的偏移量
+
+# Background colors / 背景颜色
+BACKGROUND_WHITE = (255, 255, 255)  # Pure white background / 纯白色背景
+ENCODER_BG_IMAGE = (235, 240, 250)  # Light blue for image encoder / 图像编码器的浅蓝色
+ENCODER_BG_TEXT = (248, 240, 252)  # Light purple for text encoder / 文本编码器的浅紫色
+INFO_BOX_BG = (245, 245, 250)  # Light gray for info boxes / 信息框的浅灰色
+CONCEPT_BANK_BG = (245, 248, 252)  # Very light blue for concept bank / 概念库的极浅蓝色
+
+# ============================================================================
+# FONT PATHS / 字体路径
+# ============================================================================
 # Cross-platform font paths (CVPR style: prioritize Times/Serif fonts)
+# 跨平台字体路径 (CVPR风格：优先使用Times/Serif字体)
 FONT_PATHS = [
     # Linux - Times New Roman / Serif fonts for CVPR style
     "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
@@ -48,32 +161,6 @@ FONT_PATHS = [
     "C:/Windows/Fonts/arial.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
 ]
-
-# Animation configuration constants
-# 动画配置常量
-CLIP_ANIMATION_EXAMPLES = 3  # Number of examples to animate in CLIP (out of 8 total)
-CONCEPT_CENTER_GRAY = (220, 220, 225)  # Lighter gray for non-sampled concept centers
-CONCEPT_CENTER_GRAY_BORDER = (180, 180, 190)  # Lighter border color for non-sampled centers
-FAINT_LINE_COLOR = (210, 210, 215)  # Lighter color for faint connection lines
-
-# SAM-style color palette - more sophisticated and harmonious
-# SAM风格配色方案 - 更精致和谐
-IMAGE_COLORS_SAM = [
-    (255, 107, 107),  # Coral red - softer, more professional
-    (78, 205, 196),   # Turquoise - calming
-    (99, 110, 250),   # Indigo blue - modern
-    (255, 195, 113),  # Peach - warm
-    (162, 155, 254),  # Light purple - elegant
-    (69, 183, 209),   # Sky blue - fresh
-    (255, 159, 64),   # Orange - energetic
-    (255, 99, 164),   # Pink - vibrant
-]
-
-# Matrix colors - SAM-style with better contrast
-POSITIVE_COLOR_BRIGHT = (52, 211, 153)  # Emerald green - professional
-POSITIVE_COLOR_LIGHT = (209, 250, 229)  # Very light green
-NEGATIVE_COLOR_BRIGHT = (248, 113, 113)  # Modern red
-NEGATIVE_COLOR_LIGHT = (254, 242, 242)  # Very light red/pink
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -145,120 +232,7 @@ def draw_rounded_rectangle(
         draw.rectangle(xy, fill=fill, outline=outline, width=width)
 
 
-def create_title_frame(canvas_size: Tuple[int, int] = (1920, 1080)) -> Image.Image:
-    """
-    创建扁平化风格的标题帧 (CLIP/SAM论文风格)
-    Create a flat-style title frame (CLIP/SAM paper style)
-    
-    Args:
-        canvas_size: 画布大小 / Canvas size (width, height)
-    
-    Returns:
-        Image.Image: 标题帧图像 / Title frame image
-    """
-    # 创建纯白色背景 (扁平化风格)
-    # Create pure white background (flat style)
-    canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
-    
-    # 使用较小的字体以避免超出框
-    # Use smaller fonts to avoid overflow
-    font_title = get_font(52, bold=True)
-    font_subtitle = get_font(30, bold=False)
-    font_text = get_font(22, bold=False)
-    
-    # 主标题 (无阴影，扁平化)
-    # Main title (no shadow, flat)
-    title = "Visual Contrastive Learning"
-    bbox = draw.textbbox((0, 0), title, font=font_title)
-    title_w = bbox[2] - bbox[0]
-    title_x = canvas_size[0] // 2 - title_w // 2
-    title_y = 160
-    draw.text((title_x, title_y), title, fill=(0, 0, 0), font=font_title)
-    
-    # 副标题
-    # Subtitle
-    subtitle = "Comparing CLIP and Global Contrastive Approaches"
-    bbox = draw.textbbox((0, 0), subtitle, font=font_subtitle)
-    subtitle_w = bbox[2] - bbox[0]
-    draw.text((canvas_size[0] // 2 - subtitle_w // 2, 230), subtitle,
-              fill=(60, 60, 60), font=font_subtitle)
-    
-    # 简单分隔线 (扁平化)
-    # Simple divider line (flat)
-    div_y = 290
-    draw.line([(canvas_size[0] // 2 - 400, div_y), (canvas_size[0] // 2 + 400, div_y)],
-              fill=(180, 180, 180), width=2)
-    
-    # 对比框布局 (扁平化，无阴影)
-    # Comparison boxes layout (flat, no shadows)
-    y_start = 360
-    box_width = 700
-    box_height = 480
-    gap = 120
-    
-    # CLIP框 (扁平化设计)
-    # CLIP box (flat design)
-    clip_x = canvas_size[0] // 2 - box_width - gap // 2
-    
-    # 使用简单的矩形边框，无阴影
-    # Use simple rectangle border, no shadows
-    draw_rounded_rectangle(draw, [clip_x, y_start, clip_x + box_width, y_start + box_height],
-                          radius=15, fill=(245, 245, 250), outline=(100, 100, 150), width=3)
-    
-    # 标题
-    # Title
-    draw.text((clip_x + 290, y_start + 30), "CLIP", fill=(50, 50, 100), font=font_subtitle)
-    
-    # 特征列表
-    # Feature list
-    clip_features = [
-        "• Image-Text paired learning",
-        "• Batch-level contrastive loss",
-        "• Limited negative samples",
-        "  (batch size: 32-1024)",
-        "• Dual encoder architecture:",
-        "  › Image Encoder",
-        "  › Text Encoder",
-        "• Cross-modal alignment"
-    ]
-    
-    for i, feature in enumerate(clip_features):
-        draw.text((clip_x + 60, y_start + 100 + i * 42), feature,
-                 fill=(40, 40, 40), font=font_text)
-    
-    # Global框 (扁平化设计)
-    # Global box (flat design)
-    global_x = canvas_size[0] // 2 + gap // 2
-    
-    # 使用简单的矩形边框，无阴影
-    # Use simple rectangle border, no shadows
-    draw_rounded_rectangle(draw, [global_x, y_start, global_x + box_width, y_start + box_height],
-                          radius=15, fill=(240, 245, 255), outline=(80, 120, 180), width=3)
-    
-    # 标题
-    # Title
-    draw.text((global_x + 200, y_start + 30), "Global Contrastive",
-              fill=(40, 80, 140), font=font_subtitle)
-    
-    # 特征列表
-    # Feature list
-    global_features = [
-        "• Image-only representation",
-        "• Global negative sampling",
-        "• 1M concept centers pool",
-        "  (offline clustering)",
-        "• Single encoder:",
-        "  › Image Encoder only",
-        "• Massive negative sampling:",
-        "  › 1024+ negatives per batch"
-    ]
-    
-    for i, feature in enumerate(global_features):
-        draw.text((global_x + 60, y_start + 100 + i * 42), feature,
-                 fill=(40, 40, 40), font=font_text)
-    
-    return canvas
+
 
 
 def create_clip_frame(
@@ -281,9 +255,9 @@ def create_clip_frame(
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    font_title = get_font(40, bold=True)
-    font_label = get_font(22, bold=False)
-    font_small = get_font(18, bold=False)
+    font_title = get_font(FONT_SIZE_TITLE, bold=True)
+    font_label = get_font(FONT_SIZE_LABEL, bold=False)
+    font_small = get_font(FONT_SIZE_SMALL, bold=False)
     
     # 标题 (无阴影)
     # Title (no shadow)
@@ -292,7 +266,7 @@ def create_clip_frame(
     
     # 副标题
     # Subtitle
-    batch_size = 8
+    batch_size = CLIP_BATCH_SIZE
     draw.text((50, 100), f"Batch Size: {batch_size} pairs | Max ~32K negatives in large batches",
               fill=(80, 80, 80), font=font_label)
     
@@ -301,8 +275,8 @@ def create_clip_frame(
     img_encoder_x = 200
     text_encoder_x = 1620
     y_start = 200
-    item_height = 95
-    gap = 12
+    item_height = CLIP_ITEM_HEIGHT
+    gap = CLIP_ITEM_GAP
     
     # 左侧图像标签
     # Left side images label
@@ -323,13 +297,13 @@ def create_clip_frame(
     # 图像编码器 (SAM风格，优雅设计)
     # Image Encoder (SAM-style, elegant design)
     encoder_x = img_encoder_x + 180
-    encoder_width = 180
+    encoder_width = CLIP_ENCODER_WIDTH
     encoder_height = batch_size * (item_height + gap) - gap
     
     # 使用更优雅的渐变效果背景
     # Use more elegant gradient-like background
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=12, fill=(235, 240, 250), outline=(100, 120, 200), width=3)
+                          radius=BORDER_RADIUS, fill=(235, 240, 250), outline=(100, 120, 200), width=HIGHLIGHT_BORDER_WIDTH)
     
     # 添加精致的内部装饰线条，模拟神经网络层
     # Add refined internal decorative lines to simulate neural network layers
@@ -379,7 +353,7 @@ def create_clip_frame(
     # 使用更优雅的渐变效果背景
     # Use more elegant gradient-like background
     draw_rounded_rectangle(draw, [text_enc_x, y_start, text_enc_x + encoder_width, y_start + encoder_height],
-                          radius=12, fill=(248, 240, 252), outline=(160, 100, 200), width=3)
+                          radius=BORDER_RADIUS, fill=(248, 240, 252), outline=(160, 100, 200), width=HIGHLIGHT_BORDER_WIDTH)
     
     # 添加精致的内部装饰线条，模拟神经网络层
     # Add refined internal decorative lines to simulate neural network layers
@@ -551,9 +525,9 @@ def create_global_frame(
     canvas = Image.new('RGB', canvas_size, color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    font_title = get_font(40, bold=True)
-    font_label = get_font(22, bold=False)
-    font_small = get_font(18, bold=False)
+    font_title = get_font(FONT_SIZE_TITLE, bold=True)
+    font_label = get_font(FONT_SIZE_LABEL, bold=False)
+    font_small = get_font(FONT_SIZE_SMALL, bold=False)
     
     # 标题 (无阴影)
     # Title (no shadow)
@@ -562,10 +536,10 @@ def create_global_frame(
     
     # 布局参数
     # Layout parameters
-    batch_size = 8
-    sampled_negatives = 1024
-    total_concepts = 1000000
-    num_positive_centers = 10
+    batch_size = GLOBAL_BATCH_SIZE
+    sampled_negatives = GLOBAL_SAMPLED_NEGATIVES
+    total_concepts = GLOBAL_TOTAL_CONCEPTS
+    num_positive_centers = GLOBAL_NUM_POSITIVE_CENTERS
     
     draw.text((50, 100), f"Batch: {batch_size} images | Sampled Negatives: {sampled_negatives:,} | Total Concepts: {total_concepts:,}",
               fill=(80, 80, 80), font=font_label)
@@ -574,8 +548,8 @@ def create_global_frame(
     # Left side: Images and encoder
     img_x = 150
     y_start = 200
-    item_height = 75
-    gap = 20
+    item_height = GLOBAL_ITEM_HEIGHT
+    gap = GLOBAL_ITEM_GAP
     
     draw.text((img_x - 40, 155), "Images", fill=(0, 0, 0), font=font_label)
     
@@ -609,11 +583,11 @@ def create_global_frame(
     # 图像编码器 (SAM风格)
     # Image Encoder (SAM-style)
     encoder_x = img_x + 190
-    encoder_width = 200
+    encoder_width = GLOBAL_ENCODER_WIDTH
     encoder_height = batch_size * (item_height + gap) - gap
     
     draw_rounded_rectangle(draw, [encoder_x, y_start, encoder_x + encoder_width, y_start + encoder_height],
-                          radius=12, fill=(235, 240, 250), outline=(100, 120, 200), width=3)
+                          radius=BORDER_RADIUS, fill=(235, 240, 250), outline=(100, 120, 200), width=HIGHLIGHT_BORDER_WIDTH)
     
     # 添加精致的内部装饰线条
     # Add refined internal decorative lines
@@ -655,13 +629,13 @@ def create_global_frame(
     # Concept Bank visualization (right side) - Flat style
     bank_x = 1000
     bank_y = 155
-    bank_width = 820
-    bank_height = 720
+    bank_width = GLOBAL_BANK_WIDTH
+    bank_height = GLOBAL_BANK_HEIGHT
     
     # 简单的矩形边框 (无阴影，扁平化)
     # Simple rectangle border (no shadows, flat)
     draw_rounded_rectangle(draw, [bank_x, bank_y, bank_x + bank_width, bank_y + bank_height],
-                          radius=15, fill=(245, 248, 252), outline=(100, 120, 150), width=3)
+                          radius=15, fill=(245, 248, 252), outline=(100, 120, 150), width=HIGHLIGHT_BORDER_WIDTH)
     
     # 标题
     # Title
@@ -680,7 +654,7 @@ def create_global_frame(
     # 创建稳定的随机位置用于概念中心
     # Create stable random positions for concept centers
     rng = np.random.default_rng(42)
-    num_visible_concepts = 320
+    num_visible_concepts = GLOBAL_NUM_VISIBLE_CONCEPTS
     concept_positions = []
     for i in range(num_visible_concepts):
         cx = bank_x + 100 + rng.integers(0, bank_width - 200)
@@ -720,7 +694,7 @@ def create_global_frame(
         # Select random negative centers - 20% of all visible concepts, scattered
         neg_rng = np.random.default_rng(sample_seed + 1)
         available = [i for i in range(num_visible_concepts) if i not in positive_centers]
-        num_visible_negatives = int(num_visible_concepts * 0.2)
+        num_visible_negatives = int(num_visible_concepts * GLOBAL_VISIBLE_NEGATIVES_RATIO)
         negative_indices = neg_rng.choice(len(available), size=min(num_visible_negatives, len(available)), replace=False)
         negative_centers = set(available[i] for i in negative_indices)
     
@@ -786,7 +760,7 @@ def create_global_frame(
     
     # 图例项 - SAM风格颜色
     # Legend items - SAM-style colors
-    num_visible_negatives = int(num_visible_concepts * 0.2)
+    num_visible_negatives = int(num_visible_concepts * GLOBAL_VISIBLE_NEGATIVES_RATIO)
     legend_items = [
         ("Selected Sample", (255, 195, 113), 9),  # SAM风格橙色
         (f"{num_positive_centers} Positive Centers", POSITIVE_COLOR_BRIGHT, 8),  # SAM风格绿色
@@ -836,6 +810,142 @@ def create_global_frame(
 
 
 
+def generate_clip_animation(
+    output_path: str,
+    fps: int = 2,
+    canvas_size: Tuple[int, int] = (1920, 1080),
+    as_video: bool = False
+) -> None:
+    """
+    生成CLIP动画 (扁平化CLIP/SAM论文风格)
+    Generate CLIP animation (flat CLIP/SAM paper style)
+    
+    Args:
+        output_path: 输出文件路径 / Output file path
+        fps: 每秒帧数 / Frames per second
+        canvas_size: 画布大小 / Canvas size (width, height)
+        as_video: 是否输出为视频格式 / Whether to output as video format
+    """
+    frames: List[np.ndarray] = []
+    
+    print("生成CLIP动画帧... / Generating CLIP animation frames...")
+    
+    # CLIP帧与动画
+    # CLIP frames with animation
+    clip_frames = fps * CLIP_ANIMATION_DURATION
+    for i in range(clip_frames):
+        frame = create_clip_frame(canvas_size, i)
+        frames.append(np.array(frame))
+    
+    # 保存输出
+    # Save output
+    if as_video:
+        # 确保输出路径有.mp4扩展名
+        # Ensure output path has .mp4 extension
+        if not output_path.lower().endswith('.mp4'):
+            output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+        
+        print(f"\n保存CLIP视频到 / Saving CLIP video to: {output_path}")
+        imageio.mimwrite(
+            output_path,
+            frames,
+            fps=fps,
+            codec='libx264',
+            pixelformat='yuv420p'
+        )
+    else:
+        # 确保输出路径有.gif扩展名
+        # Ensure output path has .gif extension
+        if not output_path.lower().endswith('.gif'):
+            output_path = output_path.rsplit('.', 1)[0] + '.gif'
+        
+        print(f"\n保存CLIP GIF到 / Saving CLIP GIF to: {output_path}")
+        pil_frames = [Image.fromarray(f) for f in frames]
+        pil_frames[0].save(
+            output_path,
+            save_all=True,
+            append_images=pil_frames[1:],
+            duration=int(1000 / fps),
+            loop=0
+        )
+    
+    # 输出统计信息
+    # Output statistics
+    print(f"✓ CLIP动画保存成功! / CLIP animation saved successfully!")
+    print(f"  - 总帧数 / Total frames: {len(frames)}")
+    print(f"  - 时长 / Duration: {len(frames) / fps:.1f} seconds")
+    print(f"  - 分辨率 / Resolution: {canvas_size[0]}x{canvas_size[1]}")
+    print(f"  - 扁平化CLIP/SAM论文风格 / Flat CLIP/SAM paper style")
+
+
+def generate_global_animation(
+    output_path: str,
+    fps: int = 2,
+    canvas_size: Tuple[int, int] = (1920, 1080),
+    as_video: bool = False
+) -> None:
+    """
+    生成全局对比学习动画 (扁平化CLIP/SAM论文风格)
+    Generate Global Contrastive Learning animation (flat CLIP/SAM paper style)
+    
+    Args:
+        output_path: 输出文件路径 / Output file path
+        fps: 每秒帧数 / Frames per second
+        canvas_size: 画布大小 / Canvas size (width, height)
+        as_video: 是否输出为视频格式 / Whether to output as video format
+    """
+    frames: List[np.ndarray] = []
+    
+    print("生成全局对比学习动画帧... / Generating Global Contrastive animation frames...")
+    
+    # 全局对比学习帧与增强采样动画
+    # Global frames with enhanced sampling animation
+    global_frames = fps * GLOBAL_ANIMATION_DURATION
+    for i in range(global_frames):
+        frame = create_global_frame(canvas_size, i)
+        frames.append(np.array(frame))
+    
+    # 保存输出
+    # Save output
+    if as_video:
+        # 确保输出路径有.mp4扩展名
+        # Ensure output path has .mp4 extension
+        if not output_path.lower().endswith('.mp4'):
+            output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+        
+        print(f"\n保存全局对比学习视频到 / Saving Global video to: {output_path}")
+        imageio.mimwrite(
+            output_path,
+            frames,
+            fps=fps,
+            codec='libx264',
+            pixelformat='yuv420p'
+        )
+    else:
+        # 确保输出路径有.gif扩展名
+        # Ensure output path has .gif extension
+        if not output_path.lower().endswith('.gif'):
+            output_path = output_path.rsplit('.', 1)[0] + '.gif'
+        
+        print(f"\n保存全局对比学习GIF到 / Saving Global GIF to: {output_path}")
+        pil_frames = [Image.fromarray(f) for f in frames]
+        pil_frames[0].save(
+            output_path,
+            save_all=True,
+            append_images=pil_frames[1:],
+            duration=int(1000 / fps),
+            loop=0
+        )
+    
+    # 输出统计信息
+    # Output statistics
+    print(f"✓ 全局对比学习动画保存成功! / Global animation saved successfully!")
+    print(f"  - 总帧数 / Total frames: {len(frames)}")
+    print(f"  - 时长 / Duration: {len(frames) / fps:.1f} seconds")
+    print(f"  - 分辨率 / Resolution: {canvas_size[0]}x{canvas_size[1]}")
+    print(f"  - 扁平化CLIP/SAM论文风格 / Flat CLIP/SAM paper style")
+
+
 def generate_animation(
     output_path: str,
     fps: int = 2,
@@ -845,6 +955,9 @@ def generate_animation(
     """
     生成对比动画 (扁平化CLIP/SAM论文风格)
     Generate the comparison animation (flat CLIP/SAM paper style)
+    
+    此函数已弃用，请使用 generate_clip_animation 和 generate_global_animation
+    This function is deprecated, use generate_clip_animation and generate_global_animation instead
     
     Args:
         output_path: 输出文件路径 / Output file path
@@ -856,25 +969,21 @@ def generate_animation(
     
     print("生成帧... / Generating frames...")
     
-    # 1. 标题帧 (3秒)
-    # 1. Title frame (3 seconds)
-    print("  - 标题帧 / Title frame")
-    title_frame = create_title_frame(canvas_size)
-    for _ in range(fps * 3):
-        frames.append(np.array(title_frame))
+    # 注意：标题帧已移除
+    # Note: Title frame removed
     
-    # 2. CLIP帧与动画 (8秒)
-    # 2. CLIP frames with animation (8 seconds)
+    # 1. CLIP帧与动画 (8秒)
+    # 1. CLIP frames with animation (8 seconds)
     print("  - CLIP动画帧 / CLIP animation frames")
-    clip_frames = fps * 8
+    clip_frames = fps * CLIP_ANIMATION_DURATION
     for i in range(clip_frames):
         frame = create_clip_frame(canvas_size, i)
         frames.append(np.array(frame))
     
-    # 3. 全局对比学习帧与增强采样动画 (12秒 - 更长以展示采样过程)
-    # 3. Global frames with enhanced sampling animation (12 seconds - longer to show sampling)
+    # 2. 全局对比学习帧与增强采样动画 (12秒 - 更长以展示采样过程)
+    # 2. Global frames with enhanced sampling animation (12 seconds - longer to show sampling)
     print("  - 全局对比学习动画帧 / Global contrastive animation frames")
-    global_frames = fps * 12
+    global_frames = fps * GLOBAL_ANIMATION_DURATION
     for i in range(global_frames):
         frame = create_global_frame(canvas_size, i)
         frames.append(np.array(frame))
@@ -921,7 +1030,7 @@ def generate_animation(
     print(f"  - 时长 / Duration: {len(frames) / fps:.1f} seconds")
     print(f"  - 分辨率 / Resolution: {canvas_size[0]}x{canvas_size[1]}")
     print(f"  - 扁平化CLIP/SAM论文风格 / Flat CLIP/SAM paper style")
-    print(f"  - 已移除关键差异帧 / Removed: Key differences frame")
+    print(f"  - 已移除标题帧 / Removed: Title frame")
 
 
 def main():
@@ -932,27 +1041,83 @@ def main():
     parser = argparse.ArgumentParser(
         description="生成CLIP与全局对比学习的动画对比 / Generate animated comparison of CLIP vs Global Contrastive Learning"
     )
-    parser.add_argument("--output", type=str, default="global_contrastive_comparison.gif",
-                       help="输出文件路径 / Output file path (default: global_contrastive_comparison.gif)")
+    parser.add_argument("--output", type=str, default="comparison",
+                       help="输出文件路径（不含扩展名）或前缀 / Output file path (without extension) or prefix (default: comparison)")
     parser.add_argument("--video", action="store_true",
                        help="输出为MP4视频而非GIF / Output as MP4 video instead of GIF")
-    parser.add_argument("--fps", type=int, default=2,
-                       help="每秒帧数 / Frames per second (default: 2)")
-    parser.add_argument("--width", type=int, default=1920,
-                       help="画布宽度 / Canvas width (default: 1920)")
-    parser.add_argument("--height", type=int, default=1080,
-                       help="画布高度 / Canvas height (default: 1080)")
+    parser.add_argument("--fps", type=int, default=DEFAULT_FPS,
+                       help=f"每秒帧数 / Frames per second (default: {DEFAULT_FPS})")
+    parser.add_argument("--width", type=int, default=DEFAULT_CANVAS_WIDTH,
+                       help=f"画布宽度 / Canvas width (default: {DEFAULT_CANVAS_WIDTH})")
+    parser.add_argument("--height", type=int, default=DEFAULT_CANVAS_HEIGHT,
+                       help=f"画布高度 / Canvas height (default: {DEFAULT_CANVAS_HEIGHT})")
+    parser.add_argument("--separate", action="store_true",
+                       help="生成两个独立的GIF/视频文件（CLIP和Global） / Generate two separate GIF/video files (CLIP and Global)")
+    parser.add_argument("--clip-only", action="store_true",
+                       help="仅生成CLIP动画 / Generate CLIP animation only")
+    parser.add_argument("--global-only", action="store_true",
+                       help="仅生成全局对比学习动画 / Generate Global animation only")
     
     args = parser.parse_args()
     
-    # 生成动画
-    # Generate animation
-    generate_animation(
-        output_path=args.output,
-        fps=args.fps,
-        canvas_size=(args.width, args.height),
-        as_video=args.video
-    )
+    canvas_size = (args.width, args.height)
+    
+    # 如果指定了separate或单独生成选项，创建两个独立文件
+    # If separate or individual options are specified, create two separate files
+    if args.separate or args.clip_only or args.global_only:
+        ext = ".mp4" if args.video else ".gif"
+        
+        # 移除输出路径中的扩展名
+        # Remove extension from output path
+        base_output = args.output
+        for extension in ['.gif', '.mp4', '.GIF', '.MP4']:
+            if base_output.endswith(extension):
+                base_output = base_output[:-len(extension)]
+                break
+        
+        if not args.global_only:
+            # 生成CLIP动画
+            # Generate CLIP animation
+            clip_output = f"{base_output}_clip{ext}"
+            print(f"\n{'='*60}")
+            print(f"生成CLIP动画 / Generating CLIP Animation")
+            print(f"{'='*60}")
+            generate_clip_animation(
+                output_path=clip_output,
+                fps=args.fps,
+                canvas_size=canvas_size,
+                as_video=args.video
+            )
+        
+        if not args.clip_only:
+            # 生成全局对比学习动画
+            # Generate Global animation
+            global_output = f"{base_output}_global{ext}"
+            print(f"\n{'='*60}")
+            print(f"生成全局对比学习动画 / Generating Global Contrastive Animation")
+            print(f"{'='*60}")
+            generate_global_animation(
+                output_path=global_output,
+                fps=args.fps,
+                canvas_size=canvas_size,
+                as_video=args.video
+            )
+        
+        print(f"\n{'='*60}")
+        print("✓ 所有动画生成完成! / All animations generated successfully!")
+        print(f"{'='*60}")
+    else:
+        # 默认行为：生成包含CLIP和Global的组合动画
+        # Default behavior: generate combined animation with CLIP and Global
+        print(f"\n{'='*60}")
+        print(f"生成组合动画 / Generating Combined Animation")
+        print(f"{'='*60}")
+        generate_animation(
+            output_path=args.output,
+            fps=args.fps,
+            canvas_size=canvas_size,
+            as_video=args.video
+        )
 
 
 if __name__ == "__main__":
