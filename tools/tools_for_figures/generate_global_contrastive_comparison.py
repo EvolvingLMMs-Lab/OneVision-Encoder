@@ -49,6 +49,12 @@ FONT_PATHS = [
     "C:/Windows/Fonts/arialbd.ttf",
 ]
 
+# Animation configuration constants
+# 动画配置常量
+CLIP_ANIMATION_EXAMPLES = 3  # Number of examples to animate in CLIP (out of 8 total)
+CONCEPT_CENTER_GRAY = (180, 180, 180)  # Gray color for non-sampled concept centers
+CONCEPT_CENTER_GRAY_BORDER = (120, 120, 120)  # Border color for non-sampled centers
+
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     """
@@ -388,9 +394,10 @@ def create_clip_frame(
     
     cell_size = matrix_size // batch_size
     
-    # 动画：只高亮显示前3个配对
-    # Animation: only highlight first 3 pairs
-    highlight_pair = (animation_step // 3) % 3  # Only cycle through first 3
+    # 动画：只高亮显示前N个配对 (由CLIP_ANIMATION_EXAMPLES定义)
+    # Animation: only highlight first N pairs (defined by CLIP_ANIMATION_EXAMPLES)
+    # Note: This intentionally limits highlighting to the first N pairs to simplify the visualization
+    highlight_pair = (animation_step // 3) % CLIP_ANIMATION_EXAMPLES  # Only cycle through first N
     
     # 绘制从图像嵌入到矩阵列的连接线
     # Draw connection lines from image embeddings to matrix columns
@@ -401,7 +408,7 @@ def create_clip_frame(
         if i == highlight_pair:
             draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
                      fill=image_colors[i], width=3)
-        elif i < 3:  # Show faint lines for first 3
+        elif i < CLIP_ANIMATION_EXAMPLES:  # Show faint lines for first N
             draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
                      fill=(200, 200, 200), width=1)
     
@@ -414,7 +421,7 @@ def create_clip_frame(
         if i == highlight_pair:
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
                      fill=text_colors[i], width=3)
-        elif i < 3:  # Show faint lines for first 3
+        elif i < CLIP_ANIMATION_EXAMPLES:  # Show faint lines for first N
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
                      fill=(200, 200, 200), width=1)
     
@@ -428,15 +435,16 @@ def create_clip_frame(
             if i == j:
                 # 正样本对 (绿色)
                 # Positive pair (green)
-                if i == highlight_pair and i < 3:
-                    color = (74, 222, 128)  # 亮绿色 / Bright green (only for first 3)
+                if i == highlight_pair and i < CLIP_ANIMATION_EXAMPLES:
+                    color = (74, 222, 128)  # 亮绿色 / Bright green (only for first N)
                 else:
                     color = (187, 247, 208)  # 浅绿色 / Light green
             else:
                 # 负样本对 (红色)
                 # Negative pair (red)
-                if (i == highlight_pair or j == highlight_pair) and i < 3 and j < 3:
-                    color = (252, 165, 165)  # 亮红色 / Bright red (only for first 3)
+                # Only highlight negative pairs within the first NxN submatrix for clarity
+                if (i == highlight_pair or j == highlight_pair) and i < CLIP_ANIMATION_EXAMPLES and j < CLIP_ANIMATION_EXAMPLES:
+                    color = (252, 165, 165)  # 亮红色 / Bright red (only for first NxN)
                 else:
                     color = (254, 226, 226)  # 浅红色 / Light red
             
@@ -675,10 +683,10 @@ def create_global_frame(
         else:
             # 未采样的中心 - 灰色 (扁平化)
             # Non-sampled centers - gray (flat)
-            color = (180, 180, 180)  # 灰色替代彩色
+            color = CONCEPT_CENTER_GRAY  # 灰色替代彩色
             size = 5
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
-                        fill=color, outline=(120, 120, 120), width=1)
+                        fill=color, outline=CONCEPT_CENTER_GRAY_BORDER, width=1)
     
     # 从当前样本到中心的连接线 (扁平化)
     # Connection lines from current sample to centers (flat)
