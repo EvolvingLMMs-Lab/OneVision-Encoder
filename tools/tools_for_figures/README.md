@@ -47,14 +47,16 @@ python generate_vit_residual_gif.py --demo --output custom.mp4 \
 Generates animations comparing CLIP's batch-level contrastive learning with global contrastive learning using 1M concept centers.
 
 **Features:**
+- Publication-quality visual design (Meta/Nature standards)
 - Side-by-side comparison of CLIP vs Global Contrastive Learning
 - Animated sampling process showing how samples are selected
 - Highlights 10 positive class centers for each selected sample
 - Displays randomly sampled negative centers with visual emphasis
 - Multiple samples processed in sequence (similar to CLIP's approach)
-- Enhanced visual aesthetics with glow effects and smooth animations
+- Sophisticated visual aesthetics with multi-layer shadows and glow effects
+- Smooth gradient backgrounds and modern color palette
 - Shows connection lines from samples to positive/negative centers
-- Legend box explaining different types of centers
+- Professional legend box explaining different types of centers
 - CLIP section updated to mention 32K negative samples capability
 
 **Usage:**
@@ -79,15 +81,22 @@ python generate_global_contrastive_comparison.py \
 - `--height`: Canvas height (default: 1080)
 
 **Animation Phases:**
-1. **Title Frame (3s):** Introduction and overview
-2. **CLIP Animation (8s):** Shows batch-level contrastive learning with similarity matrix
-3. **Global Contrastive Animation (12s):** Enhanced sampling animation showing:
-   - Sequential sample selection with highlight effects
-   - 10 positive centers highlighted in green with glow
-   - ~25 sampled negative centers highlighted in red/orange with glow
-   - Animated connection lines from samples to centers
-   - Multiple samples processed to demonstrate the process
-4. **Comparison Summary (4s):** Side-by-side key differences
+1. **Title Frame (3s):** Professional introduction with elegant gradient background and side-by-side overview
+2. **CLIP Animation (8s):** Shows batch-level contrastive learning with enhanced similarity matrix and modern styling
+3. **Global Contrastive Animation (12s):** Publication-quality sampling animation featuring:
+   - Sequential sample selection with sophisticated highlight effects
+   - 10 positive centers highlighted in vibrant green with multi-layer glow
+   - ~64 sampled negative centers highlighted in red with elegant glow effects
+   - Smooth animated connection lines from samples to centers
+   - Multiple samples processed with professional transitions
+   - Enhanced concept bank visualization with depth effects
+
+**Design Enhancements:**
+- **Modern Color Palette:** Vibrant, consistent colors (#ef4444, #22c55e, #3b82f6, etc.)
+- **Typography:** Professional hierarchy with larger, clearer fonts (64px title, 36px subtitle)
+- **Depth Effects:** Multi-layer shadows on all major elements for 3D appearance
+- **Gradients:** Smooth background gradients for elegant, clean look
+- **Visual Polish:** Rounded corners (15-20px), enhanced borders, sophisticated glow effects
 
 **Key Differences Visualized:**
 
