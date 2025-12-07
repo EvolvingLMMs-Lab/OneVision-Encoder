@@ -54,6 +54,7 @@ FONT_PATHS = [
 CLIP_ANIMATION_EXAMPLES = 3  # Number of examples to animate in CLIP (out of 8 total)
 CONCEPT_CENTER_GRAY = (180, 180, 180)  # Gray color for non-sampled concept centers
 CONCEPT_CENTER_GRAY_BORDER = (120, 120, 120)  # Border color for non-sampled centers
+FAINT_LINE_COLOR = (200, 200, 200)  # Color for faint connection lines
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -410,7 +411,7 @@ def create_clip_frame(
                      fill=image_colors[i], width=3)
         elif i < CLIP_ANIMATION_EXAMPLES:  # Show faint lines for first N
             draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
-                     fill=(200, 200, 200), width=1)
+                     fill=FAINT_LINE_COLOR, width=1)
     
     # 绘制从文本嵌入到矩阵行的连接线
     # Draw connection lines from text embeddings to matrix rows
@@ -423,7 +424,7 @@ def create_clip_frame(
                      fill=text_colors[i], width=3)
         elif i < CLIP_ANIMATION_EXAMPLES:  # Show faint lines for first N
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
-                     fill=(200, 200, 200), width=1)
+                     fill=FAINT_LINE_COLOR, width=1)
     
     for i in range(batch_size):
         for j in range(batch_size):
@@ -443,7 +444,10 @@ def create_clip_frame(
                 # 负样本对 (红色)
                 # Negative pair (red)
                 # Only highlight negative pairs within the first NxN submatrix for clarity
-                if (i == highlight_pair or j == highlight_pair) and i < CLIP_ANIMATION_EXAMPLES and j < CLIP_ANIMATION_EXAMPLES:
+                is_within_animation_range = (i < CLIP_ANIMATION_EXAMPLES and j < CLIP_ANIMATION_EXAMPLES)
+                is_highlighted = (i == highlight_pair or j == highlight_pair)
+                
+                if is_highlighted and is_within_animation_range:
                     color = (252, 165, 165)  # 亮红色 / Bright red (only for first NxN)
                 else:
                     color = (254, 226, 226)  # 浅红色 / Light red
