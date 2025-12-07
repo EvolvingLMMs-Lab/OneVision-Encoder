@@ -92,26 +92,26 @@ GLOBAL_BANK_HEIGHT = 720  # Height of concept bank visualization / 概念库可�
 # SAM-style color palette for images - more sophisticated and harmonious
 # SAM风格配色方案 - 更精致和谐
 IMAGE_COLORS_SAM = [
-    (255, 107, 107),  # Coral red - softer, more professional
-    (78, 205, 196),   # Turquoise - calming
-    (99, 110, 250),   # Indigo blue - modern
-    (255, 195, 113),  # Peach - warm
-    (162, 155, 254),  # Light purple - elegant
-    (69, 183, 209),   # Sky blue - fresh
-    (255, 159, 64),   # Orange - energetic
-    (255, 99, 164),   # Pink - vibrant
+    (255, 107, 107),  # Coral red - softer, more professional / 珊瑚红 - 柔和专业
+    (78, 205, 196),   # Turquoise - calming / 青绿色 - 平静
+    (99, 110, 250),   # Indigo blue - modern / 靛蓝 - 现代
+    (255, 195, 113),  # Peach - warm / 桃色 - 温暖
+    (162, 155, 254),  # Light purple - elegant / 浅紫 - 优雅
+    (69, 183, 209),   # Sky blue - fresh / 天蓝 - 清新
+    (255, 159, 64),   # Orange - energetic / 橙色 - 活力
+    (255, 99, 164),   # Pink - vibrant / 粉色 - 鲜活
 ]
 
-# Matrix colors - SAM-style with better contrast
-POSITIVE_COLOR_BRIGHT = (52, 211, 153)  # Emerald green - professional
-POSITIVE_COLOR_LIGHT = (209, 250, 229)  # Very light green
-NEGATIVE_COLOR_BRIGHT = (248, 113, 113)  # Modern red
-NEGATIVE_COLOR_LIGHT = (254, 242, 242)  # Very light red/pink
+# Matrix colors - SAM-style with better contrast / 矩阵颜色 - SAM风格，更好的对比度
+POSITIVE_COLOR_BRIGHT = (52, 211, 153)  # Emerald green - professional / 祖母绿 - 专业
+POSITIVE_COLOR_LIGHT = (209, 250, 229)  # Very light green / 极浅绿
+NEGATIVE_COLOR_BRIGHT = (248, 113, 113)  # Modern red / 现代红
+NEGATIVE_COLOR_LIGHT = (254, 242, 242)  # Very light red/pink / 极浅红/粉
 
-# Concept center colors
-CONCEPT_CENTER_GRAY = (220, 220, 225)  # Lighter gray for non-sampled concept centers
-CONCEPT_CENTER_GRAY_BORDER = (180, 180, 190)  # Lighter border color for non-sampled centers
-FAINT_LINE_COLOR = (210, 210, 215)  # Lighter color for faint connection lines
+# Concept center colors / 概念中心颜色
+CONCEPT_CENTER_GRAY = (220, 220, 225)  # Lighter gray for non-sampled concept centers / 浅灰色（未采样）
+CONCEPT_CENTER_GRAY_BORDER = (180, 180, 190)  # Lighter border color for non-sampled centers / 浅灰边框
+FAINT_LINE_COLOR = (210, 210, 215)  # Lighter color for faint connection lines / 浅色连接线
 
 # Typography / 字体设置
 # ----------------------------------------------------------------------------
@@ -417,6 +417,7 @@ def create_clip_frame(
         # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
         # All samples get lines: animated ones in color, others in light gray
         if i == highlight_pair:
+            # Draw with slight curve for elegance / 使用轻微的曲线增加优雅感
             draw.line([(emb_x + 40, img_emb_y), (matrix_col_x, matrix_y)],
                      fill=image_colors[i], width=3)
         else:
@@ -432,6 +433,7 @@ def create_clip_frame(
         # 所有样本都画连接线，动画样本用彩色，其他用浅灰色
         # All samples get lines: animated ones in color, others in light gray
         if i == highlight_pair:
+            # Draw with slight curve for elegance / 使用轻微的曲线增加优雅感
             draw.line([(text_emb_x + 40, text_emb_y), (matrix_x + matrix_size, matrix_row_y)],
                      fill=text_colors[i], width=3)
         else:
@@ -703,20 +705,27 @@ def create_global_frame(
     
     for cx, cy, i in concept_positions:
         if i in positive_centers:
-            # 正样本中心 - SAM风格绿色
-            # Positive centers - SAM-style green
+            # 正样本中心 - SAM风格绿色，增强视觉效果
+            # Positive centers - SAM-style green with enhanced visual effect
             color = POSITIVE_COLOR_BRIGHT
             size = 8
-            # 添加外圈增强视觉效果
-            draw.ellipse([cx - size - 2, cy - size - 2, cx + size + 2, cy + size + 2],
-                        fill=(180, 240, 210), outline=None)
+            # 添加多层外圈增强视觉层次感
+            # Add multiple outer rings for enhanced visual hierarchy
+            draw.ellipse([cx - size - 3, cy - size - 3, cx + size + 3, cy + size + 3],
+                        fill=(200, 245, 220), outline=None)
+            draw.ellipse([cx - size - 1, cy - size - 1, cx + size + 1, cy + size + 1],
+                        fill=(160, 240, 200), outline=None)
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
                         fill=color, outline=(255, 255, 255), width=2)
         elif i in negative_centers:
-            # 负样本中心 - SAM风格红色
-            # Negative centers - SAM-style red
+            # 负样本中心 - SAM风格红色，轻微外圈
+            # Negative centers - SAM-style red with subtle outer ring
             color = NEGATIVE_COLOR_BRIGHT
             size = 7
+            # 添加轻微的外圈
+            # Add subtle outer ring
+            draw.ellipse([cx - size - 1, cy - size - 1, cx + size + 1, cy + size + 1],
+                        fill=(255, 180, 180), outline=None)
             draw.ellipse([cx - size, cy - size, cx + size, cy + size],
                         fill=color, outline=(255, 255, 255), width=1)
         else:
