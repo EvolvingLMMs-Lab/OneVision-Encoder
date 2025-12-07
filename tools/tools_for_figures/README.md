@@ -46,48 +46,58 @@ python generate_vit_residual_gif.py --demo --output custom.mp4 \
 
 Generates animations comparing CLIP's batch-level contrastive learning with global contrastive learning using 1M concept centers.
 
+**Now uses Manim for high-quality mathematical animations!**
+
 **Features:**
 - Side-by-side comparison of CLIP vs Global Contrastive Learning
 - Animated sampling process showing how samples are selected
 - Highlights 10 positive class centers for each selected sample
 - Displays randomly sampled negative centers with visual emphasis
 - Multiple samples processed in sequence (similar to CLIP's approach)
-- Enhanced visual aesthetics with glow effects and smooth animations
+- Smooth animations with professional quality using Manim
 - Shows connection lines from samples to positive/negative centers
 - Legend box explaining different types of centers
 - CLIP section updated to mention 32K negative samples capability
 
 **Usage:**
 ```bash
-# Generate GIF (default)
-python generate_global_contrastive_comparison.py --output comparison.gif
+# Preview in low quality
+manim generate_global_contrastive_comparison.py ComparisonVideo -pql
 
-# Generate MP4 video (better quality)
-python generate_global_contrastive_comparison.py --output comparison.mp4 --video
+# Preview in high quality
+manim generate_global_contrastive_comparison.py ComparisonVideo -pqh
 
-# Customize parameters
-python generate_global_contrastive_comparison.py \
-    --output custom_comparison.gif \
-    --fps 3 --width 1920 --height 1080
+# Render high quality MP4 video
+manim generate_global_contrastive_comparison.py ComparisonVideo --format mp4 -qh
+
+# Render medium quality MP4 video (faster)
+manim generate_global_contrastive_comparison.py ComparisonVideo --format mp4 -qm
+
+# Render individual scenes
+manim generate_global_contrastive_comparison.py TitleScene -pql
+manim generate_global_contrastive_comparison.py CLIPScene -pql
+manim generate_global_contrastive_comparison.py GlobalContrastiveScene -pql
+manim generate_global_contrastive_comparison.py ComparisonScene -pql
 ```
 
-**Parameters:**
-- `--output`: Output file path (default: global_contrastive_comparison.gif)
-- `--video`: Output as MP4 video instead of GIF
-- `--fps`: Frames per second (default: 2)
-- `--width`: Canvas width (default: 1920)
-- `--height`: Canvas height (default: 1080)
+**Output:**
+The video will be saved in:
+`media/videos/generate_global_contrastive_comparison/[quality]/ComparisonVideo.mp4`
+
+Where `[quality]` is one of:
+- `480p15` for low quality
+- `720p30` for medium quality  
+- `1080p60` for high quality
 
 **Animation Phases:**
-1. **Title Frame (3s):** Introduction and overview
-2. **CLIP Animation (8s):** Shows batch-level contrastive learning with similarity matrix
-3. **Global Contrastive Animation (12s):** Enhanced sampling animation showing:
+1. **Title Scene (~5s):** Introduction and overview with feature comparison boxes
+2. **CLIP Scene (~10s):** Shows batch-level contrastive learning with animated similarity matrix
+3. **Global Contrastive Scene (~15s):** Enhanced sampling animation showing:
    - Sequential sample selection with highlight effects
-   - 10 positive centers highlighted in green with glow
-   - ~25 sampled negative centers highlighted in red/orange with glow
+   - 10 positive centers highlighted in green
+   - ~25 sampled negative centers highlighted in orange
    - Animated connection lines from samples to centers
-   - Multiple samples processed to demonstrate the process
-4. **Comparison Summary (4s):** Side-by-side key differences
+4. **Comparison Scene (~8s):** Side-by-side key differences
 
 **Key Differences Visualized:**
 
@@ -104,6 +114,10 @@ python generate_global_contrastive_comparison.py \
 
 Install dependencies:
 ```bash
+# For generate_global_contrastive_comparison.py (uses Manim)
+pip install manim
+
+# For generate_vit_residual_gif.py (uses PIL/imageio)
 pip install imageio imageio-ffmpeg pillow numpy
 ```
 
@@ -112,21 +126,48 @@ For video processing in generate_vit_residual_gif.py, also install:
 pip install opencv-python
 ```
 
+**System Dependencies for Manim:**
+On Linux (Ubuntu/Debian):
+```bash
+sudo apt-get install libcairo2-dev libpango1.0-dev ffmpeg
+```
+
+On macOS:
+```bash
+brew install cairo pango ffmpeg
+```
+
+On Windows, follow the [Manim installation guide](https://docs.manim.community/en/stable/installation.html).
+
 ## Output Examples
 
-Generated files can be found in this directory:
-- `global_contrastive_vs_clip.gif` - Animated GIF comparison
-- `global_contrastive_vs_clip.mp4` - Video comparison (better quality)
+Generated files:
+- **generate_global_contrastive_comparison.py**: `media/videos/generate_global_contrastive_comparison/[quality]/ComparisonVideo.mp4`
+- **generate_vit_residual_gif.py**: `vit_residual_encoding.mp4` or `vit_residual_encoding.gif`
 
 ## Tips
 
-1. **For presentations:** Use MP4 format with `--video` flag for better quality
-2. **For web/docs:** Use GIF format for easier embedding
-3. **Animation speed:** Adjust `--fps` parameter (2-4 recommended)
-4. **Resolution:** Standard HD (1920x1080) works well, adjust based on needs
+1. **For presentations:** 
+   - Use Manim with `-qh` flag for best quality
+   - For `generate_global_contrastive_comparison.py`, use: `manim generate_global_contrastive_comparison.py ComparisonVideo --format mp4 -qh`
+   - For `generate_vit_residual_gif.py`, use MP4 format with `--video` flag
+2. **For web/docs:** 
+   - Use medium quality `-qm` for reasonable file sizes
+   - For `generate_vit_residual_gif.py`, use GIF format for easier embedding
+3. **Animation speed:** 
+   - Manim animations are timed automatically in the code
+   - For PIL-based animations, adjust `--fps` parameter (2-4 recommended)
+4. **Resolution:** 
+   - Manim: Quality flag determines resolution (480p, 720p, 1080p)
+   - PIL-based: Standard HD (1920x1080) works well, adjust `--width` and `--height` as needed
+5. **Preview during development:**
+   - Use `-pql` (preview low quality) for fast iteration
+   - Use `-pqh` (preview high quality) for final check before rendering
 
 ## Notes
 
+- **generate_global_contrastive_comparison.py** now uses **Manim** for professional mathematical animations
+- **generate_vit_residual_gif.py** still uses PIL/imageio for frame-by-frame control
 - Both scripts work cross-platform (Linux, macOS, Windows)
 - Font rendering uses system fonts with automatic fallback
-- Older Pillow versions may show rectangles instead of rounded rectangles
+- Manim provides smoother animations and better quality than GIF-based approaches
