@@ -16,7 +16,7 @@ REPORT_DIR_SUFFIX="_16frames"
 
 
 DEFAULT_DATASETS=(
-    # "ssv2"
+    "ssv2"
     "diving48"
     "perception_test"
     "epic_verb"

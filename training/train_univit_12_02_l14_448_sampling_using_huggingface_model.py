@@ -469,23 +469,6 @@ def main():
         if dataset_config.dali_type == "decord":
             from dataloader.data_decord_video_sampling_frame import get_dali_dataloader
 
-            # def get_dali_dataloader(
-            #     data_root_path: str,
-            #     data_csv_path: str,
-            #     mode: str = "val",
-            #     batch_size: int = 32,
-            #     sequence_length: int = 16,
-            #     input_size: int = 224,
-            #     short_side_size: int = 224,
-            #     use_rgb: bool = True,
-            #     mean: List[float] = [0.48145466, 0.4578275, 0.40821073],
-            #     std: List[float] = [0.26862954, 0.26130258, 0.27577711],
-            #     dali_num_threads: int = 4,
-            #     dali_py_num_workers: int = 8,
-            #     decord_num_threads: int = 2,
-            #     seed: int = 0,
-            # ) -> DALIWarper:
-
             # 使用调整后的 batch size 和实际帧数
             train_iter = get_dali_dataloader(
                 data_root_path="",
@@ -512,6 +495,23 @@ def main():
                 )
             else:
                 from dataloader.data_v2 import MultiRecDALIWarper
+                # print("dataset_config.prefix", dataset_config.prefixes)
+                train_iter = MultiRecDALIWarper(
+                    list_prefix=dataset_config.prefixes,
+                    batch_size=args.list_batch_sizes_adjusted[head_id],
+                    image_size=args.image_size,
+                    workers=args.workers,
+                    shard_id=dataset_config.shard_id,
+                    num_shards=dataset_config.num_shards
+        )
+        elif dataset_config.dali_type == "ocr":
+            if args.debug:
+                from dataloader.data_v2_ocr import SyntheticDataIter
+                train_iter = SyntheticDataIter(
+                    args.list_batch_sizes_adjusted[head_id], 224, local_rank
+                )
+            else:
+                from dataloader.data_v2_ocr import MultiRecDALIWarper
                 # print("dataset_config.prefix", dataset_config.prefixes)
                 train_iter = MultiRecDALIWarper(
                     list_prefix=dataset_config.prefixes,
