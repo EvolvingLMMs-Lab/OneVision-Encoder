@@ -146,7 +146,6 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
 
     # 直接resize到input_size，因为视频已经是256x256的正方形
     videos = fn.resize(videos, resize_x=input_size, resize_y=input_size, antialias=True, interp_type=types.INTERP_CUBIC)
-    videos = fn.crop_mirror_normalize(videos, device="gpu", dtype=types.UINT8, output_layout="FHWC",)
 
     if mode == "train":
         # 亮度/对比度
