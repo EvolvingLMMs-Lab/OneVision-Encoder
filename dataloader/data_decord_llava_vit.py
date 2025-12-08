@@ -101,9 +101,7 @@ class VideoExternalSource:
         video_visible_indices_path = parts[11]
         try:
             video_data, frame_indices, total_frames = self._load_video_data(video_path)
-            video_visible_indices = np.load(video_visible_indices_path, mmap_mode="r")
-            if isinstance(video_visible_indices, np.ndarray):
-                video_visible_indices = video_visible_indices.astype(np.int16)
+            video_visible_indices = np.load(video_visible_indices_path, mmap_mode="r").astype(np.int16)
             return video_data, np.array(video_label, dtype=np.int64), frame_indices, np.int64([total_frames]), video_visible_indices
         except Exception as e:
             self.logger.info(f"Failed to load video: {video_path}, error: {e}")
@@ -225,7 +223,7 @@ def get_dali_dataloader(
     source_params = {
         "num_shards": num_shards, "shard_id": shard_id, "file_list": file_list,
         "batch_size": batch_size, "sequence_length": sequence_length, "seed": seed + rank,
-        "use_rgb": use_rgb, "input_size": input_size, "short_side_size": short_side_size,
+        "use_rgb": use_rgb, "input_size": input_size,
         "mean": mean, "std": std,
         "decord_num_threads": decord_num_threads,
     }
