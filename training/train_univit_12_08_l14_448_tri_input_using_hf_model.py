@@ -623,7 +623,143 @@ def main():
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)
 
-            elif dataset_config.dali_type in ["origin"]:
+            elif dataset_config.dali_type in ["decord_residual"]:
+                head_input = list_data_batch[head_id]["pixel_values"]
+                list_batch_sizes.append(head_input.size(0))
+                visible_indices = list_data_batch[head_id]["visible_indices"]  # [bs, ?]，需要至少 args.total_indices 合法列
+
+                bs = visible_indices.shape[0]
+                dev = visible_indices.device
+
+                # 初始化 out：默认使用 visible_indices 的前 args.target_num 列的拷贝
+                out = visible_indices[:, :args.target_num].clone()
+
+                # 按 batch 固定划分：前50% residual, 中37.5% frame_sampling, 后12.5% collage
+                n1 = int(bs * 0.5)
+                n2 = int(bs * 0.375)
+
+                idx_range = torch.arange(bs, device=dev)
+                mask_residual = idx_range < n1
+                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)
+                mask_collage = idx_range >= n2
+
+                # ---------- residual（前50%）: 生成 out 行 ----------
+                if mask_residual.any():
+                    vis_a = visible_indices[mask_residual, :args.total_indices]
+                    must = vis_a[:, :args.must_num]
+                    candidates = vis_a[:, args.must_num:args.total_indices]
+                    k = max(0, args.target_num - args.must_num)
+                    k = min(k, candidates.size(1))
+                    if k > 0:
+                        scores = torch.rand(vis_a.size(0), candidates.size(1), device=dev)
+                        idx = scores.topk(k, dim=1).indices
+                        sampled = torch.gather(candidates, 1, idx)
+                        sel_a = torch.cat([must, sampled], dim=1)
+                    else:
+                        sel_a = must
+                    if sel_a.size(1) < args.target_num:
+                        pad = sel_a[:, -1:].repeat(1, args.target_num - sel_a.size(1))
+                        sel_a = torch.cat([sel_a, pad], dim=1)
+                    out[mask_residual] = sel_a
+
+                # ---------- frame_sampling（中35%）: 生成 out 行 ----------
+                if mask_frame_sampling.any():
+                    nB = visible_indices[mask_frame_sampling].size(0)
+                    SEQ = 8
+                    FRAMES = 64
+                    avg = FRAMES // SEQ
+                    base = torch.arange(SEQ, device=dev) * avg
+                    offs = torch.randint(avg, (nB, SEQ), device=dev)
+                    frames = base + offs  # [nB, 8]
+
+                    per = torch.arange(args.must_num, device=dev)
+                    pos = (frames.unsqueeze(-1) * args.must_num + per).reshape(nB, -1)  # [nB, 8*args.must_num]
+                    sel_b = pos.to(visible_indices.dtype)
+
+                    if sel_b.size(1) == args.target_num:
+                        out[mask_frame_sampling] = sel_b
+                    elif sel_b.size(1) > args.target_num:
+                        out[mask_frame_sampling] = sel_b[:, :args.target_num]
+                    else:
+                        pad = sel_b[:, -1:].repeat(1, args.target_num - sel_b.size(1))
+                        out[mask_frame_sampling] = torch.cat([sel_b, pad], dim=1)
+
+                # ---------- combined: residual + frame_sampling 一起推理（有 out） ----------
+                combined_mask = mask_residual | mask_frame_sampling
+                if combined_mask.any():
+                    combined_idx = torch.nonzero(combined_mask, as_tuple=False).squeeze(1)
+                    combined_head_input = head_input[combined_idx]  # 保持原样（可能为 [n, C, H, W] 或其他）
+                    combined_out = out[combined_idx]
+
+                    with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                        combined_head_output = backbone_ddp_compiled(combined_head_input, combined_out)
+                    if hasattr(combined_head_output, "pooler_output"):
+                        combined_head_output = combined_head_output.pooler_output
+                    else:
+                        combined_head_output  = combined_head_output["head_output"]
+
+                    combined_head_output = combined_head_output.float()
+
+                # ---------- collage（后15%）: 从 head_input split 出帧，按 frame_sampling 策略抽帧并拼成 8行1列单张图，然后像 origin 一样单独推理 ----------
+                if mask_collage.any():
+                    coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)
+                    nC = coll_idx.numel()
+                    SEQ = 8
+                    FRAMES = 64  # assume fixed 64 frames for head_subset
+
+                    # 从 head_input 中选出需要做 collage 的样本，期望形状为 [nC, C, 64, H, W]
+                    head_subset = head_input[coll_idx]  # [nC, C, 64, H, W] (must hold)
+
+                    # 检查形状
+                    if head_subset.dim() != 5 or head_subset.size(2) != FRAMES:
+                        raise RuntimeError(
+                            f"collage branch expects head_subset shape [nC, C, {FRAMES}, H, W], got {tuple(head_subset.shape)}"
+                        )
+
+                    nC = head_subset.size(0)
+                    Cf = head_subset.size(1)
+                    Hf = head_subset.size(3)
+                    Wf = head_subset.size(4)
+
+                    # 与 frame_sampling 一致的抽帧策略（在 64 帧上均匀分段后随机 offset）
+                    avg = FRAMES // SEQ  # 8
+                    base = torch.arange(SEQ, device=dev) * avg
+                    offs = torch.randint(avg, (nC, SEQ), device=dev)
+                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [nC, SEQ], 范围在 [0, 63]
+
+                    # 用 gather 从 head_subset 采样：gather 在 time 维 (dim=2)
+                    # 为 gather 准备索引形状 [nC, Cf, SEQ, Hf, Wf]
+                    idx_expand = frames_idx.view(nC, 1, SEQ, 1, 1).expand(-1, Cf, -1, Hf, Wf).to(head_subset.device)
+                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [nC, Cf, SEQ, Hf, Wf]
+
+                    # 为拼接方便，转为 [nC, SEQ, Cf, Hf, Wf]
+                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [nC, SEQ, Cf, Hf, Wf]
+
+                    # 竖向拼接为 8 行 1 列图 -> [nC, Cf, Hf*SEQ, Wf]
+                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(SEQ)]
+                    grid = torch.cat(grid_rows, dim=-2)  # [nC, Cf, Hf*SEQ, Wf]
+
+                    # 像 origin 一样单独推理（不传 out）
+                    with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                        collage_head_output = backbone_ddp_compiled(grid)
+                    if hasattr(collage_head_output, "pooler_output"):
+                        collage_head_output = collage_head_output.pooler_output
+                    else:
+                        collage_head_output  = collage_head_output["head_output"]
+                    collage_head_output = collage_head_output.float()
+
+                # ---------- 汇总 combined 与 collage 输出，按 batch 顺序放回 ----------
+                D = combined_head_output.size(1)
+
+                head_embedding_full = torch.zeros(bs, D, device=dev, dtype=torch.float32)
+                if combined_mask.any():
+                    head_embedding_full[combined_idx] = combined_head_output
+                if mask_collage.any():
+                    head_embedding_full[coll_idx] = collage_head_output
+
+                list_embedding.append(head_embedding_full)
+
+            elif dataset_config.dali_type in ["origin", "ocr"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
