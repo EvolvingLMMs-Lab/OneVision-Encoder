@@ -12,7 +12,7 @@ from nvidia.dali.plugin.pytorch import DALIGenericIterator
 logger = logging.getLogger(__file__)
 
 # ----------------------------------------------------------------------------
-# 1. DALI Iterator Wrapper (已修改 - 返回 indices 和 total_frames)
+# 1. DALI Iterator Wrapper (已修改 - 返回 indices, total_frames 和 video_visible_indices)
 # ----------------------------------------------------------------------------
 class DALIWarper:
     def __init__(self, dali_iter: DALIGenericIterator, steps_per_epoch: int):
@@ -25,7 +25,8 @@ class DALIWarper:
             "videos": data_dict["videos"],
             "labels": data_dict["labels"],
             "indices": data_dict["indices"],
-            "total_frames": data_dict["total_frames"]
+            "total_frames": data_dict["total_frames"],
+            "video_visible_indices": data_dict["video_visible_indices"]
         }
 
     def __iter__(self):
@@ -38,7 +39,7 @@ class DALIWarper:
         self.iter.reset()
 
 # ----------------------------------------------------------------------------
-# 2. DALI External Source for Video Data (已修改 - 返回 indices 和 total_frames)
+# 2. DALI External Source for Video Data (已修改 - 返回 indices, total_frames 和 video_visible_indices)
 # ----------------------------------------------------------------------------
 class VideoExternalSource:
     def __init__(self, mode: str, source_params: dict):
@@ -90,16 +91,20 @@ class VideoExternalSource:
             sample_line = self.file_list[0]
         else:
             sample_line = self.file_list[sample_idx]
-        parts = sample_line.strip().split("\t")
-        if len(parts) < 11:
+        parts = sample_line.strip().split()
+        if len(parts) < 12:
             self.logger.info(f"Invalid line format (not enough columns): {sample_line}")
             new_idx = np.random.randint(0, len(self.file_list))
             return self._get_valid_sample(new_idx, depth + 1)
         video_path = parts[0]
         video_label = [int(x) for x in parts[1:11]]
+        video_visible_indices_path = parts[11]
         try:
             video_data, frame_indices, total_frames = self._load_video_data(video_path)
-            return video_data, np.array(video_label, dtype=np.int64), frame_indices, np.int64([total_frames])
+            video_visible_indices = np.load(video_visible_indices_path, mmap_mode="r")
+            if isinstance(video_visible_indices, np.ndarray):
+                video_visible_indices = video_visible_indices.astype(np.int16)
+            return video_data, np.array(video_label, dtype=np.int64), frame_indices, np.int64([total_frames]), video_visible_indices
         except Exception as e:
             self.logger.info(f"Failed to load video: {video_path}, error: {e}")
             new_idx = np.random.randint(0, len(self.file_list))
@@ -115,32 +120,33 @@ class VideoExternalSource:
         return self._get_valid_sample(sample_idx, depth=0)
 
 # ----------------------------------------------------------------------------
-# 3. DALI Pipeline Definition (已修改 - 处理 indices 和 total_frames)
+# 3. DALI Pipeline Definition (已修改 - 处理 indices, total_frames 和 video_visible_indices)
 # ----------------------------------------------------------------------------
 @pipeline_def(enable_conditionals=True)
 def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
-    short_side_size = source_params["short_side_size"]
     input_size = source_params["input_size"]
     mean = source_params["mean"]
     std = source_params["std"]
 
-    # ===> 现在返回 4 个输出: videos, labels, indices, total_frames <===
-    videos, labels, indices, total_frames = fn.external_source(
+    # ===> 现在返回 5 个输出: videos, labels, indices, total_frames, video_visible_indices <===
+    videos, labels, indices, total_frames, video_visible_indices = fn.external_source(
         source=VideoExternalSource(mode, source_params),
-        num_outputs=4,
+        num_outputs=5,
         batch=False,
         parallel=True,
-        dtype=[types.UINT8, types.INT64, types.INT64, types.INT64],
-        layout=["FHWC", "C", "C", "C"]
+        dtype=[types.UINT8, types.INT64, types.INT64, types.INT64, types.INT16],
+        layout=["FHWC", "C", "C", "C", "C"]
     )
 
     videos = videos.gpu()
     labels = labels.gpu()
     indices = indices.gpu()
     total_frames = total_frames.gpu()
+    video_visible_indices = video_visible_indices.gpu()
 
-    videos = fn.resize(videos, resize_shorter=short_side_size, antialias=True, interp_type=types.INTERP_CUBIC)
-    videos = fn.crop_mirror_normalize(videos, device="gpu", crop=[input_size, input_size], crop_pos_x=0.5, crop_pos_y=0.5, dtype=types.UINT8, output_layout="FHWC",)
+    # 直接resize到input_size，因为视频已经是256x256的正方形
+    videos = fn.resize(videos, resize_x=input_size, resize_y=input_size, antialias=True, interp_type=types.INTERP_CUBIC)
+    videos = fn.crop_mirror_normalize(videos, device="gpu", dtype=types.UINT8, output_layout="FHWC",)
 
     if mode == "train":
         # 亮度/对比度
@@ -176,10 +182,10 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
             )
 
     videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW", mean=[m * 255.0 for m in mean], std=[s * 255.0 for s in std])
-    return videos, labels, indices, total_frames
+    return videos, labels, indices, total_frames, video_visible_indices
 
 # ----------------------------------------------------------------------------
-# 4. Main Dataloader Function (已修改 - output_map 增加 indices 和 total_frames)
+# 4. Main Dataloader Function (已修改 - output_map 增加 indices, total_frames 和 video_visible_indices)
 # ----------------------------------------------------------------------------
 def get_dali_dataloader(
     data_root_path: str,
@@ -234,7 +240,7 @@ def get_dali_dataloader(
 
     dali_iter = DALIGenericIterator(
         pipelines=[pipe],
-        output_map=["videos", "labels", "indices", "total_frames"],
+        output_map=["videos", "labels", "indices", "total_frames", "video_visible_indices"],
         auto_reset=True
     )
     steps_per_epoch = len(file_list) // batch_size // num_shards
