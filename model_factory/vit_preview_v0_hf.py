@@ -344,6 +344,8 @@ class LlavaViTAttention(nn.Module):
         self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
 
+
+    
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -368,13 +370,14 @@ class LlavaViTAttention(nn.Module):
 
         # Calculate attention scores
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scale
+        # print("attention_mask", attention_mask.shape)
 
         if attention_mask is not None:
             if attention_mask.size() != (batch_size, 1, q_len, q_len):
                 if attention_mask.dim() == 3:
                      attention_mask = attention_mask.unsqueeze(1)
             attn_weights = attn_weights + attention_mask
-
+            
         # FIX: Remove dtype=torch.float32 to stay in original dtype (bf16/fp16)
         attn_weights = nn.functional.softmax(attn_weights, dim=-1)
         attn_weights = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
@@ -622,6 +625,66 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
 
         self.post_init()
 
+
+    def mask_by_residual_topk(self, res: torch.Tensor, k_keep: int):
+        """
+        基于残差 res 的 Top-K 掩码。
+        选择 |res| 在 patch 内求和后的得分最高的 K 个 patch 作为可见，其余为 mask。
+
+        Args:
+            res:  (B, 1, T, H, W)  —— I 帧建议事先置 0，这样自然会优先选到 P 帧。
+            k_keep: int            —— 每个样本保留的可见块数量（Top-K 超参）
+
+        Returns:
+            visible_indices: LongTensor (B, K)   —— 选中的线性 patch 索引（按升序）
+            visible_mask:    BoolTensor (B, L)   —— L = T * (H/Ph) * (W/Pw)
+            ids_restore:     LongTensor (B, L)   —— MAE 风格的还原下标
+        """
+        assert res.dim() == 5 and res.size(1) == 1, "res 需为 (B,1,T,H,W)"
+        B, _, T, H, W = res.shape
+
+        patch_size = self.config.patch_size
+        if isinstance(patch_size, int):
+            ph = pw = patch_size
+        else:
+            ph, pw = patch_size
+            
+        assert H % ph == 0 and W % pw == 0, "H/W 必须能被 patch 大小整除"
+
+        hb, wb = H // ph, W // pw        # 每帧的 patch 网格
+        L = T * hb * wb                  # 总 patch 数
+
+        # K 边界
+        K = int(max(0, min(k_keep, L)))
+
+        # 计算每个 patch 的残差得分（|.| 在 patch 内求和） -> (B, T, hb, wb)
+        # 参考：res_c = res[:hb*ph, :wb*pw].reshape(hb, ph, wb, pw); s = |res_c|.sum(axis=(1,3))
+        res_abs = res.abs().squeeze(1)                                 # (B,T,H,W)
+        scores = res_abs.reshape(B, T, hb, ph, wb, pw).sum(dim=(3, 5)) # (B,T,hb,wb)
+        scores = scores.reshape(B, L)                                  # (B, L)
+
+        # 选 Top-K（按 batch 独立进行）
+        if K > 0:
+            topk_idx = torch.topk(scores, k=K, dim=1, largest=True, sorted=False).indices  # (B, K)
+            visible_indices = torch.sort(topk_idx, dim=1).values                           # (B, K) 升序，便于后续索引
+        else:
+            visible_indices = torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+        # 构造可见 mask
+        visible_mask = torch.zeros(B, L, dtype=torch.bool, device=res.device)
+        if K > 0:
+            visible_mask.scatter_(1, visible_indices, True)
+
+        # MAE 风格 ids_restore：把可见块排在前面、遮挡块排在后面
+        vis_int   = visible_mask.long()
+        mask_int  = 1 - vis_int
+        vis_rank  = torch.cumsum(vis_int, dim=1) - 1
+        mask_rank = torch.cumsum(mask_int, dim=1) - 1
+        n_visible_col = vis_int.sum(dim=1, keepdim=True)
+        ids_restore = torch.where(visible_mask, vis_rank, n_visible_col + mask_rank).long()
+
+        return visible_indices, visible_mask, ids_restore
+    
     @add_start_docstrings_to_model_forward(LLAVA_VIT_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=LlavaViTConfig)
     def forward(
@@ -668,9 +731,16 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
         hidden_states = self.embeddings(pixel_values)
         batch_size, total_patches, _ = hidden_states.shape
 
+        if visible_indices.ndim == 5:
+            visible_indices, _, _ = self.mask_by_residual_topk(
+                res=visible_indices,
+                k_keep=2048
+            )
+
         # 2. Visible Indices Handling
         if visible_indices is None:
              visible_indices = torch.arange(total_patches, device=pixel_values.device).unsqueeze(0).expand(batch_size, -1)
+
 
         gather_index = visible_indices.unsqueeze(-1).expand(-1, -1, self.config.hidden_size)
         hidden_states = torch.gather(hidden_states, 1, gather_index)
@@ -807,9 +877,6 @@ def hf_llava_vit_giant_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
-
-
-
 
 if __name__ == "__main__":
     import timm
