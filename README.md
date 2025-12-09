@@ -28,6 +28,10 @@
 
 LLaVA-ViT is a vision encoder designed for multimodal large language models, featuring efficient video representation with sparse video input. This project provides training code, data processing tools, and model evaluation utilities.
 
+<p align="center">
+  <img src="pages/images/global_contrastive_comparison.gif" alt="Global Contrastive Comparison" width="800" style="max-width: 100%;">
+</p>
+
 ### Pre-training Tips
 
 1. **Scale-up is the final step** - Maximize model capabilities before scaling, and ensure generalization phenomena emerge
