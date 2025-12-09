@@ -31,13 +31,13 @@ def parse_args() -> argparse.Namespace:
 
     # Mode
     parser.add_argument("--model_family", default="llava_vit_codec")
-    parser.add_argument("--model_name", default="pretrain_encoder_base_patch16_224_v11_09_ln_head_ip")
-    parser.add_argument("--ckpt_path", default="/video_vit/xiangan/checkpoint_llava_vit/continue_with_mlcd_1536_tokens_b16_mix_three_input_residual_mv_new_b16/00056000/backbone.pt")
+    parser.add_argument("--model_name", default="hf_llava_vit_large_ln")
+    parser.add_argument("--model_weight", default="/video_vit/xiangan/checkpoint_llava_vit/2025_12_08_new_l14_continue_128gpus_all_residual/00022000_hf")    
     parser.add_argument("--num_frames", type=int, default=64)    
     parser.add_argument("--num_tokens", type=int, default=1568)
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--tubelet_size", type=int, default=1)
-    parser.add_argument("--embedding_size", type=int, default=768)
+    parser.add_argument("--embedding_size", type=int, default=1024)
     parser.add_argument("--num_classes", type=int, default=0)
     # ===> 新增：目标帧数参数 <===
     parser.add_argument("--target_frames", type=int, default=64,
@@ -211,9 +211,12 @@ def get_feature(
                     visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
-                    enc_out = model(padded_videos, visible_index, mask_ratio=None)
+                    enc_out = model(padded_videos, visible_index)
 
-                    outputs = enc_out["visible_embeddings"]
+                    if hasattr(enc_out, "last_hidden_state"):
+                        outputs = enc_out.last_hidden_state
+                    else:
+                        outputs = enc_out["visible_embeddings"]
                 else:
                     raise
 
@@ -225,9 +228,13 @@ def get_feature(
                 bs, C, T, H, W = videos.shape
                 device = videos.device
                 assert args.num_frames >= 64, "要64帧输入,请检查"
-                
-                enc_out = model(videos, res_zero_masks, mask_ratio=0.5)
-                outputs = enc_out["visible_embeddings"]
+
+                # print (videos.shape)
+                enc_out = model(videos, res_zero_masks)
+                if hasattr(enc_out, "last_hidden_state"):
+                    outputs = enc_out.last_hidden_state
+                else:
+                    outputs = enc_out["visible_embeddings"]                
                 return outputs
 
     elif args.model_family == "llava_vit_tiling":
@@ -417,14 +424,21 @@ def evaluate(
 
     return {k: v.item() * 100 for k, v in computed_metrics.items()}
 
-
 def get_model(args: argparse.Namespace) -> nn.Module:
+
+    if args.model_name == "hf_llava_vit_large_ln":
+        from model_factory.vit_preview_v0_hf import LlavaViTModel
+        model = LlavaViTModel.from_pretrained(args.model_weight, torch_dtype=torch.bfloat16)
+        model = torch.compile(model)
+        return model
+
     model = create_model(args.model_name, pretrained=False)
-    if args.model_family in ["llava_vit_codec", "llava_vit_sampling", "llava_vit_tiling"]:
-        state_dict = torch.load(args.ckpt_path, map_location="cpu")
+    if args.model_family in ["llava_vit_sampling", "llava_vit_codec"]:
+        state_dict = torch.load(args.model_weight, map_location="cpu")
         state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=True)
     return model
+
 
 
 def main() -> None:
@@ -540,7 +554,7 @@ def main() -> None:
     if args.rank == 0:
         print(f"best_lr: {best_lr} max_acc_top1: {best_top1} max_acc_top5: {best_top5}")
 
-        save_path = os.path.join(args.save_report, f"report_attentive_probe_{os.path.basename(args.ckpt_path)}.txt")
+        save_path = os.path.join(args.save_report, f"report_attentive_probe_{os.path.basename(args.model_weight)}.txt")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, "a+") as f:
             f.write(f"{args.dataset} {best_top1}\n")
