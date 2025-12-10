@@ -658,41 +658,82 @@ class DINOv3ViTPacking(nn.Module):
             hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
             grid_thw = grid_thw.to(device=self.device)
             
-            # Reconstruct images from packed patches
-            pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
-            
-            # Process through model
-            outputs = self.model(
-                pixel_values=pixel_values,
-                output_hidden_states=True
-            )
-            
-            # Get the last layer's hidden state: [batch_size, seq_len, hidden_size]
-            last_hidden_state = outputs.last_hidden_state
-            
-            # Calculate number of patches per image from grid_thw (excluding CLS and register tokens)
+            # Calculate number of patches per image from grid_thw
             num_images = grid_thw.shape[0]
             patches_per_image = []
+            image_sizes = []
             for i in range(num_images):
                 t, h, w = grid_thw[i][0].item(), grid_thw[i][1].item(), grid_thw[i][2].item()
                 num_patches = int(t * h * w)
                 patches_per_image.append(num_patches)
+                image_sizes.append((int(h) * self.patch_size, int(w) * self.patch_size))
             
-            # Extract patch tokens (excluding CLS and register tokens)
-            # DINOv3 has: [CLS, register_tokens..., patch_tokens...]
-            num_register_tokens = self.model.config.num_register_tokens
-            prefix_length = 1 + num_register_tokens  # CLS + register tokens
+            # Check if all images have the same size
+            all_same_size = len(set(image_sizes)) == 1
             
-            # Convert back to packing format: [total_num_patches, hidden_size]
-            # Extract only the patch tokens (excluding CLS and register tokens)
-            output_list = []
-            for i in range(num_images):
-                num_patches = patches_per_image[i]
-                # Extract patch tokens starting after CLS and register tokens
-                patch_tokens = last_hidden_state[i, prefix_length:prefix_length + num_patches]
-                output_list.append(patch_tokens)
-            
-            packed_output = torch.cat(output_list, dim=0)
+            if all_same_size:
+                # Optimized path: batch process all images together
+                pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
+                
+                # Process through model
+                outputs = self.model(
+                    pixel_values=pixel_values,
+                    output_hidden_states=True
+                )
+                
+                # Get the last layer's hidden state: [batch_size, seq_len, hidden_size]
+                last_hidden_state = outputs.last_hidden_state
+                
+                # Extract patch tokens (excluding CLS and register tokens)
+                # DINOv3 has: [CLS, register_tokens..., patch_tokens...]
+                num_register_tokens = self.model.config.num_register_tokens
+                prefix_length = 1 + num_register_tokens  # CLS + register tokens
+                
+                # Convert back to packing format: [total_num_patches, hidden_size]
+                output_list = []
+                for i in range(num_images):
+                    num_patches = patches_per_image[i]
+                    # Extract patch tokens starting after CLS and register tokens
+                    patch_tokens = last_hidden_state[i, prefix_length:prefix_length + num_patches]
+                    output_list.append(patch_tokens)
+                
+                packed_output = torch.cat(output_list, dim=0)
+            else:
+                # Variable size path: process each image separately
+                output_list = []
+                start_idx = 0
+                
+                for i in range(num_images):
+                    num_patches = patches_per_image[i]
+                    
+                    # Extract patches for this image
+                    image_hidden_states = hidden_states[start_idx:start_idx + num_patches].unsqueeze(0)
+                    image_grid_thw = grid_thw[i:i+1]
+                    
+                    # Reconstruct and process this image
+                    pixel_values = self._reconstruct_images_from_patches(
+                        image_hidden_states.squeeze(0), image_grid_thw
+                    )
+                    
+                    # Process through model
+                    outputs = self.model(
+                        pixel_values=pixel_values,
+                        output_hidden_states=True
+                    )
+                    
+                    # Get the last layer's hidden state
+                    last_hidden_state = outputs.last_hidden_state
+                    
+                    # Extract patch tokens (excluding CLS and register tokens)
+                    num_register_tokens = self.model.config.num_register_tokens
+                    prefix_length = 1 + num_register_tokens
+                    
+                    patch_tokens = last_hidden_state[0, prefix_length:prefix_length + num_patches]
+                    output_list.append(patch_tokens)
+                    
+                    start_idx += num_patches
+                
+                packed_output = torch.cat(output_list, dim=0)
         
         return packed_output
 
