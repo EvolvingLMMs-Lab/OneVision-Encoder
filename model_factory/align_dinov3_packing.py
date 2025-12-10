@@ -464,40 +464,165 @@ def main():
             traceback.print_exc()
         
     else:
-        # Original random tensor test
-        # Validate image size is divisible by patch size
-        if args.image_size % patch_size != 0:
-            raise ValueError(
-                f"Image size ({args.image_size}) must be divisible by patch size ({patch_size})"
-            )
+        # Multi-resolution random tensor tests
+        # Test resolutions: 224, 384, 512
+        test_resolutions = [224, 384, 512]
         
-        # Create test input
-        print(f"\nCreating test input: [{args.batch_size}, 3, {args.image_size}, {args.image_size}]")
-        test_input = torch.randn(args.batch_size, 3, args.image_size, args.image_size)
+        # Validate all resolutions are divisible by patch size
+        for res in test_resolutions:
+            if res % patch_size != 0:
+                raise ValueError(
+                    f"Resolution {res} must be divisible by patch size ({patch_size})"
+                )
         
-        # Run alignment test
         print("\n" + "=" * 80)
-        print("Running Alignment Test")
+        print("Multi-Resolution Alignment Tests")
+        print("=" * 80)
+        print(f"Testing resolutions: {test_resolutions}")
+        
+        # Test 1: Individual resolution tests
+        print("\n" + "=" * 80)
+        print("Test 1: Individual Resolution Tests")
         print("=" * 80)
         
-        metrics, standard_output, packing_output = test_alignment(
-            standard_model, packing_model, test_input, patch_size, args.device
-        )
+        for resolution in test_resolutions:
+            print(f"\n{'=' * 80}")
+            print(f"Testing resolution: {resolution}x{resolution}")
+            print(f"{'=' * 80}")
+            
+            # Create test input
+            test_input = torch.randn(args.batch_size, 3, resolution, resolution)
+            print(f"Input shape: {test_input.shape}")
+            
+            try:
+                # Run alignment test
+                metrics, standard_output, packing_output = test_alignment(
+                    standard_model, packing_model, test_input, patch_size, args.device
+                )
+                
+                # Display results
+                print(f"\nResults for {resolution}x{resolution}:")
+                print("-" * 80)
+                print(f"Max Diff:        {metrics['max_diff']:.6f}")
+                print(f"Mean Diff:       {metrics['mean_diff']:.6f}")
+                print(f"Min Cosine Sim:  {metrics['min_cosine']:.8f}")
+                print(f"Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+                print(f"Max Cosine Sim:  {metrics['max_cosine']:.8f}")
+                
+                # Check if test passed
+                test_passed = metrics['min_cosine'] > args.threshold
+                test_results.append((f"{resolution}x{resolution}", test_passed, metrics))
+                
+                if test_passed:
+                    print(f"✅ PASS: {resolution}x{resolution} (min cosine similarity {metrics['min_cosine']:.8f} > {args.threshold})")
+                else:
+                    print(f"❌ FAIL: {resolution}x{resolution} (min cosine similarity {metrics['min_cosine']:.8f} <= {args.threshold})")
+                    all_tests_passed = False
+                    
+            except Exception as e:
+                print(f"❌ ERROR testing {resolution}x{resolution}: {e}")
+                all_tests_passed = False
+                traceback.print_exc()
         
-        # Display results
-        print("\n" + "=" * 80)
-        print("Results")
-        print("=" * 80)
-        print(f"Max Diff:        {metrics['max_diff']:.6f}")
-        print(f"Mean Diff:       {metrics['mean_diff']:.6f}")
-        print(f"Min Cosine Sim:  {metrics['min_cosine']:.8f}")
-        print(f"Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
-        print(f"Max Cosine Sim:  {metrics['max_cosine']:.8f}")
+        # Test 2: Mixed resolution batch test (all three resolutions together)
+        print(f"\n{'=' * 80}")
+        print(f"Test 2: Mixed Resolution Batch Test")
+        print(f"{'=' * 80}")
+        print(f"Testing all resolutions together in packing format: {test_resolutions}")
         
-        # Check if test passed
-        test_passed = metrics['min_cosine'] > args.threshold
-        test_results.append(("random", test_passed, metrics))
-        all_tests_passed = test_passed
+        try:
+            # Create images with different resolutions
+            images = []
+            for resolution in test_resolutions:
+                img = torch.randn(1, 3, resolution, resolution, device=args.device)
+                images.append(img)
+            
+            print(f"Created {len(images)} images with resolutions: {test_resolutions}")
+            
+            # Process each through standard model separately
+            print("\nRunning standard model on each image separately...")
+            standard_outputs = []
+            for i, (img, resolution) in enumerate(zip(images, test_resolutions)):
+                with torch.no_grad():
+                    output = standard_model(img)
+                # Extract patch tokens (excluding CLS and register tokens)
+                num_register_tokens = standard_model.model.config.num_register_tokens
+                prefix_length = 1 + num_register_tokens
+                patch_tokens = output[:, prefix_length:, :]
+                standard_outputs.append(patch_tokens.squeeze(0))  # Remove batch dimension
+                print(f"  Image {i+1} ({resolution}x{resolution}): output shape {patch_tokens.shape}")
+            
+            # Convert all images to packing format
+            print("\nConverting to packing format...")
+            all_patches = []
+            grid_thw_list = []
+            
+            for i, (img, resolution) in enumerate(zip(images, test_resolutions)):
+                packed_patches, grid_thw_single = convert_to_patches(img, patch_size)
+                all_patches.append(packed_patches)
+                grid_thw_list.append(grid_thw_single)
+                num_patches = packed_patches.shape[0]
+                print(f"  Image {i+1} ({resolution}x{resolution}): {num_patches} patches")
+            
+            # Concatenate all patches
+            packed_input = torch.cat(all_patches, dim=0)
+            grid_thw = torch.cat(grid_thw_list, dim=0)
+            
+            print(f"Packed input shape: {packed_input.shape}")
+            print(f"grid_thw shape: {grid_thw.shape}")
+            print(f"grid_thw values:\n{grid_thw}")
+            
+            # Process through packing model
+            print("\nRunning packing model...")
+            with torch.no_grad():
+                packing_output = packing_model(packed_input, grid_thw)
+            
+            print(f"Packing model output shape: {packing_output.shape}")
+            
+            # Split packing output back into individual images
+            packing_outputs = []
+            start_idx = 0
+            for i, resolution in enumerate(test_resolutions):
+                num_patches = (resolution // patch_size) ** 2
+                packing_outputs.append(packing_output[start_idx:start_idx + num_patches])
+                start_idx += num_patches
+                print(f"  Image {i+1} output shape: {packing_outputs[-1].shape}")
+            
+            # Compare each image's output
+            print("\nComparing outputs for each resolution...")
+            all_mixed_passed = True
+            for i, resolution in enumerate(test_resolutions):
+                standard_out = standard_outputs[i]
+                packing_out = packing_outputs[i]
+                
+                # Reshape to add batch dimension for metric computation
+                standard_out = standard_out.unsqueeze(0)
+                packing_out = packing_out.unsqueeze(0)
+                
+                metrics = compute_similarity_metrics(standard_out, packing_out)
+                
+                print(f"\n  Results for {resolution}x{resolution} in mixed batch:")
+                print(f"    Max Diff:        {metrics['max_diff']:.6f}")
+                print(f"    Mean Diff:       {metrics['mean_diff']:.6f}")
+                print(f"    Min Cosine Sim:  {metrics['min_cosine']:.8f}")
+                print(f"    Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+                
+                test_passed = metrics['min_cosine'] > args.threshold
+                if not test_passed:
+                    all_mixed_passed = False
+                    all_tests_passed = False
+            
+            if all_mixed_passed:
+                print(f"\n✅ PASS: Mixed resolution batch test (all resolutions aligned)")
+                test_results.append(("mixed_batch", True, {"min_cosine": min([compute_similarity_metrics(standard_outputs[i].unsqueeze(0), packing_outputs[i].unsqueeze(0))['min_cosine'] for i in range(len(test_resolutions))])}))
+            else:
+                print(f"\n❌ FAIL: Mixed resolution batch test (some resolutions misaligned)")
+                test_results.append(("mixed_batch", False, {"min_cosine": 0.0}))
+                
+        except Exception as e:
+            print(f"❌ ERROR in mixed resolution batch test: {e}")
+            all_tests_passed = False
+            traceback.print_exc()
     
     # Final summary
     print("\n" + "=" * 80)
