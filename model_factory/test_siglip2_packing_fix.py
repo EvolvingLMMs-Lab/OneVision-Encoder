@@ -7,6 +7,14 @@ This test verifies that:
 1. The parameter name issue is resolved (attention_mask vs pixel_attention_mask)
 2. The optimized path works for same-length sequences (no attention mask)
 3. The variable-length path works correctly with attention masks
+
+Returns:
+    0 if all tests pass successfully
+    1 if any test fails
+
+Note: This test validates the code structure and signatures without requiring
+a model checkpoint. To test with actual model inference, use:
+    python align_siglip2_packing.py --ckpt <path_to_checkpoint>
 """
 
 import sys
