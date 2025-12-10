@@ -383,8 +383,8 @@ def create_animated_cube_building(
         # Create canvas with white background (RGBA for transparency support)
         canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
         
-        # Draw frames from back to front, but only up to current_frame_count
-        for i in range(current_frame_count - 1, -1, -1):
+        # Draw frames from back to front, but only up to current_frame_count (later frames overlay earlier frames)
+        for i in range(current_frame_count):
             frame = frames[i]
             
             # Resize frame
@@ -528,8 +528,8 @@ def create_spatiotemporal_cube(
     print(f"  Canvas size: {canvas_width}x{canvas_height}")
     print(f"  Offset: ({offset_x}, {offset_y})")
     
-    # Draw frames from back to front (reverse order for proper layering)
-    for i in range(num_frames - 1, -1, -1):
+    # Draw frames from back to front (later frames overlay earlier frames)
+    for i in range(num_frames):
         frame = frames[i]
         
         # Resize frame
