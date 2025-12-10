@@ -26,15 +26,15 @@ import numpy as np
 import torch
 from torch import nn
 
-from ...activations import ACT2FN
-from ...modeling_layers import GradientCheckpointingLayer
-from ...modeling_outputs import BaseModelOutputWithPooling
-from ...modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
-from ...processing_utils import Unpack
-from ...pytorch_utils import compile_compatible_method_lru_cache
-from ...utils import TransformersKwargs, auto_docstring
-from ...utils.generic import check_model_inputs
-from .configuration_dinov3_vit import DINOv3ViTConfig
+from transformers.activations import ACT2FN
+from transformers.modeling_layers import GradientCheckpointingLayer
+from transformers.modeling_outputs import BaseModelOutputWithPooling
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
+from transformers.processing_utils import Unpack
+from transformers.pytorch_utils import compile_compatible_method_lru_cache
+from transformers.utils import TransformersKwargs, auto_docstring
+from transformers.utils.generic import check_model_inputs
+from transformers.models.dinov3_vit.configuration_dinov3_vit import DINOv3ViTConfig
 
 
 class DINOv3ViTEmbeddings(nn.Module):
