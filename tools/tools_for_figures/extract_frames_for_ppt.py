@@ -7,6 +7,7 @@ animated cube building, and save selected frames with perspective transformation
 This tool extracts frames from a video (either sampled or all frames at full frame rate),
 generates various visualizations including:
 - Animated GIF preview
+- Residual-based GIF with high-residual patches highlighted
 - Spatiotemporal volume visualization (space-time cube with oblique projection)
 - Animated cube building (GIF showing frames being added one by one with transparency)
 - Individual frames with 3D perspective effect
@@ -14,6 +15,7 @@ generates various visualizations including:
 Features:
 - Extract N evenly-spaced frames OR all frames at full frame rate
 - Generate an animated GIF preview
+- Generate residual-based GIF (highlights changed regions, darkens unchanged regions)
 - Create spatiotemporal cube visualization (video cube / space-time cube)
 - Create animated cube building with transparency effects
 - Select specific frames by their indices
@@ -21,6 +23,12 @@ Features:
 - Save individual frames with perspective effect
 
 Usage Examples:
+    # Extract frames and create both original and residual GIFs
+    python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif --residual-gif residual_preview.gif
+    
+    # Create residual GIF with custom parameters
+    python extract_frames_for_ppt.py --video /path/to/video.mp4 --residual-gif residual.gif --residual-threshold 15.0 --residual-darken-factor 0.2
+    
     # Extract all frames and create spatiotemporal cube visualization
     python extract_frames_for_ppt.py --video /path/to/video.mp4 --all-frames --spacetime-cube spacetime.png
     
@@ -43,7 +51,7 @@ Usage Examples:
     # Do everything in one command
     python extract_frames_for_ppt.py --video /path/to/video.mp4 \
         --all-frames --spacetime-cube spacetime.png --animated-cube cube_anim.gif \
-        --output preview.gif --select 0,10,20,30 --output-dir frames/
+        --output preview.gif --residual-gif residual.gif --select 0,10,20,30 --output-dir frames/
 """
 
 import argparse
@@ -171,6 +179,81 @@ def load_video_frames(
         return None
 
 
+def compute_residual_mask(
+    current_frame: np.ndarray,
+    reference_frame: np.ndarray,
+    patch_size: int = 16,
+    threshold: float = 10.0
+) -> np.ndarray:
+    """
+    Compute a binary mask indicating which patches have high residual values.
+    
+    Args:
+        current_frame: Current frame to compare
+        reference_frame: Reference frame (typically the first frame)
+        patch_size: Size of each patch for residual computation
+        threshold: Threshold for considering a patch as having high residual
+        
+    Returns:
+        Binary mask where 1 = high residual (keep), 0 = low residual (darken)
+        
+    Note:
+        Partial patches at image boundaries (when dimensions are not evenly divisible
+        by patch_size) are not processed and will have mask value of 0 (darkened).
+    """
+    # Compute raw residual
+    residual = current_frame.astype(np.float32) - reference_frame.astype(np.float32)
+    
+    h, w = current_frame.shape[:2]
+    mask = np.zeros((h, w), dtype=np.float32)
+    
+    # Process each patch
+    num_patches_h = h // patch_size
+    num_patches_w = w // patch_size
+    
+    for i in range(num_patches_h):
+        for j in range(num_patches_w):
+            y_start = i * patch_size
+            y_end = (i + 1) * patch_size
+            x_start = j * patch_size
+            x_end = (j + 1) * patch_size
+            
+            # Calculate mean absolute difference for this patch
+            patch_residual = residual[y_start:y_end, x_start:x_end]
+            patch_mad = np.mean(np.abs(patch_residual))
+            
+            # If residual is high, mark this patch in the mask
+            if patch_mad > threshold:
+                mask[y_start:y_end, x_start:x_end] = 1.0
+    
+    return mask
+
+
+def apply_residual_darkening(
+    frame: np.ndarray,
+    mask: np.ndarray,
+    darken_factor: float = 0.3
+) -> np.ndarray:
+    """
+    Darken regions of the frame based on the residual mask.
+    
+    Args:
+        frame: Original frame
+        mask: Binary mask (1 = keep bright, 0 = darken)
+        darken_factor: Factor to darken low-residual regions (0-1, lower = darker)
+        
+    Returns:
+        Frame with low-residual regions darkened
+    """
+    # Expand mask to 3 channels
+    mask_3d = np.stack([mask, mask, mask], axis=2)
+    
+    # Apply darkening: high residual regions stay bright, low residual regions are darkened
+    darkened_frame = frame.astype(np.float32) * (mask_3d + (1 - mask_3d) * darken_factor)
+    
+    return darkened_frame.clip(0, 255).astype(np.uint8)
+
+
 def create_gif_preview(
     frames: np.ndarray,
     output_path: str,
@@ -237,6 +320,101 @@ def create_gif_preview(
     print(f"GIF preview saved to: {output_path}")
     print(f"  - Total frames: {len(gif_frames)}")
     print(f"  - Duration per frame: {duration}ms")
+
+
+def create_residual_gif_preview(
+    frames: np.ndarray,
+    output_path: str,
+    duration: int = 500,
+    add_labels: bool = True,
+    patch_size: int = 16,
+    threshold: float = 10.0,
+    darken_factor: float = 0.3
+) -> None:
+    """
+    Create an animated GIF with high-residual patches highlighted and low-residual patches darkened.
+    
+    The first frame is shown normally as the reference. Subsequent frames have their
+    low-residual patches (patches with little change from the first frame) darkened,
+    while high-residual patches (patches with significant change) remain bright.
+
+    Args:
+        frames: np.ndarray of shape (num_frames, height, width, 3)
+        output_path: Path to save the residual GIF
+        duration: Duration of each frame in milliseconds (default: 500)
+        add_labels: Whether to add frame numbers to each frame
+        patch_size: Size of patches for residual computation (default: 16)
+        threshold: Threshold for high residual detection (default: 10.0)
+        darken_factor: Factor to darken low-residual regions (default: 0.3)
+    """
+    gif_frames = []
+    font = get_font(24, bold=True)
+    reference_frame = frames[0]
+
+    for idx, frame in enumerate(frames):
+        if idx == 0:
+            # First frame is the reference - show it normally
+            processed_frame = frame.copy()
+            mask = None  # No mask for reference frame
+        else:
+            # Compute residual mask and apply darkening
+            mask = compute_residual_mask(frame, reference_frame, patch_size, threshold)
+            processed_frame = apply_residual_darkening(frame, mask, darken_factor)
+        
+        # Convert to PIL Image
+        img = Image.fromarray(processed_frame)
+
+        if add_labels:
+            # Add frame number overlay with residual info
+            draw = ImageDraw.Draw(img)
+            if idx == 0:
+                label = f"Frame {idx} (Reference)"
+            else:
+                # Calculate percentage of high-residual patches
+                high_residual_ratio = np.sum(mask > 0.5) / (mask.shape[0] * mask.shape[1]) * 100
+                label = f"Frame {idx} ({high_residual_ratio:.1f}% changed)"
+
+            # Get text bounding box for background
+            bbox = draw.textbbox((0, 0), label, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+
+            # Position at top-left with padding
+            padding = 10
+            bg_box = [
+                padding,
+                padding,
+                padding + text_width + padding * 2,
+                padding + text_height + padding * 2
+            ]
+
+            # Draw semi-transparent background
+            draw.rectangle(bg_box, fill=(0, 0, 0, 180))
+
+            # Draw text
+            draw.text(
+                (padding * 2, padding * 1.5),
+                label,
+                fill=(255, 255, 255),
+                font=font
+            )
+
+        gif_frames.append(img)
+
+    # Save as GIF
+    gif_frames[0].save(
+        output_path,
+        save_all=True,
+        append_images=gif_frames[1:],
+        duration=duration,
+        loop=0
+    )
+
+    print(f"Residual GIF preview saved to: {output_path}")
+    print(f"  - Total frames: {len(gif_frames)}")
+    print(f"  - Duration per frame: {duration}ms")
+    print(f"  - Patch size: {patch_size}x{patch_size}")
+    print(f"  - Residual threshold: {threshold}")
 
 
 def apply_perspective_transform(
@@ -730,6 +908,31 @@ def main():
         action="store_true",
         help="Disable transparency effects in animated cube (frames won't fade with depth)"
     )
+    
+    # Residual GIF options
+    parser.add_argument(
+        "--residual-gif",
+        type=str,
+        help="Create residual-based GIF with high-residual patches highlighted (e.g., 'residual_preview.gif')"
+    )
+    parser.add_argument(
+        "--residual-patch-size",
+        type=int,
+        default=16,
+        help="Patch size for residual computation (default: 16)"
+    )
+    parser.add_argument(
+        "--residual-threshold",
+        type=float,
+        default=10.0,
+        help="Threshold for high residual detection (default: 10.0)"
+    )
+    parser.add_argument(
+        "--residual-darken-factor",
+        type=float,
+        default=0.3,
+        help="Factor to darken low-residual regions, 0-1 (default: 0.3, lower = darker)"
+    )
 
     args = parser.parse_args()
 
@@ -800,8 +1003,22 @@ def main():
         add_labels=not args.no_labels
     )
     step_num += 1
+    
+    # Create residual GIF (if requested)
+    if args.residual_gif:
+        print(f"\nStep {step_num}: Creating residual-based GIF preview...")
+        create_residual_gif_preview(
+            frames,
+            args.residual_gif,
+            duration=args.duration,
+            add_labels=not args.no_labels,
+            patch_size=args.residual_patch_size,
+            threshold=args.residual_threshold,
+            darken_factor=args.residual_darken_factor
+        )
+        step_num += 1
 
-    # Step 3/4: Save selected frames with perspective (if requested)
+    # Save selected frames with perspective (if requested)
     if args.select:
         print(f"\nStep {step_num}: Saving selected frames with perspective effect...")
         try:
@@ -831,6 +1048,8 @@ def main():
     if args.animated_cube:
         print(f"  ✓ Animated cube building: {args.animated_cube}")
     print(f"  ✓ GIF preview: {args.output}")
+    if args.residual_gif:
+        print(f"  ✓ Residual GIF: {args.residual_gif}")
     if args.select:
         print(f"  ✓ Perspective frames: {args.output_dir}/")
     print("="*60)
