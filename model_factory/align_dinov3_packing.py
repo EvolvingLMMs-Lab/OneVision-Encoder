@@ -46,7 +46,9 @@ Example:
 """
 
 import argparse
+import math
 import os
+import traceback
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -119,7 +121,7 @@ def round_up_to_multiple(value, multiple):
     Returns:
         int: Rounded up value (at least `multiple`)
     """
-    return max(multiple, ((value + multiple - 1) // multiple) * multiple)
+    return max(multiple, math.ceil(value / multiple) * multiple)
 
 
 def generate_test_image(path, width, height):
@@ -401,7 +403,6 @@ def main():
             except Exception as e:
                 print(f"❌ ERROR processing {img_name}: {e}")
                 all_tests_passed = False
-                import traceback
                 traceback.print_exc()
         
         # Test with both images together in a batch
@@ -460,7 +461,6 @@ def main():
         except Exception as e:
             print(f"❌ ERROR processing batched images: {e}")
             all_tests_passed = False
-            import traceback
             traceback.print_exc()
         
     else:

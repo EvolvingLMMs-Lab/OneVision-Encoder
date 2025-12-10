@@ -697,5 +697,4 @@ class DINOv3ViTPacking(nn.Module):
         return packed_output
 
 
-
 __all__ = ["DINOv3ViTModel", "DINOv3ViTPreTrainedModel", "DINOv3ViTPacking"]
