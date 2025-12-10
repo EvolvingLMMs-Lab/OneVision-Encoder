@@ -4,10 +4,13 @@ import os
 import time
 import warnings
 from typing import Dict
+
 import torch
 import torch.nn.functional as F
 import torchmetrics
-from dataloader.ap_dataloader_dali_ip_mv import get_dali_dataloader
+from dataloader.ap_dataloader_dali import get_dali_dataloader
+from dataloader.ap_dataloader_dali_ip_mv import get_dali_dataloader_codec
+
 from timm.loss import LabelSmoothingCrossEntropy
 from timm.models import create_model
 from timm.models.layers import trunc_normal_
@@ -17,9 +20,10 @@ from torch.optim.lr_scheduler import LinearLR
 
 # Ensure custom models and layers are registered
 import model_factory
-from model_factory.layers import Siglip2MultiheadAttentionPoolingHead
+from model_factory.layers import Siglip2MultiheadAttentionPoolingHead, Siglip2TransformerAttentionPoolingHead
 
 warnings.filterwarnings("ignore")
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser("Attentive probing with SigLIP2 head (Meta style)")
@@ -29,15 +33,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val_data_csv_path", default="ssv2_val_new.csv")
     parser.add_argument("--dataset", default="ssv2")
 
-    # Mode
-    parser.add_argument("--model_family", default="llava_vit_codec")
-    parser.add_argument("--model_name", default="hf_llava_vit_large_ln")
-    parser.add_argument("--model_weight", default="/video_vit/xiangan/checkpoint_llava_vit/2025_12_08_new_l14_continue_128gpus_all_residual/00022000_hf")    
-    parser.add_argument("--num_frames", type=int, default=64)    
+    # Model
+    parser.add_argument("--model_family", default="llava_vit_sampling")
+    parser.add_argument("--model_name", default="llava_vit_base_ln")
+    parser.add_argument("--model_weight", default="NULL")
+    parser.add_argument("--num_frames", type=int, default=8)
     parser.add_argument("--num_tokens", type=int, default=1568)
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--tubelet_size", type=int, default=1)
-    parser.add_argument("--embedding_size", type=int, default=1024)
+    parser.add_argument("--embedding_size", type=int, default=768)
     parser.add_argument("--num_classes", type=int, default=0)
     # ===> 新增：目标帧数参数 <===
     parser.add_argument("--target_frames", type=int, default=64,
@@ -53,6 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--smoothing", type=float, default=0.1)
     parser.add_argument("--print_freq", type=int, default=10)
     parser.add_argument("--eval_freq", type=int, default=1)
+    parser.add_argument("--frames_token_num", type=int, default=196)
 
     # Dataloader
     parser.add_argument("--dali_num_threads", type=int, default=2)
@@ -74,6 +79,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--world_size", type=int, default=1)
     parser.add_argument("--global_rank", type=int, default=0)
+
+    # 新增：时序空间crop参数（默认与dali默认一致）
+    parser.add_argument("--num_temporal_crops", type=int, default=1, help="Number of temporal crops for evaluation")
+    parser.add_argument("--num_spatial_crops", type=int, default=1, help="Number of spatial crops for evaluation")
+
+    parser.add_argument("--probe_size", default=1, type=int)
 
     return parser.parse_args()
 
@@ -115,8 +126,8 @@ def get_feature(
     args: argparse.Namespace,
     videos: torch.Tensor,
     model: nn.Module,
-    frame_indices: torch.Tensor = None,
     res_zero_masks: torch.Tensor = None,
+    frame_indices: torch.Tensor = None,
     total_frames: torch.Tensor = None,
     is_training: bool = False
 ) -> torch.Tensor:
@@ -141,19 +152,14 @@ def get_feature(
 
     list_vit_single_image = [
         "clip",
+        "siglip",
         "siglip2",
         "dinov2",
         "dinov3",
-        "llava_vit_si"
+        "metaclip",
+        "llava_vit_si",
+        "aimv2"
     ]
-
-    B, C, T, H, W = videos.shape
-    patch_h, patch_w = getattr(model, "patch_size", (16, 16))
-    assert H % patch_h == 0 and W % patch_w == 0, "H/W 必须能被 patch_size 整除"
-    h_patches, w_patches = H // patch_h, W // patch_w
-    patches_per_frame = h_patches * w_patches
-    device = videos.device
-
     if args.model_family in list_vit_single_image:
         # ===> 专门图片分支 <===
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -184,7 +190,7 @@ def get_feature(
             with torch.no_grad():
                 bs, C, T, H, W = videos.shape
                 device = videos.device
-                frame_tokens = patches_per_frame  # 每帧的 token 数量
+                frame_tokens = args.frames_token_num  # 每帧的 token 数量
                 target_frames = args.target_frames  # 目标帧数，默认 64
 
                 if frame_indices is not None and total_frames is not None:
@@ -212,11 +218,11 @@ def get_feature(
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
                     enc_out = model(padded_videos, visible_index)
-
                     if hasattr(enc_out, "last_hidden_state"):
                         outputs = enc_out.last_hidden_state
                     else:
                         outputs = enc_out["visible_embeddings"]
+
                 else:
                     raise
 
@@ -228,8 +234,6 @@ def get_feature(
                 bs, C, T, H, W = videos.shape
                 device = videos.device
                 assert args.num_frames >= 64, "要64帧输入,请检查"
-
-                # print (videos.shape)
                 enc_out = model(videos, res_zero_masks)
                 if hasattr(enc_out, "last_hidden_state"):
                     outputs = enc_out.last_hidden_state
@@ -237,36 +241,19 @@ def get_feature(
                     outputs = enc_out["visible_embeddings"]                
                 return outputs
 
-    elif args.model_family == "llava_vit_tiling":
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            with torch.no_grad():
-
-                sample_stride = 8
-                # tiled——按 stride 取帧并把时间折到高度（单帧高图），全可见
-                sampled = videos[:, :, ::sample_stride, :, :]           # [B, C, T_s, H, W]
-                T_s = sampled.shape[2]
-                assert T_s >= 1, "采样后没有帧，请检查 sample_stride/T"
-
-                tiled_imgs = sampled.contiguous().view(B, C, T_s * H, W)  # [B, C, T_s*H, W]
-                big_H, big_W = T_s * H, W
-                assert big_H % patch_h == 0 and big_W % patch_w == 0, "tiled 图尺寸需仍与 patch_size 对齐"
-                big_h_patches, big_w_patches = big_H // patch_h, big_W // patch_w
-                total_patches_tiled = big_h_patches * big_w_patches
-
-                visible_index_tiled = torch.arange(total_patches_tiled, device=device).unsqueeze(0).expand(B, -1)  # 全可见
-
-                enc_out = model(tiled_imgs, visible_index_tiled, mask_ratio=None)
-                outputs = enc_out["visible_embeddings"]
-                
-                return outputs
-            
     raise ValueError(f"Unsupported model_family: {args.model_family}")
 
 
 class ClassificationHead(nn.Module):
-    def __init__(self, hidden_dim: int, num_classes: int, init_scale: float = 1e-3) -> None:
+    def __init__(self, hidden_dim: int, num_classes: int, init_scale: float = 1e-3, probe_size=1) -> None:
         super().__init__()
         self.pool = Siglip2MultiheadAttentionPoolingHead(hidden_size=hidden_dim, num_attention_heads=max(1, hidden_dim // 64), intermediate_size=hidden_dim * 4,)
+        # self.pool = Siglip2TransformerAttentionPoolingHead(
+        #     hidden_size=hidden_dim,
+        #     num_attention_heads=max(1, hidden_dim // 64),
+        #     num_layers=probe_size,
+        #     norm_cls=nn.LayerNorm
+        # )
         self.norm = nn.LayerNorm(hidden_dim)
         self.fc = nn.Linear(hidden_dim, num_classes)
         self.apply(self._init_weights)
@@ -296,7 +283,7 @@ def train_one_experiment(
     loader_val,
 ) -> tuple[float, float]:
     base_model.to(device).eval()
-    head = ClassificationHead(hidden_dim=args.embedding_size, num_classes=args.num_classes)
+    head = ClassificationHead(hidden_dim=args.embedding_size, num_classes=args.num_classes, probe_size=args.probe_size)
     head.to(device)
     head = torch.nn.parallel.DistributedDataParallel(head, device_ids=[args.local_rank])
     optimizer = torch.optim.AdamW(head.parameters(), lr=lr, eps=1e-8, betas=(0.9, 0.999), weight_decay=args.default_weight_decay)
@@ -322,11 +309,13 @@ def train_one_experiment(
             labels = batch["labels"].view(-1).to(device, non_blocking=True)
             indices = batch["indices"].to(device, non_blocking=True)  # [B, seq_len]
             total_frames = batch["total_frames"].to(device, non_blocking=True)  # [B, 1]
-            res_zero_masks = batch["res_zero_masks"].to(device, non_blocking=True)
+
+            res_zero_masks = None
+            if args.model_family == "llava_vit_codec":
+                res_zero_masks = batch["res_zero_masks"].to(device, non_blocking=True)
 
             with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                feats = get_feature(args, videos, base_model, frame_indices=indices, res_zero_masks = res_zero_masks, total_frames=total_frames, is_training=True)
-            
+                feats = get_feature(args, videos, base_model, frame_indices=indices, total_frames=total_frames, res_zero_masks = res_zero_masks, is_training=True)
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 logits = head(feats)
                 loss = criterion(logits, labels)
@@ -389,46 +378,63 @@ def evaluate(
     loader_val,
 ) -> Dict[str, float]:
     head.eval()
-
     val_metrics = torchmetrics.MetricCollection({
         "acc1": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=1),
         "acc5": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=5),
     }).to(device)
 
+    num_crops = args.num_temporal_crops * args.num_spatial_crops
+
+    all_logits, all_targets = [], []
     steps_val = len(loader_val)
     for i, batch in enumerate(loader_val):
-        # ===> 从字典中解包数据（包括 total_frames） <===
-        videos = batch["videos"].to(device, non_blocking=True)
-        target = batch["labels"].view(-1).to(device, non_blocking=True)
-        indices = batch["indices"].to(device, non_blocking=True)  # [B, seq_len]
-        total_frames = batch["total_frames"].to(device, non_blocking=True)  # [B, 1]
-        res_zero_masks = batch["res_zero_masks"].to(device, non_blocking=True)
+        videos = batch["videos"].to(device, non_blocking=True)    # [B*N, C, T, H, W]
+        labels = batch["labels"].view(-1).to(device, non_blocking=True)  # [B*N]
+        indices = batch["indices"].to(device, non_blocking=True)
+        total_frames = batch["total_frames"].to(device, non_blocking=True)
 
-        feats = get_feature(args, videos, base_model, frame_indices=indices, res_zero_masks = res_zero_masks, total_frames=total_frames, is_training=False)
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            logits = head(feats)
+        B = videos.shape[0] // num_crops
+        # reshape为 [B, num_crops, ...]
+        videos = videos.view(B, num_crops, *videos.shape[1:])
+        labels = labels.view(B, num_crops)[:, 0]   # [B]，同一个视频的labels一样
+        indices = indices.view(B, num_crops, *indices.shape[1:])
+        total_frames = total_frames.view(B, num_crops)[:, 0]
 
-        val_metrics.update(logits, target)
+        logits_per_crop = []
+        for crop_id in range(num_crops):
+            feats = get_feature(args, videos[:, crop_id], base_model, frame_indices=indices[:, crop_id], total_frames=total_frames, is_training=False)
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                logits = head(feats)      # [B, num_classes]
+                logits_per_crop.append(logits)
+        # [num_crops, B, num_classes] -> [B, num_crops, num_classes]
+        logits_all = torch.stack(logits_per_crop, dim=1)
+        # 对 crop 维求平均（可 softmax 再平均/直接logit平均）
+        logits_mean = logits_all.mean(dim=1)   # [B, num_classes]
+        # 收集
+        all_logits.append(logits_mean)
+        all_targets.append(labels)
 
-        if (i + 1) % args.print_freq == 0:
-            if args.rank == 0:
-                print(f"Eval: [{i + 1}/{steps_val}]")
+        if (i + 1) % args.print_freq == 0 and args.rank == 0:
+            print(f"Eval: [{i + 1}/{steps_val}]")
 
+    all_logits = torch.cat(all_logits, dim=0)        # [total_B, num_classes]
+    all_targets = torch.cat(all_targets, dim=0)      # [total_B]
+
+    val_metrics.update(all_logits, all_targets)
     computed_metrics = val_metrics.compute()
-
     if args.rank == 0:
         print(
             f"* Final Acc@1: {computed_metrics['acc1'] * 100:.1f} "
             f"| Final Acc@5: {computed_metrics['acc5'] * 100:.1f}"
         )
-
     return {k: v.item() * 100 for k, v in computed_metrics.items()}
+
 
 def get_model(args: argparse.Namespace) -> nn.Module:
 
     if args.model_name == "hf_llava_vit_large_ln":
         from model_factory.vit_preview_v0_hf import LlavaViTModel
-        model = LlavaViTModel.from_pretrained(args.model_weight, torch_dtype=torch.bfloat16)
+        model = LlavaViTModel.from_pretrained(args.model_weight, dtype=torch.bfloat16)
         model = torch.compile(model)
         return model
 
@@ -438,7 +444,6 @@ def get_model(args: argparse.Namespace) -> nn.Module:
         state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=True)
     return model
-
 
 
 def main() -> None:
@@ -481,7 +486,6 @@ def main() -> None:
         args.val_data_root_path = os.path.join(args.data_root, "k400_hevc")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
-
     try:
         args.rank = int(os.environ["RANK"])
         args.local_rank = int(os.environ["LOCAL_RANK"])
@@ -500,45 +504,54 @@ def main() -> None:
         print("Create data loaders...")
 
 
-    if args.model_family == "siglip2":
+    if args.model_family in ["siglip", "siglip2"]:
         args.mean = [0.5, 0.5, 0.5]
         args.std = [0.5, 0.5, 0.5]
     if args.model_family in ["dinov2", "dinov3"]:
         args.mean = [0.485, 0.456, 0.406]
         args.std = [0.229, 0.224, 0.225]
 
-    train_loader = get_dali_dataloader(
-        data_root_path=args.train_data_root_path,
-        data_csv_path=os.path.join(args.train_data_root_path, args.train_data_csv_path),
-        mode="train",
-        data_set = args.dataset,
-        batch_size=args.batch_size,
-        sequence_length=args.num_frames,
-        input_size=args.input_size,
-        short_side_size=args.short_side_size,
-        mean=args.mean,
-        std=args.std,
-        dali_num_threads=args.dali_num_threads,
-        dali_py_num_workers=args.dali_py_num_workers,
-        decord_num_threads=args.decord_num_threads,
-        seed=args.seed
-    )
-    val_loader = get_dali_dataloader(
-        data_root_path=args.val_data_root_path,
-        data_csv_path=os.path.join(args.val_data_root_path, args.val_data_csv_path),
-        mode="val",
-        data_set = args.dataset,
-        batch_size=args.batch_size,
-        sequence_length=args.num_frames,
-        input_size=args.input_size,
-        short_side_size=args.short_side_size,
-        mean=args.mean,
-        std=args.std,
-        dali_num_threads=args.dali_num_threads,
-        dali_py_num_workers=args.dali_py_num_workers,
-        decord_num_threads=args.decord_num_threads,
-        seed=1024
-    )
+    # Create DALI dataloader based on model family
+    train_dataloader_params = {
+        "data_root_path": args.train_data_root_path,
+        "data_csv_path": os.path.join(args.train_data_root_path, args.train_data_csv_path) if not os.path.isabs(args.train_data_csv_path) else args.train_data_csv_path,
+        "mode": "train",
+        "batch_size": args.batch_size,
+        "sequence_length": args.num_frames,
+        "input_size": args.input_size,
+        "short_side_size": args.short_side_size,
+        "mean": args.mean,
+        "std": args.std,
+        "dali_num_threads": args.dali_num_threads,
+        "dali_py_num_workers": args.dali_py_num_workers,
+        "decord_num_threads": args.decord_num_threads,
+        "seed": 1024,
+    }
+
+    test_dataloader_params = {
+        "data_root_path": args.data_root,
+        "data_csv_path": os.path.join(args.val_data_root_path, args.val_data_csv_path) if not os.path.isabs(args.val_data_csv_path) else args.val_data_csv_path,
+        "mode": "val",
+        "batch_size": args.batch_size,
+        "sequence_length": args.num_frames,
+        "input_size": args.input_size,
+        "short_side_size": args.short_side_size,
+        "mean": args.mean,
+        "std": args.std,
+        "dali_num_threads": args.dali_num_threads,
+        "dali_py_num_workers": args.dali_py_num_workers,
+        "decord_num_threads": args.decord_num_threads,
+        "seed": 1024,
+    }
+
+    if args.model_family == "llava_vit_codec":
+        train_loader = get_dali_dataloader_codec(**train_dataloader_params)
+        val_loader = get_dali_dataloader_codec(**test_dataloader_params)
+
+    else:
+        train_loader = get_dali_dataloader(**train_dataloader_params)
+        val_loader = get_dali_dataloader(**test_dataloader_params)
+
     if args.rank == 0:
         print("Data loaders ready.")
 
@@ -546,7 +559,6 @@ def main() -> None:
     best_lr, best_top1, best_top5 = 0.0, 0.0, 0.0
     for lr in lrs:
         base_model = get_model(args)
-        # base_model = torch.compile(base_model)
         acc1, acc5 = train_one_experiment(args, lr, device, base_model, train_loader, val_loader)
         if acc1 > best_top1:
             best_lr, best_top1, best_top5 = lr, acc1, acc5
