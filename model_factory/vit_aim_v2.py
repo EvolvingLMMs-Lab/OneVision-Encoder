@@ -31,7 +31,7 @@ class AIMv2(nn.Module):
         return last_hidden_state
 
 @register_model
-def aimv2_large_patch14_native(pretrained: bool = False, **kwargs):
+def aimv2_large_patch14_native_ap(pretrained: bool = False, **kwargs):
     model = AIMv2("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
     return model
 
