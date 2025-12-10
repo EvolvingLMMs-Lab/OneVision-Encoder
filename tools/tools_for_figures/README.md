@@ -44,57 +44,96 @@ python generate_vit_residual_gif.py --demo --output custom.mp4 \
 
 ### 2. extract_frames_for_ppt.py
 
-Extract frames from a video, create an animated GIF preview, and save selected frames with 3D perspective transformation for PowerPoint presentations.
+Extract frames from a video, create an animated GIF preview, spatiotemporal volume visualization (space-time cube), and save selected frames with 3D perspective transformation for PowerPoint presentations.
 
 **Features:**
-- Extract 16 evenly-spaced frames from any video
+- Extract N evenly-spaced frames OR all frames at full frame rate
 - Generate an animated GIF preview with frame labels
-- Select any 4 (or more) specific frames to save separately
+- **NEW:** Create spatiotemporal cube visualization (video cube / space-time cube with oblique projection)
+- Select specific frames to save separately
 - Apply 3D perspective transformation with rotation for visual appeal
 - Varying angles for each frame for dynamic presentation
 
 **Usage:**
 ```bash
-# Step 1: Extract 16 frames and create GIF preview
+# NEW: Extract all frames and create spatiotemporal cube visualization
+python extract_frames_for_ppt.py --video /path/to/video.mp4 \
+    --all-frames \
+    --spacetime-cube spacetime.png
+
+# Customize spatiotemporal cube parameters
+python extract_frames_for_ppt.py --video /path/to/video.mp4 \
+    --all-frames \
+    --spacetime-cube spacetime.png \
+    --cube-offset-x 20 \
+    --cube-offset-y 20 \
+    --cube-scale 0.4 \
+    --cube-max-frames 50 \
+    --resize 320x240
+
+# Traditional: Extract 16 frames and create GIF preview
 python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif
 
-# Step 2: After viewing GIF, select 4 frames and apply perspective
-python extract_frames_for_ppt.py --video /path/to/video.mp4 --select 0,5,10,15 --output-dir ppt_frames/
+# Select frames and apply perspective transformation
+python extract_frames_for_ppt.py --video /path/to/video.mp4 \
+    --select 0,5,10,15 \
+    --output-dir ppt_frames/
 
-# Do both in one command
-python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif --select 0,4,8,12 --output-dir ppt_frames/
-
-# Customize parameters
-python extract_frames_for_ppt.py --video input.mp4 \
-    --num-frames 16 \
+# Do everything in one command
+python extract_frames_for_ppt.py --video /path/to/video.mp4 \
+    --all-frames \
+    --spacetime-cube spacetime.png \
     --output preview.gif \
-    --duration 400 \
-    --select 2,6,10,14 \
-    --output-dir perspective/ \
-    --angle 15 \
-    --resize 1280x720
+    --select 0,10,20,30 \
+    --output-dir ppt_frames/
 ```
 
 **Parameters:**
 - `--video`: Path to input video file (required)
-- `--num-frames`: Number of frames to extract (default: 16)
+- `--num-frames`: Number of frames to extract (default: 16, ignored if --all-frames is set)
+- `--all-frames`: Extract ALL frames at full frame rate (overrides --num-frames)
 - `--output`: Output path for GIF preview (default: frames_preview.gif)
 - `--duration`: Duration per frame in GIF in milliseconds (default: 500)
 - `--select`: Comma-separated frame indices for perspective effect (e.g., '0,4,8,12')
 - `--output-dir`: Directory to save perspective frames (default: perspective_frames/)
 - `--angle`: Perspective rotation angle in degrees (default: 12.0)
-- `--resize`: Resize frames to WIDTHxHEIGHT (e.g., '1280x720')
-- `--no-labels`: Don't add frame numbers to GIF preview
+- `--resize`: Resize frames to WIDTHxHEIGHT (e.g., '640x480')
+- `--no-labels`: Don't add frame labels to GIF preview
 
-**Workflow:**
-1. Extract 16 frames from your video and generate a GIF preview
+**Spatiotemporal Cube Parameters:**
+- `--spacetime-cube`: Path to save space-time cube visualization (e.g., 'spacetime.png')
+- `--cube-offset-x`: Horizontal offset between frames in pixels (default: 15)
+- `--cube-offset-y`: Vertical offset between frames in pixels (default: 15)
+- `--cube-max-frames`: Maximum number of frames to include (default: all frames)
+- `--cube-scale`: Scale factor for frames (default: 0.5, smaller = more compact)
+
+**Workflows:**
+
+*Spatiotemporal Cube Workflow (NEW):*
+1. Extract all frames from your video at full frame rate with `--all-frames`
+2. Create a space-time cube visualization with `--spacetime-cube`
+3. Adjust offset and scale parameters to control the 3D appearance
+4. Use the generated PNG image in your PowerPoint presentation
+
+*Traditional Workflow:*
+1. Extract frames from your video and generate a GIF preview
 2. View the GIF to identify which frames you want for your presentation
 3. Run again with `--select` to create perspective versions of chosen frames
 4. Import the perspective PNGs into your PowerPoint slides
 
 **Output:**
-- GIF preview: Animated preview showing all 16 frames with frame numbers
+- GIF preview: Animated preview showing frames with frame numbers
+- **Spatiotemporal cube:** PNG image showing all frames stacked with oblique projection (cascade/stacked view)
 - Perspective frames: Individual PNG files with 3D rotation effect, saved with transparency
+
+**Spatiotemporal Cube Visualization:**
+
+The spatiotemporal cube (also known as space-time cube or video cube) creates a 3D visualization where:
+- Frames are stacked along the time axis
+- Uses oblique projection to maintain frame proportions
+- Creates a cascade/layered view effect
+- Perfect for showing temporal progression in presentations
+- Front frames show time labels (t=0, t=1, etc.)
 
 ### 3. generate_global_contrastive_comparison.py
 
