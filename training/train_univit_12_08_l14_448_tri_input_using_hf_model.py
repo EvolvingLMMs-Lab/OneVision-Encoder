@@ -115,10 +115,10 @@ parser.add_argument("--vis_interval", type=int, default=10, help="Visualization 
 # Index sampling for ViT input / ViT 输入的索引采样
 # ---------------------------
 
-parser.add_argument("--total_indices", type=int, default=2000, help="Visible indices total count / 可见索引总数")
-parser.add_argument("--target_num", type=int, default=1568, help="Sampled indices count / 采样索引个数")
-parser.add_argument("--must_num", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
-parser.add_argument("--num_tokens_per_frame", type=int, default=196, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
+parser.add_argument("--total_indices", type=int, default=2048, help="Visible indices total count / 可见索引总数")
+parser.add_argument("--target_num", type=int, default=2048, help="Sampled indices count / 采样索引个数")
+parser.add_argument("--must_num", type=int, default=256, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
+parser.add_argument("--num_tokens_per_frame", type=int, default=256, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
 
 # ---------------------------
 # Multi-frame training / 多帧训练
@@ -486,6 +486,26 @@ def main():
             logger.info(f"[head_id={head_id}] Video dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, "
                         f"num_frames={args.actual_num_frames}")
 
+        elif dataset_config.dali_type == "decord_residual":
+            from dataloader.data_decord_llava_vit import get_dali_dataloader
+
+            # 使用调整后的 batch size 和实际帧数
+            train_iter = get_dali_dataloader(
+                data_root_path="",
+                data_csv_path=dataset_config.prefixes[0],
+                mode="train",
+                dali_num_threads=2,
+                dali_py_num_workers=4 // frame_scale_factor,
+                decord_num_threads=frame_scale_factor,
+                batch_size=args.list_batch_sizes_adjusted[head_id],
+                input_size=args.image_size_video[0],
+                sequence_length=64,
+                seed=0+rank,
+                shard_id=dataset_config.shard_id,
+                num_shards=dataset_config.num_shards)
+
+            logger.info(f"[head_id={head_id}] Video residual dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, "
+                        f"num_frames=64")
 
         elif dataset_config.dali_type == "origin":
             if args.debug:
@@ -624,9 +644,10 @@ def main():
                 list_embedding.append(head_embedding)
 
             elif dataset_config.dali_type in ["decord_residual"]:
-                head_input = list_data_batch[head_id]["pixel_values"]
+                head_input = list_data_batch[head_id]["videos"]
                 list_batch_sizes.append(head_input.size(0))
-                visible_indices = list_data_batch[head_id]["visible_indices"]  # [bs, ?]，需要至少 args.total_indices 合法列
+                visible_indices = list_data_batch[head_id]["video_visible_indices"]  # [bs, ?]，需要至少 args.total_indices 合法列
+                visible_indices = visible_indices.long()
 
                 bs = visible_indices.shape[0]
                 dev = visible_indices.device

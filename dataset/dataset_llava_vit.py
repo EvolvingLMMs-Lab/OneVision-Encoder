@@ -259,7 +259,7 @@ def llava_vit_ocr_ssd():
         label_start=0,
         num_shards=num_shards,
         shard_id=shard_id,
-        dali_type="origin",
+        dali_type="ocr",
         random_diff=100,
     )
 
@@ -376,10 +376,29 @@ def configs_for_llava_vit_versions_0_0_2_add_pandas70M_filtered():
         name="configs_for_llava_vit_versions_0_0_2_add_pandas70M_filtered",
         prefixes=[list_mp4_label_path],
         num_classes=400000,
-        num_examples=1269187 ** 128,
+        num_examples=1269187 * 128,
         num_shards=1,
         shard_id=0,
         dali_type="decord",
+    )
+
+@DATASET_REGISTRY.register()
+def configs_for_llava_vit_versions_0_0_2_square_with_index_filtered():
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
+    assert world_size <= 128
+    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_square_with_index_filtered_split_128/part_{rank:03d}"
+
+    return Property(
+        name="configs_for_llava_vit_versions_0_0_2_square_with_index_filtered",
+        prefixes=[list_mp4_label_path],
+        num_classes=400000,
+        num_examples=1629324 * 128,
+        num_shards=1,
+        shard_id=0,
+        dali_type="decord_residual",
     )
 
 
