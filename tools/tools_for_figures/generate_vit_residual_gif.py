@@ -1231,7 +1231,7 @@ def main():
         frames = generate_synthetic_frames(args.num_frames)
     
     print(f"Loaded {len(frames)} frames with shape: {frames[0].shape}")
-    print(f"Selecting top {args.total_tokens} tokens globally across {args.num_frames - 1} P-frames")
+    print(f"Selecting top {args.total_tokens} tokens globally across {len(frames) - 1} P-frames")
     
     # Generate animated cube building if requested
     if args.animated_cube:
@@ -1258,7 +1258,7 @@ def main():
             duration=args.duration,
             canvas_size=(args.width, args.height),
             include_architecture=not args.no_architecture,
-            total_frames=args.num_frames,
+            total_frames=len(frames),
             total_p_frame_tokens=args.total_tokens
         )
     else:
@@ -1269,7 +1269,7 @@ def main():
             fps=args.fps,
             canvas_size=(args.width, args.height),
             include_architecture=not args.no_architecture,
-            total_frames=args.num_frames,
+            total_frames=len(frames),
             total_p_frame_tokens=args.total_tokens
         )
 
