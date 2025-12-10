@@ -4,11 +4,32 @@
 Siglip2 Naflex Packing Alignment Script
 
 This script verifies consistency between:
-- vit_siglip2.py (Siglip2Naflex) - standard format
-- vit_siglip2_packing_hf.py (Siglip2NaflexPacking) - packing format
+- vit_siglip2.py (Siglip2Naflex) - standard format that accepts [B, C, H, W] images
+- vit_siglip2_packing_hf.py (Siglip2NaflexPacking) - packing format that accepts pre-patchified input
+
+The script performs the following:
+1. Loads both standard and packing models with the same checkpoint
+2. Creates random test images in standard format [B, C, H, W]
+3. Processes through standard model directly
+4. Converts images to packing format (pre-patchified patches + grid_thw)
+5. Processes through packing model
+6. Compares outputs using cosine similarity and absolute difference metrics
+7. Reports pass/fail based on similarity threshold
+
+Expected Result:
+Both models should produce identical (or near-identical) outputs since they share
+the same weights and architecture, just with different I/O formats.
 
 Usage:
     python align_siglip2_packing.py --ckpt <model_checkpoint> [--device cuda]
+    
+Example:
+    python align_siglip2_packing.py \
+        --ckpt google/siglip2-so400m-patch16-naflex \
+        --device cuda \
+        --batch_size 2 \
+        --image_size 224 \
+        --threshold 0.99
 """
 
 import argparse
