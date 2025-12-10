@@ -1294,7 +1294,7 @@ class Siglip2NaflexPacking(nn.Module):
             # Call the vision model with the required parameters
             outputs = self.model.vision_model(
                 pixel_values=pixel_values,
-                pixel_attention_mask=pixel_attention_mask,
+                attention_mask=pixel_attention_mask,
                 spatial_shapes=spatial_shapes,
                 output_hidden_states=True
             )
