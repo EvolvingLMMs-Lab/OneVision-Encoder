@@ -42,7 +42,61 @@ python generate_vit_residual_gif.py --demo --output custom.mp4 \
 - `--gif`: Output as GIF instead of video
 - `--duration`: Duration per frame in ms for GIF (default: 800)
 
-### 2. generate_global_contrastive_comparison.py
+### 2. extract_frames_for_ppt.py
+
+Extract frames from a video, create an animated GIF preview, and save selected frames with 3D perspective transformation for PowerPoint presentations.
+
+**Features:**
+- Extract 16 evenly-spaced frames from any video
+- Generate an animated GIF preview with frame labels
+- Select any 4 (or more) specific frames to save separately
+- Apply 3D perspective transformation with rotation for visual appeal
+- Varying angles for each frame for dynamic presentation
+
+**Usage:**
+```bash
+# Step 1: Extract 16 frames and create GIF preview
+python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif
+
+# Step 2: After viewing GIF, select 4 frames and apply perspective
+python extract_frames_for_ppt.py --video /path/to/video.mp4 --select 0,5,10,15 --output-dir ppt_frames/
+
+# Do both in one command
+python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif --select 0,4,8,12 --output-dir ppt_frames/
+
+# Customize parameters
+python extract_frames_for_ppt.py --video input.mp4 \
+    --num-frames 16 \
+    --output preview.gif \
+    --duration 400 \
+    --select 2,6,10,14 \
+    --output-dir perspective/ \
+    --angle 15 \
+    --resize 1280x720
+```
+
+**Parameters:**
+- `--video`: Path to input video file (required)
+- `--num-frames`: Number of frames to extract (default: 16)
+- `--output`: Output path for GIF preview (default: frames_preview.gif)
+- `--duration`: Duration per frame in GIF in milliseconds (default: 500)
+- `--select`: Comma-separated frame indices for perspective effect (e.g., '0,4,8,12')
+- `--output-dir`: Directory to save perspective frames (default: perspective_frames/)
+- `--angle`: Perspective rotation angle in degrees (default: 12.0)
+- `--resize`: Resize frames to WIDTHxHEIGHT (e.g., '1280x720')
+- `--no-labels`: Don't add frame numbers to GIF preview
+
+**Workflow:**
+1. Extract 16 frames from your video and generate a GIF preview
+2. View the GIF to identify which frames you want for your presentation
+3. Run again with `--select` to create perspective versions of chosen frames
+4. Import the perspective PNGs into your PowerPoint slides
+
+**Output:**
+- GIF preview: Animated preview showing all 16 frames with frame numbers
+- Perspective frames: Individual PNG files with 3D rotation effect, saved with transparency
+
+### 3. generate_global_contrastive_comparison.py
 
 Generates animations comparing CLIP's batch-level contrastive learning with global contrastive learning using 1M concept centers.
 
@@ -139,13 +193,10 @@ All parameters are now centralized at the top of the script for easy modificatio
 
 Install dependencies:
 ```bash
-pip install imageio imageio-ffmpeg pillow numpy
+pip install imageio imageio-ffmpeg pillow numpy opencv-python
 ```
 
-For video processing in generate_vit_residual_gif.py, also install:
-```bash
-pip install opencv-python
-```
+**Note:** `opencv-python` is required for video processing in both `generate_vit_residual_gif.py` and `extract_frames_for_ppt.py`.
 
 ## Output Examples
 
