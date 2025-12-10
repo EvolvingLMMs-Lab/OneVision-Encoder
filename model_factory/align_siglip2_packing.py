@@ -105,6 +105,20 @@ def convert_to_patches(pixel_values, patch_size):
     return packed_patches, grid_thw
 
 
+def round_up_to_multiple(value, multiple):
+    """
+    Round up a value to the nearest multiple.
+    
+    Args:
+        value (int): Value to round up
+        multiple (int): Multiple to round up to
+    
+    Returns:
+        int: Rounded up value (at least `multiple`)
+    """
+    return max(multiple, ((value + multiple - 1) // multiple) * multiple)
+
+
 def generate_test_image(path, width, height):
     """
     Generate a test image with random colors if it doesn't exist.
@@ -338,13 +352,9 @@ def main():
                     print(f"⚠️  Warning: Image dimensions ({width}x{height}) are not divisible by patch size ({patch_size})")
                     print(f"Resizing to nearest multiple of patch size...")
                     
-                    # Round up to nearest multiple of patch size (consistent with batch processing)
-                    new_height = ((height + patch_size - 1) // patch_size) * patch_size
-                    new_width = ((width + patch_size - 1) // patch_size) * patch_size
-                    
-                    # Ensure minimum size is at least one patch
-                    new_height = max(patch_size, new_height)
-                    new_width = max(patch_size, new_width)
+                    # Round up to nearest multiple of patch size
+                    new_height = round_up_to_multiple(height, patch_size)
+                    new_width = round_up_to_multiple(width, patch_size)
                     
                     test_input = F.interpolate(
                         test_input,
@@ -401,17 +411,9 @@ def main():
             _, _, h1, w1 = img1.shape
             _, _, h2, w2 = img2.shape
             
-            # Resize both to a common size (use max dimensions)
-            target_h = max(h1, h2)
-            target_w = max(w1, w2)
-            
-            # Round up to nearest multiple of patch size
-            target_h = ((target_h + patch_size - 1) // patch_size) * patch_size
-            target_w = ((target_w + patch_size - 1) // patch_size) * patch_size
-            
-            # Ensure minimum size
-            target_h = max(patch_size, target_h)
-            target_w = max(patch_size, target_w)
+            # Resize both to a common size (use max dimensions, rounded up to patch size)
+            target_h = round_up_to_multiple(max(h1, h2), patch_size)
+            target_w = round_up_to_multiple(max(w1, w2), patch_size)
             
             print(f"Resizing images to common size: {target_w}x{target_h}")
             
