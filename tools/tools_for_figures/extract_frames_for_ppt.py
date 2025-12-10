@@ -214,7 +214,7 @@ def create_gif_preview(
 
 def apply_perspective_transform(
     image: np.ndarray,
-    angle: float = 15.0,
+    angle: float = 12.0,
     scale: float = 0.8
 ) -> Image.Image:
     """
@@ -236,10 +236,6 @@ def apply_perspective_transform(
     # Create a larger canvas to accommodate the perspective transform
     new_width = int(width * 1.3)
     new_height = int(height * 1.3)
-    
-    # Calculate perspective transform coefficients
-    # This creates a tilted view with depth
-    angle_rad = np.radians(angle)
     
     # Original corners
     corners_orig = np.array([
