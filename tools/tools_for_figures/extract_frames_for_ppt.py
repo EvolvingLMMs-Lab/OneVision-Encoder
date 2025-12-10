@@ -8,7 +8,6 @@ This simplified tool creates two types of spatiotemporal cube visualizations:
 - Residual-based animated cube (highlights changed regions, darkens unchanged regions)
 
 Usage Examples:
-<<<<<<< Updated upstream
     # Create animated cube building GIF
     python extract_frames_for_ppt.py --video /path/to/video.mp4 --animated-cube cube_animation.gif
 
@@ -16,34 +15,6 @@ Usage Examples:
     python extract_frames_for_ppt.py --video /path/to/video.mp4 --residual-gif residual_cube.gif
 
     # Create both with custom parameters
-=======
-    # Extract frames and create both original and residual cube GIFs
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif --residual-gif residual_cube.gif
-
-    # Create residual cube GIF with custom parameters
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --residual-gif residual.gif --residual-threshold 15.0 --residual-darken-factor 0.2
-
-    # Extract all frames and create spatiotemporal cube visualization
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --all-frames --spacetime-cube spacetime.png
-
-    # Create animated cube building GIF with transparency effects
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --animated-cube cube_animation.gif
-
-    # Create animated cube building without transparency
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --animated-cube cube_animation.gif --no-transparency
-
-    # Extract all frames with custom cube parameters
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --all-frames \
-        --spacetime-cube spacetime.png --cube-offset-x 20 --cube-offset-y 20 --cube-scale 0.4
-
-    # Traditional usage: Extract 16 frames and generate GIF preview
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --output frames_preview.gif
-
-    # Select 4 specific frames and apply perspective
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --select 0,4,8,12 --output-dir perspective_frames/
-
-    # Do everything in one command
->>>>>>> Stashed changes
     python extract_frames_for_ppt.py --video /path/to/video.mp4 \
         --animated-cube test.gif --animation-duration 300 \
         --residual-gif residual_preview.gif --residual-threshold 20
