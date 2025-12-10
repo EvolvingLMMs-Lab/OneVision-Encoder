@@ -612,7 +612,15 @@ def main():
             
             if all_mixed_passed:
                 print(f"\n✅ PASS: Mixed resolution batch test (all resolutions aligned)")
-                test_results.append(("mixed_batch", True, {"min_cosine": min([compute_similarity_metrics(standard_outputs[i].unsqueeze(0), packing_outputs[i].unsqueeze(0))['min_cosine'] for i in range(len(test_resolutions))])}))
+                # Compute minimum cosine similarity across all resolutions
+                min_cosines = []
+                for i in range(len(test_resolutions)):
+                    metrics = compute_similarity_metrics(
+                        standard_outputs[i].unsqueeze(0), 
+                        packing_outputs[i].unsqueeze(0)
+                    )
+                    min_cosines.append(metrics['min_cosine'])
+                test_results.append(("mixed_batch", True, {"min_cosine": min(min_cosines)}))
             else:
                 print(f"\n❌ FAIL: Mixed resolution batch test (some resolutions misaligned)")
                 test_results.append(("mixed_batch", False, {"min_cosine": 0.0}))

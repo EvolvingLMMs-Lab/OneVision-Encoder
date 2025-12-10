@@ -652,11 +652,11 @@ class DINOv3ViTPacking(nn.Module):
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
         with torch.no_grad():
-            # Get target dtype from patch embedding
+            # Get target dtype from model parameters
             try:
-                target_dtype = self.model.embeddings.patch_embeddings.weight.dtype
-            except AttributeError:
-                # Fallback to bfloat16 or float32
+                target_dtype = next(self.model.parameters()).dtype
+            except (StopIteration, AttributeError):
+                # Fallback to bfloat16 or float32 if parameters not accessible
                 target_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             
             # Move inputs to device

@@ -43,7 +43,8 @@ class AIMv2Packing(nn.Module):
     def __init__(
         self, 
         ckpt: str = "apple/aimv2-large-patch14-224",
-        device: str = "cuda" if torch.cuda.is_available() else "cpu"
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        revision: str = "ac764a25c832c7dc5e11871daa588e98e3cdbfb7"
     ):
         """
         Initialize the AIMv2 Packing model with FlashAttention.
@@ -51,15 +52,17 @@ class AIMv2Packing(nn.Module):
         Args:
             ckpt (str): HuggingFace checkpoint for the pre-trained model.
             device (str): Device to map the model for inference.
+            revision (str): Specific git revision to use. Default is the verified working version.
         """
         super(AIMv2Packing, self).__init__()
         self.device = torch.device(device)
         
         # Load the full model with FlashAttention enabled
         # Note: trust_remote_code is required for AIMv2
+        # Using specific revision for stability and reproducibility
         self.model = AutoModel.from_pretrained(
             ckpt,
-            revision="ac764a25c832c7dc5e11871daa588e98e3cdbfb7",
+            revision=revision,
             trust_remote_code=True,
             attn_implementation="flash_attention_2",
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
@@ -138,10 +141,12 @@ class AIMv2Packing(nn.Module):
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
         with torch.no_grad():
-            # Get target dtype - fallback to bfloat16 or float32
-            target_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-            if hasattr(self.model, 'dtype'):
-                target_dtype = self.model.dtype
+            # Get target dtype from model parameters
+            try:
+                target_dtype = next(self.model.parameters()).dtype
+            except (StopIteration, AttributeError):
+                # Fallback to bfloat16 or float32 if parameters not accessible
+                target_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             
             # Move inputs to device
             hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
