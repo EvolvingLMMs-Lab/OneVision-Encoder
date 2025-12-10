@@ -9,7 +9,7 @@ This script verifies consistency between:
 
 The script performs the following:
 1. Loads both standard and packing models with the same checkpoint
-2. Creates random test images in standard format [B, C, H, W]
+2. Creates random test images in standard format [B, C, H, W] OR loads real images
 3. Processes through standard model directly
 4. Converts images to packing format (pre-patchified patches + grid_thw)
 5. Processes through packing model
@@ -21,7 +21,11 @@ Both models should produce identical (or near-identical) outputs since they shar
 the same weights and architecture, just with different I/O formats.
 
 Usage:
+    # Test with random tensors
     python align_siglip2_packing.py --ckpt <model_checkpoint> [--device cuda]
+    
+    # Test with real images from model_factory/images/
+    python align_siglip2_packing.py --ckpt <model_checkpoint> --use_real_images
     
 Example:
     python align_siglip2_packing.py \
@@ -30,14 +34,28 @@ Example:
         --batch_size 2 \
         --image_size 224 \
         --threshold 0.99
+    
+    python align_siglip2_packing.py \
+        --ckpt google/siglip2-so400m-patch16-naflex \
+        --device cuda \
+        --use_real_images \
+        --image_dir model_factory/images
 """
 
 import argparse
+import os
 import torch
 import torch.nn.functional as F
 import numpy as np
 from vit_siglip2 import Siglip2Naflex
 from vit_siglip2_packing_hf import Siglip2NaflexPacking
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("Warning: PIL not available. Real image tests will be disabled.")
 
 
 def convert_to_patches(pixel_values, patch_size):
@@ -85,6 +103,50 @@ def convert_to_patches(pixel_values, patch_size):
     )
     
     return packed_patches, grid_thw
+
+
+def generate_test_image(path, width, height):
+    """
+    Generate a test image with random colors if it doesn't exist.
+    
+    Args:
+        path: Path to save the image
+        width: Width of the image
+        height: Height of the image
+    """
+    if not PIL_AVAILABLE:
+        raise ImportError("PIL is required to generate images. Please install Pillow.")
+    
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    
+    # Create a random colorful image
+    img_array = np.random.randint(0, 256, (height, width, 3), dtype=np.uint8)
+    img = Image.fromarray(img_array, 'RGB')
+    img.save(path)
+    print(f"Generated test image: {path} ({width}x{height})")
+
+
+def load_image_as_tensor(image_path, device):
+    """
+    Load an image from disk and convert it to a tensor.
+    
+    Args:
+        image_path: Path to the image file
+        device: Device to load the tensor to
+    
+    Returns:
+        torch.Tensor: Image tensor of shape [1, 3, H, W] with values in [0, 1]
+    """
+    if not PIL_AVAILABLE:
+        raise ImportError("PIL is required to load images. Please install Pillow.")
+    
+    img = Image.open(image_path).convert('RGB')
+    img_array = np.array(img, dtype=np.float32) / 255.0  # Normalize to [0, 1]
+    
+    # Convert to tensor: [H, W, C] -> [C, H, W] -> [1, C, H, W]
+    img_tensor = torch.from_numpy(img_array).permute(2, 0, 1).unsqueeze(0)
+    
+    return img_tensor.to(device)
 
 
 def compute_similarity_metrics(feat1: torch.Tensor, feat2: torch.Tensor):
@@ -190,6 +252,10 @@ def main():
                        help="Image size for testing (default: 224)")
     parser.add_argument("--threshold", type=float, default=0.99,
                        help="Cosine similarity threshold for pass/fail (default: 0.99)")
+    parser.add_argument("--use_real_images", action="store_true",
+                       help="Use real images from model_factory/images/ directory")
+    parser.add_argument("--image_dir", type=str, default="model_factory/images",
+                       help="Directory containing test images (default: model_factory/images)")
     
     args = parser.parse_args()
     
@@ -199,6 +265,7 @@ def main():
     print(f"Model checkpoint: {args.ckpt}")
     print(f"Device: {args.device}")
     print(f"Similarity threshold: {args.threshold}")
+    print(f"Use real images: {args.use_real_images}")
     
     # Initialize models
     print("\nInitializing models...")
@@ -211,45 +278,223 @@ def main():
     patch_size = packing_model.patch_size
     print(f"Patch size: {patch_size}")
     
-    # Validate image size is divisible by patch size
-    if args.image_size % patch_size != 0:
-        raise ValueError(
-            f"Image size ({args.image_size}) must be divisible by patch size ({patch_size})"
+    all_tests_passed = True
+    test_results = []
+    
+    if args.use_real_images:
+        if not PIL_AVAILABLE:
+            print("\n❌ ERROR: PIL is not available. Cannot load real images.")
+            print("Please install Pillow: pip install Pillow")
+            return 1
+        
+        # Get the script's directory to construct absolute paths
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        image_dir = os.path.join(script_dir, "images") if args.image_dir == "model_factory/images" else args.image_dir
+        
+        # Define test images
+        test_images = [
+            ("1.jpg", 384, 384),  # Default size if needs to be generated
+            ("2.jpg", 512, 512),  # Default size if needs to be generated
+        ]
+        
+        print("\n" + "=" * 80)
+        print("Testing with Real Images")
+        print("=" * 80)
+        
+        # Check and generate images if needed
+        for img_name, width, height in test_images:
+            img_path = os.path.join(image_dir, img_name)
+            if not os.path.exists(img_path):
+                print(f"\nImage not found: {img_path}")
+                print(f"Generating test image...")
+                generate_test_image(img_path, width, height)
+        
+        # Load and test each image individually
+        for img_name, _, _ in test_images:
+            img_path = os.path.join(image_dir, img_name)
+            print(f"\n{'=' * 80}")
+            print(f"Testing image: {img_name}")
+            print(f"{'=' * 80}")
+            
+            try:
+                # Load image
+                test_input = load_image_as_tensor(img_path, args.device)
+                
+                # Get actual image dimensions
+                _, _, height, width = test_input.shape
+                print(f"Image dimensions: {width}x{height}")
+                
+                # Check if dimensions are divisible by patch size
+                if height % patch_size != 0 or width % patch_size != 0:
+                    print(f"⚠️  Warning: Image dimensions ({width}x{height}) are not divisible by patch size ({patch_size})")
+                    print(f"Resizing to nearest multiple of patch size...")
+                    
+                    # Resize to nearest multiple of patch size
+                    new_height = (height // patch_size) * patch_size
+                    new_width = (width // patch_size) * patch_size
+                    
+                    if new_height == 0 or new_width == 0:
+                        print(f"❌ ERROR: Image too small for patch size {patch_size}")
+                        all_tests_passed = False
+                        continue
+                    
+                    test_input = F.interpolate(
+                        test_input,
+                        size=(new_height, new_width),
+                        mode='bilinear',
+                        align_corners=False
+                    )
+                    print(f"Resized to: {new_width}x{new_height}")
+                
+                # Run alignment test
+                metrics, standard_output, packing_output = test_alignment(
+                    standard_model, packing_model, test_input, patch_size, args.device
+                )
+                
+                # Display results
+                print(f"\nResults for {img_name}:")
+                print("-" * 80)
+                print(f"Max Diff:        {metrics['max_diff']:.6f}")
+                print(f"Mean Diff:       {metrics['mean_diff']:.6f}")
+                print(f"Min Cosine Sim:  {metrics['min_cosine']:.8f}")
+                print(f"Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+                print(f"Max Cosine Sim:  {metrics['max_cosine']:.8f}")
+                
+                # Check if test passed
+                test_passed = metrics['min_cosine'] > args.threshold
+                test_results.append((img_name, test_passed, metrics))
+                
+                if test_passed:
+                    print(f"✅ PASS: {img_name} (min cosine similarity {metrics['min_cosine']:.8f} > {args.threshold})")
+                else:
+                    print(f"❌ FAIL: {img_name} (min cosine similarity {metrics['min_cosine']:.8f} <= {args.threshold})")
+                    all_tests_passed = False
+                    
+            except Exception as e:
+                print(f"❌ ERROR processing {img_name}: {e}")
+                all_tests_passed = False
+                import traceback
+                traceback.print_exc()
+        
+        # Test with both images together in a batch
+        print(f"\n{'=' * 80}")
+        print(f"Testing with batched real images")
+        print(f"{'=' * 80}")
+        
+        try:
+            # Load both images
+            img1_path = os.path.join(image_dir, test_images[0][0])
+            img2_path = os.path.join(image_dir, test_images[1][0])
+            
+            img1 = load_image_as_tensor(img1_path, args.device)
+            img2 = load_image_as_tensor(img2_path, args.device)
+            
+            # Get dimensions
+            _, _, h1, w1 = img1.shape
+            _, _, h2, w2 = img2.shape
+            
+            # Resize both to a common size (use max dimensions)
+            target_h = max(h1, h2)
+            target_w = max(w1, w2)
+            
+            # Round to nearest multiple of patch size
+            target_h = (target_h // patch_size) * patch_size
+            target_w = (target_w // patch_size) * patch_size
+            
+            if target_h == 0 or target_w == 0:
+                target_h = max(patch_size, target_h)
+                target_w = max(patch_size, target_w)
+            
+            print(f"Resizing images to common size: {target_w}x{target_h}")
+            
+            img1_resized = F.interpolate(img1, size=(target_h, target_w), mode='bilinear', align_corners=False)
+            img2_resized = F.interpolate(img2, size=(target_h, target_w), mode='bilinear', align_corners=False)
+            
+            # Batch images together
+            batch_input = torch.cat([img1_resized, img2_resized], dim=0)
+            
+            # Run alignment test
+            metrics, standard_output, packing_output = test_alignment(
+                standard_model, packing_model, batch_input, patch_size, args.device
+            )
+            
+            # Display results
+            print(f"\nResults for batched images:")
+            print("-" * 80)
+            print(f"Max Diff:        {metrics['max_diff']:.6f}")
+            print(f"Mean Diff:       {metrics['mean_diff']:.6f}")
+            print(f"Min Cosine Sim:  {metrics['min_cosine']:.8f}")
+            print(f"Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+            print(f"Max Cosine Sim:  {metrics['max_cosine']:.8f}")
+            
+            # Check if test passed
+            test_passed = metrics['min_cosine'] > args.threshold
+            test_results.append(("batch", test_passed, metrics))
+            
+            if test_passed:
+                print(f"✅ PASS: Batched images (min cosine similarity {metrics['min_cosine']:.8f} > {args.threshold})")
+            else:
+                print(f"❌ FAIL: Batched images (min cosine similarity {metrics['min_cosine']:.8f} <= {args.threshold})")
+                all_tests_passed = False
+                
+        except Exception as e:
+            print(f"❌ ERROR processing batched images: {e}")
+            all_tests_passed = False
+            import traceback
+            traceback.print_exc()
+        
+    else:
+        # Original random tensor test
+        # Validate image size is divisible by patch size
+        if args.image_size % patch_size != 0:
+            raise ValueError(
+                f"Image size ({args.image_size}) must be divisible by patch size ({patch_size})"
+            )
+        
+        # Create test input
+        print(f"\nCreating test input: [{args.batch_size}, 3, {args.image_size}, {args.image_size}]")
+        test_input = torch.randn(args.batch_size, 3, args.image_size, args.image_size)
+        
+        # Run alignment test
+        print("\n" + "=" * 80)
+        print("Running Alignment Test")
+        print("=" * 80)
+        
+        metrics, standard_output, packing_output = test_alignment(
+            standard_model, packing_model, test_input, patch_size, args.device
         )
+        
+        # Display results
+        print("\n" + "=" * 80)
+        print("Results")
+        print("=" * 80)
+        print(f"Max Diff:        {metrics['max_diff']:.6f}")
+        print(f"Mean Diff:       {metrics['mean_diff']:.6f}")
+        print(f"Min Cosine Sim:  {metrics['min_cosine']:.8f}")
+        print(f"Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+        print(f"Max Cosine Sim:  {metrics['max_cosine']:.8f}")
+        
+        # Check if test passed
+        test_passed = metrics['min_cosine'] > args.threshold
+        test_results.append(("random", test_passed, metrics))
+        all_tests_passed = test_passed
     
-    # Create test input
-    print(f"\nCreating test input: [{args.batch_size}, 3, {args.image_size}, {args.image_size}]")
-    test_input = torch.randn(args.batch_size, 3, args.image_size, args.image_size)
-    
-    # Run alignment test
-    print("\n" + "=" * 80)
-    print("Running Alignment Test")
-    print("=" * 80)
-    
-    metrics, standard_output, packing_output = test_alignment(
-        standard_model, packing_model, test_input, patch_size, args.device
-    )
-    
-    # Display results
-    print("\n" + "=" * 80)
-    print("Results")
-    print("=" * 80)
-    print(f"Max Diff:        {metrics['max_diff']:.6f}")
-    print(f"Mean Diff:       {metrics['mean_diff']:.6f}")
-    print(f"Min Cosine Sim:  {metrics['min_cosine']:.8f}")
-    print(f"Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
-    print(f"Max Cosine Sim:  {metrics['max_cosine']:.8f}")
-    
-    # Pass/Fail
+    # Final summary
     print("\n" + "=" * 80)
     print("Summary")
     print("=" * 80)
     
-    if metrics['min_cosine'] > args.threshold:
-        print(f"✅ PASS: Models are aligned (min cosine similarity {metrics['min_cosine']:.8f} > {args.threshold})")
+    if len(test_results) > 1:
+        print(f"\nTest Results:")
+        for name, passed, metrics in test_results:
+            status = "✅ PASS" if passed else "❌ FAIL"
+            print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f})")
+    
+    if all_tests_passed:
+        print(f"\n✅ ALL TESTS PASSED: Models are aligned")
         return 0
     else:
-        print(f"❌ FAIL: Models are NOT aligned (min cosine similarity {metrics['min_cosine']:.8f} <= {args.threshold})")
+        print(f"\n❌ SOME TESTS FAILED: Models may not be aligned")
         return 1
 
 
