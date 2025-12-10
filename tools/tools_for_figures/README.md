@@ -12,6 +12,7 @@ Generates animations visualizing how LLaVA-ViT processes video frames with resid
 - Shows I-frame (full frame) and P-frames (residual encoding)
 - Visualizes token selection and compression
 - Supports both video input and synthetic demo data
+- **NEW:** Animated cube building showing residual encoding spatiotemporal visualization
 
 **Usage:**
 ```bash
@@ -23,6 +24,18 @@ python generate_vit_residual_gif.py --video /path/to/video.mp4 --output output.m
 
 # Generate GIF instead of video
 python generate_vit_residual_gif.py --demo --output demo.gif --gif
+
+# Generate animated cube building GIF showing residual encoding
+python generate_vit_residual_gif.py --demo --animated-cube residual_cube.gif
+
+# Customize animated cube building
+python generate_vit_residual_gif.py --video /path/to/video.mp4 \
+    --animated-cube cube.gif --cube-scale 0.6 --cube-duration 400 \
+    --cube-max-frames 16 --no-cube-transparency
+
+# Generate both standard visualization and animated cube
+python generate_vit_residual_gif.py --demo --output demo.mp4 \
+    --animated-cube residual_cube.gif
 
 # Customize parameters
 python generate_vit_residual_gif.py --demo --output custom.mp4 \
@@ -41,6 +54,27 @@ python generate_vit_residual_gif.py --demo --output custom.mp4 \
 - `--total-tokens`: Total tokens across all P-frames (default: 1372)
 - `--gif`: Output as GIF instead of video
 - `--duration`: Duration per frame in ms for GIF (default: 800)
+
+**Animated Cube Building Parameters (NEW):**
+- `--animated-cube`: Path to save animated cube building GIF (e.g., 'cube.gif')
+- `--cube-offset-x`: Horizontal offset between frames in pixels (default: 15)
+- `--cube-offset-y`: Vertical offset between frames in pixels (default: 15)
+- `--cube-scale`: Scale factor for frames (default: 0.5)
+- `--cube-max-frames`: Maximum number of frames to include (default: all)
+- `--cube-duration`: Duration per animation frame in ms (default: 300)
+- `--no-cube-transparency`: Disable transparency effects (frames won't fade with depth)
+- `--no-cube-labels`: Don't add frame labels to animated cube
+
+**Animated Cube Building Feature:**
+
+The animated cube building creates a dynamic visualization where:
+- Starts with the I-frame (full reference frame) shown in green
+- Progressively adds P-frames (residual frames with selected tokens) one by one in orange
+- Each P-frame shows only the most important tokens based on residual magnitude
+- Uses transparency effects (optional) where back frames are more transparent for depth perception
+- Frame opacity ranges from 60% (back) to 100% (front) when transparency is enabled
+- Holds the final complete cube for emphasis
+- Perfect for presentations to show how residual encoding builds the spatiotemporal representation
 
 ### 2. extract_frames_for_ppt.py
 
