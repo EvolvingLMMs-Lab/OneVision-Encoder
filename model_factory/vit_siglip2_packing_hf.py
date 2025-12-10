@@ -1191,6 +1191,11 @@ class Siglip2ForImageClassification(Siglip2PreTrainedModel):
         )
 
 
+# =============================================================================
+# CUSTOM EXTENSION: The following code is a custom addition for LLaVA-ViT
+# and is not part of the auto-generated transformers code above.
+# =============================================================================
+
 class Siglip2NaflexPacking(nn.Module):
     """
     Siglip2 Naflex Packing variant for efficient variable-length sequence processing.
@@ -1244,8 +1249,15 @@ class Siglip2NaflexPacking(nn.Module):
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
         with torch.no_grad():
+            # Get target dtype from patch embedding
+            try:
+                target_dtype = self.model.vision_model.embeddings.patch_embedding.weight.dtype
+            except AttributeError:
+                # Fallback to float32 if structure is different
+                target_dtype = torch.float32
+            
             # Move inputs to device
-            hidden_states = hidden_states.to(device=self.device, dtype=self.model.vision_model.embeddings.patch_embedding.weight.dtype)
+            hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
             grid_thw = grid_thw.to(device=self.device)
             
             # Calculate spatial_shapes from grid_thw
@@ -1268,7 +1280,7 @@ class Siglip2NaflexPacking(nn.Module):
             # Reshape and pad if necessary
             pixel_values = torch.zeros(num_images, max_num_patches, patch_dim, 
                                       dtype=hidden_states.dtype, device=self.device)
-            attention_mask = torch.zeros(num_images, max_num_patches, 
+            pixel_attention_mask = torch.zeros(num_images, max_num_patches, 
                                         dtype=torch.long, device=self.device)
             
             # Fill in the actual patches and attention masks
@@ -1276,13 +1288,13 @@ class Siglip2NaflexPacking(nn.Module):
             for i in range(num_images):
                 num_patches = patches_per_image[i]
                 pixel_values[i, :num_patches] = hidden_states[start_idx:start_idx + num_patches]
-                attention_mask[i, :num_patches] = 1
+                pixel_attention_mask[i, :num_patches] = 1
                 start_idx += num_patches
             
             # Call the vision model with the required parameters
             outputs = self.model.vision_model(
                 pixel_values=pixel_values,
-                attention_mask=attention_mask,
+                pixel_attention_mask=pixel_attention_mask,
                 spatial_shapes=spatial_shapes,
                 output_hidden_states=True
             )
