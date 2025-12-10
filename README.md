@@ -31,14 +31,15 @@ LLaVA-ViT is a vision encoder designed for multimodal large language models, fea
 ### Input Method Comparison
 
 <table>
+  <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">Comparison of Frame Sampling Input vs Codec Input</caption>
   <tr>
     <td align="center">
-      <img src="pages/images/example.gif" alt="Frame Sampling Input" width="400"><br>
+      <img src="pages/images/example.gif" alt="Animated demonstration of traditional uniform frame sampling method for video processing" width="400"><br>
       <b>抽帧输入 (Frame Sampling Input)</b><br>
       Traditional uniform frame sampling approach
     </td>
     <td align="center">
-      <img src="pages/images/example_codec_input.gif" alt="Codec Input" width="400"><br>
+      <img src="pages/images/example_codec_input.gif" alt="Animated demonstration of efficient codec-based input decomposition with I-frames and P-frames" width="400"><br>
       <b>Codec Input</b><br>
       Our efficient codec-based input decomposition
     </td>
