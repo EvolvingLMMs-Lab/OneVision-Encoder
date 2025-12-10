@@ -58,6 +58,13 @@ FONT_PATHS = [
     "C:/Windows/Fonts/arialbd.ttf",
 ]
 
+# Constants for animated cube building visualization
+MIN_ALPHA_FACTOR = 0.6  # Minimum opacity for back frames (60%)
+ALPHA_RANGE = 0.4  # Range from min to max opacity (60% to 100%)
+SHADOW_OFFSET = 4  # Shadow offset in pixels
+SHADOW_ALPHA = 50  # Shadow opacity (0-255)
+
+
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     """Get a font with cross-platform support, falling back to default if needed."""
@@ -966,12 +973,12 @@ def create_animated_cube_building_residual(
             # Apply transparency for depth effect (earlier frames more transparent, later frames more opaque)
             if transparency:
                 # Calculate alpha: later frames (higher i, drawn last) are more opaque
-                # Range from 60% (earlier frames) to 100% (later frames)
+                # Range from MIN_ALPHA_FACTOR (earlier frames) to 1.0 (later frames)
                 # For single frame (current_frame_count=1), use 100% opacity
                 if current_frame_count == 1:
                     alpha_factor = 1.0
                 else:
-                    alpha_factor = 0.6 + (0.4 * i / (current_frame_count - 1))
+                    alpha_factor = MIN_ALPHA_FACTOR + (ALPHA_RANGE * i / (current_frame_count - 1))
                 # Create alpha mask
                 alpha = frame_img.split()[3]
                 alpha = alpha.point(lambda p: int(p * alpha_factor))
@@ -982,7 +989,8 @@ def create_animated_cube_building_residual(
             y = 50 + i * offset_y
             
             # Add subtle shadow for depth
-            shadow = Image.new('RGBA', (scaled_width + 4, scaled_height + 4), (0, 0, 0, 50))
+            shadow = Image.new('RGBA', (scaled_width + SHADOW_OFFSET, scaled_height + SHADOW_OFFSET), 
+                             (0, 0, 0, SHADOW_ALPHA))
             canvas.paste(shadow, (x + 2, y + 2), shadow)
             
             # Paste frame with transparency
