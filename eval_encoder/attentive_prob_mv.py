@@ -393,6 +393,10 @@ def evaluate(
         indices = batch["indices"].to(device, non_blocking=True)
         total_frames = batch["total_frames"].to(device, non_blocking=True)
 
+        res_zero_masks = None
+        if args.model_family == "llava_vit_codec":
+            res_zero_masks = batch["res_zero_masks"].to(device, non_blocking=True)
+
         B = videos.shape[0] // num_crops
         # reshape为 [B, num_crops, ...]
         videos = videos.view(B, num_crops, *videos.shape[1:])
@@ -402,7 +406,7 @@ def evaluate(
 
         logits_per_crop = []
         for crop_id in range(num_crops):
-            feats = get_feature(args, videos[:, crop_id], base_model, frame_indices=indices[:, crop_id], total_frames=total_frames, is_training=False)
+            feats = get_feature(args, videos[:, crop_id], base_model, frame_indices=indices[:, crop_id], res_zero_masks = res_zero_masks,  total_frames=total_frames, is_training=False)
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 logits = head(feats)      # [B, num_classes]
                 logits_per_crop.append(logits)
