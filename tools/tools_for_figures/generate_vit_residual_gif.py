@@ -12,10 +12,26 @@ Features:
 - Token limiting: 64 frames max, with top 196*7=1372 most important tokens for P-frames
 - Video output (MP4) for better quality
 - Side-by-side visualization of original frame and residual
+- Animated cube building: Progressive spatiotemporal visualization showing I-frame and P-frames
 
 Usage:
+    # Generate standard residual encoding video
     python generate_vit_residual_gif.py --video /path/to/video.mp4 --output output.mp4
-    python generate_vit_residual_gif.py --demo --output demo.mp4  # Generate demo with synthetic data
+    
+    # Generate demo with synthetic data
+    python generate_vit_residual_gif.py --demo --output demo.mp4
+    
+    # Generate animated cube building GIF showing residual encoding
+    python generate_vit_residual_gif.py --demo --animated-cube residual_cube.gif
+    
+    # Customize animated cube building
+    python generate_vit_residual_gif.py --video /path/to/video.mp4 \
+        --animated-cube cube.gif --cube-scale 0.6 --cube-duration 400 \
+        --cube-max-frames 16 --no-cube-transparency
+    
+    # Generate both standard visualization and animated cube
+    python generate_vit_residual_gif.py --demo --output demo.mp4 \
+        --animated-cube residual_cube.gif
 """
 
 import argparse
@@ -41,6 +57,13 @@ FONT_PATHS = [
     "C:/Windows/Fonts/arial.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
 ]
+
+# Constants for animated cube building visualization
+MIN_ALPHA_FACTOR = 0.6  # Minimum opacity for back frames (60%)
+ALPHA_RANGE = 0.4  # Range from min to max opacity (60% to 100%)
+SHADOW_OFFSET = 4  # Shadow offset in pixels
+SHADOW_ALPHA = 50  # Shadow opacity (0-255)
+
 
 
 def get_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -840,6 +863,200 @@ def create_architecture_frame(canvas_size: Tuple[int, int] = (1600, 720)) -> Ima
 
 
 
+def create_animated_cube_building_residual(
+    frames: np.ndarray,
+    output_path: str,
+    patch_size: int = 16,
+    offset_x: int = 15,
+    offset_y: int = 15,
+    max_frames: Optional[int] = None,
+    frame_scale: float = 0.5,
+    add_labels: bool = True,
+    duration: int = 300,
+    transparency: bool = True,
+    final_hold_frames: int = 3,
+    total_p_frame_tokens: int = 196 * 7
+) -> None:
+    """
+    Create an animated GIF showing the residual encoding cube being built frame by frame.
+    
+    This creates an animation that starts from the I-frame (full frame) and progressively adds
+    P-frames (residual frames) to build the complete spatiotemporal cube visualization with 
+    optional transparency effects for depth perception.
+    
+    The first frame is shown as the full reference frame (I-frame), and subsequent frames
+    show residuals with only the most important tokens highlighted.
+    
+    Args:
+        frames: np.ndarray of shape (num_frames, height, width, 3)
+        output_path: Path to save the animated GIF
+        patch_size: ViT patch size for residual computation
+        offset_x: Horizontal offset between consecutive frames (default: 15)
+        offset_y: Vertical offset between consecutive frames (default: 15)
+        max_frames: Maximum number of frames to include (None = all frames)
+        frame_scale: Scale factor for frames (default: 0.5)
+        add_labels: Whether to add frame numbers
+        duration: Duration of each animation frame in milliseconds (default: 300)
+        transparency: Whether to apply transparency effects for depth (default: True)
+        final_hold_frames: Number of times to repeat final frame for emphasis (default: 3)
+        total_p_frame_tokens: Total tokens to select across all P-frames (default: 196*7=1372)
+    """
+    # Limit number of frames if needed
+    if max_frames is not None and len(frames) > max_frames:
+        # Sample frames evenly
+        indices = np.linspace(0, len(frames) - 1, max_frames, dtype=int)
+        frames = frames[indices]
+        print(f"Using {max_frames} frames sampled from total frames")
+    
+    num_frames = len(frames)
+    frame_height, frame_width = frames[0].shape[:2]
+    
+    # Compute global token selection for residuals
+    global_selection = compute_global_token_selection(frames, patch_size, total_p_frame_tokens)
+    
+    # Prepare frames for visualization
+    display_frames = []
+    for i in range(num_frames):
+        if i == 0:
+            # First frame: show original (I-frame)
+            display_frames.append(frames[i])
+        else:
+            # P-frames: show residual with selected tokens
+            if i in global_selection:
+                selected_patches_set = global_selection[i]
+                masked_residual, _ = compute_masked_residual_with_selection(
+                    frames[i], frames[0], selected_patches_set, patch_size
+                )
+            else:
+                # No tokens selected for this frame
+                h, w = frames[i].shape[:2]
+                masked_residual = np.ones((h, w, 3), dtype=np.uint8) * 255
+            display_frames.append(masked_residual)
+    
+    # Scale frames
+    scaled_width = int(frame_width * frame_scale)
+    scaled_height = int(frame_height * frame_scale)
+    
+    # Calculate canvas size
+    canvas_width = scaled_width + (num_frames - 1) * offset_x + 100
+    canvas_height = scaled_height + (num_frames - 1) * offset_y + 100
+    
+    # Font for labels
+    font = get_font(16, bold=True) if add_labels else None
+    
+    print(f"Creating animated cube building with residual encoding...")
+    print(f"  Frames: {num_frames}")
+    print(f"  Frame size: {scaled_width}x{scaled_height}")
+    print(f"  Canvas size: {canvas_width}x{canvas_height}")
+    print(f"  Offset: ({offset_x}, {offset_y})")
+    print(f"  Transparency: {transparency}")
+    
+    gif_frames = []
+    
+    # Create animation: add frames one by one
+    for current_frame_count in range(1, num_frames + 1):
+        # Create canvas with white background (RGBA for transparency support)
+        canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
+        
+        # Draw frames in order (0 to current_frame_count-1), so later frames overlay earlier frames
+        for i in range(current_frame_count):
+            frame = display_frames[i]
+            
+            # Resize frame
+            frame_img = Image.fromarray(frame)
+            frame_img = frame_img.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+            
+            # Convert to RGBA for transparency effects
+            if frame_img.mode != 'RGBA':
+                frame_img = frame_img.convert('RGBA')
+            
+            # Apply transparency for depth effect (earlier frames more transparent, later frames more opaque)
+            if transparency:
+                # Calculate alpha: later frames (higher i, drawn last) are more opaque
+                # Range from MIN_ALPHA_FACTOR (earlier frames) to 1.0 (later frames)
+                # For single frame (current_frame_count=1), use 100% opacity
+                if current_frame_count == 1:
+                    alpha_factor = 1.0
+                else:
+                    alpha_factor = MIN_ALPHA_FACTOR + (ALPHA_RANGE * i / (current_frame_count - 1))
+                # Create alpha mask
+                alpha = frame_img.split()[3]
+                alpha = alpha.point(lambda p: int(p * alpha_factor))
+                frame_img.putalpha(alpha)
+            
+            # Calculate position (earlier frames at top-left, later frames at bottom-right)
+            x = 50 + i * offset_x
+            y = 50 + i * offset_y
+            
+            # Add subtle shadow for depth
+            shadow = Image.new('RGBA', (scaled_width + SHADOW_OFFSET, scaled_height + SHADOW_OFFSET), 
+                             (0, 0, 0, SHADOW_ALPHA))
+            canvas.paste(shadow, (x + 2, y + 2), shadow)
+            
+            # Paste frame with transparency
+            canvas.paste(frame_img, (x, y), frame_img)
+            
+            # Add frame border for clarity
+            draw = ImageDraw.Draw(canvas)
+            # Use different colors for I-frame vs P-frames
+            if i == 0:
+                border_color = (100, 255, 150, 255)  # Green for I-frame
+            else:
+                border_color = (255, 150, 100, 255)  # Orange for P-frames
+            draw.rectangle(
+                [x, y, x + scaled_width, y + scaled_height],
+                outline=border_color,
+                width=2
+            )
+            
+            # Add label if requested (only for the most recent frames)
+            if add_labels and i >= current_frame_count - min(5, current_frame_count):
+                if i == 0:
+                    label = f"I-Frame"
+                else:
+                    label = f"P{i}"
+                # Get text size
+                bbox = draw.textbbox((0, 0), label, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                
+                # Position label at bottom-right of frame
+                label_x = x + scaled_width - text_width - 5
+                label_y = y + scaled_height - text_height - 5
+                
+                # Draw background for label
+                draw.rectangle(
+                    [label_x - 3, label_y - 2, label_x + text_width + 3, label_y + text_height + 2],
+                    fill=(255, 255, 255, 230)
+                )
+                
+                # Draw text
+                draw.text((label_x, label_y), label, fill=(0, 0, 0, 255), font=font)
+        
+        # Convert RGBA to RGB for GIF (with white background)
+        rgb_canvas = Image.new('RGB', canvas.size, (255, 255, 255))
+        rgb_canvas.paste(canvas, (0, 0), canvas)
+        gif_frames.append(rgb_canvas)
+    
+    # Hold the final frame for longer
+    for _ in range(final_hold_frames):
+        gif_frames.append(gif_frames[-1])
+    
+    # Save as animated GIF
+    gif_frames[0].save(
+        output_path,
+        save_all=True,
+        append_images=gif_frames[1:],
+        duration=duration,
+        loop=0
+    )
+    
+    print(f"\nAnimated cube building GIF saved to: {output_path}")
+    print(f"  Total animation frames: {len(gif_frames)}")
+    print(f"  Duration per frame: {duration}ms")
+    print(f"  Total duration: {len(gif_frames) * duration / 1000:.1f}s")
+
+
 def generate_video(
     frames: np.ndarray,
     output_path: str,
@@ -986,6 +1203,24 @@ def main():
     parser.add_argument("--gif", action="store_true", help="Output as GIF instead of video")
     parser.add_argument("--duration", type=int, default=800, help="Duration of each frame in ms (for GIF)")
     
+    # Animated cube building options
+    parser.add_argument("--animated-cube", type=str,
+                        help="Create animated GIF showing residual cube being built frame by frame (e.g., 'cube_animation.gif')")
+    parser.add_argument("--cube-offset-x", type=int, default=15,
+                        help="Horizontal offset between frames in animated cube (default: 15)")
+    parser.add_argument("--cube-offset-y", type=int, default=15,
+                        help="Vertical offset between frames in animated cube (default: 15)")
+    parser.add_argument("--cube-scale", type=float, default=0.5,
+                        help="Scale factor for frames in animated cube (default: 0.5)")
+    parser.add_argument("--cube-max-frames", type=int,
+                        help="Maximum number of frames in animated cube (default: all frames)")
+    parser.add_argument("--cube-duration", type=int, default=300,
+                        help="Duration of each frame in animated cube GIF in milliseconds (default: 300)")
+    parser.add_argument("--no-cube-transparency", action="store_true",
+                        help="Disable transparency effects in animated cube (frames won't fade with depth)")
+    parser.add_argument("--no-cube-labels", action="store_true",
+                        help="Don't add frame labels to animated cube")
+    
     args = parser.parse_args()
     
     frames = None
@@ -1004,7 +1239,24 @@ def main():
         frames = generate_synthetic_frames(args.num_frames)
     
     print(f"Loaded {len(frames)} frames with shape: {frames[0].shape}")
-    print(f"Selecting top {args.total_tokens} tokens globally across {args.num_frames - 1} P-frames")
+    print(f"Selecting top {args.total_tokens} tokens globally across {len(frames) - 1} P-frames")
+    
+    # Generate animated cube building if requested
+    if args.animated_cube:
+        print(f"\nGenerating animated cube building GIF...")
+        create_animated_cube_building_residual(
+            frames=frames,
+            output_path=args.animated_cube,
+            patch_size=args.patch_size,
+            offset_x=args.cube_offset_x,
+            offset_y=args.cube_offset_y,
+            max_frames=args.cube_max_frames,
+            frame_scale=args.cube_scale,
+            add_labels=not args.no_cube_labels,
+            duration=args.cube_duration,
+            transparency=not args.no_cube_transparency,
+            total_p_frame_tokens=args.total_tokens
+        )
     
     if args.gif:
         generate_gif(
@@ -1014,7 +1266,7 @@ def main():
             duration=args.duration,
             canvas_size=(args.width, args.height),
             include_architecture=not args.no_architecture,
-            total_frames=args.num_frames,
+            total_frames=len(frames),
             total_p_frame_tokens=args.total_tokens
         )
     else:
@@ -1025,7 +1277,7 @@ def main():
             fps=args.fps,
             canvas_size=(args.width, args.height),
             include_architecture=not args.no_architecture,
-            total_frames=args.num_frames,
+            total_frames=len(frames),
             total_p_frame_tokens=args.total_tokens
         )
 
