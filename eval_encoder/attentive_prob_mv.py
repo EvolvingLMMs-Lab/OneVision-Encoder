@@ -529,7 +529,7 @@ def main() -> None:
     }
 
     test_dataloader_params = {
-        "data_root_path": args.data_root,
+        "data_root_path": args.val_data_root_path,
         "data_csv_path": os.path.join(args.val_data_root_path, args.val_data_csv_path) if not os.path.isabs(args.val_data_csv_path) else args.val_data_csv_path,
         "mode": "val",
         "batch_size": args.batch_size,
