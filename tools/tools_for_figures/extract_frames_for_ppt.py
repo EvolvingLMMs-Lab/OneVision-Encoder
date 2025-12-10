@@ -326,7 +326,8 @@ def create_animated_cube_building(
     frame_scale: float = 0.5,
     add_labels: bool = True,
     duration: int = 300,
-    transparency: bool = True
+    transparency: bool = True,
+    final_hold_frames: int = 3
 ) -> None:
     """
     Create an animated GIF showing the spatiotemporal cube being built frame by frame.
@@ -345,6 +346,7 @@ def create_animated_cube_building(
         add_labels: Whether to add frame numbers
         duration: Duration of each animation frame in milliseconds (default: 300)
         transparency: Whether to apply transparency effects for depth (default: True)
+        final_hold_frames: Number of times to repeat final frame for emphasis (default: 3)
     """
     # Limit number of frames if needed
     if max_frames is not None and len(frames) > max_frames:
@@ -397,7 +399,11 @@ def create_animated_cube_building(
             if transparency:
                 # Calculate alpha: front frames (higher i) are more opaque
                 # Range from 60% (back) to 100% (front)
-                alpha_factor = 0.6 + (0.4 * i / max(1, current_frame_count - 1))
+                # For single frame (current_frame_count=1), use 100% opacity
+                if current_frame_count == 1:
+                    alpha_factor = 1.0
+                else:
+                    alpha_factor = 0.6 + (0.4 * i / (current_frame_count - 1))
                 # Create alpha mask
                 alpha = frame_img.split()[3]
                 alpha = alpha.point(lambda p: int(p * alpha_factor))
@@ -449,7 +455,7 @@ def create_animated_cube_building(
         gif_frames.append(rgb_canvas)
     
     # Hold the final frame for longer
-    for _ in range(3):
+    for _ in range(final_hold_frames):
         gif_frames.append(gif_frames[-1])
     
     # Save as animated GIF
