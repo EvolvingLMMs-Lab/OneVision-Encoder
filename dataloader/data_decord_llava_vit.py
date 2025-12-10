@@ -99,6 +99,7 @@ class VideoExternalSource:
         video_path = parts[0]
         video_label = [int(x) for x in parts[1:11]]
         video_visible_indices_path = parts[11]
+        video_visible_indices_path = video_visible_indices_path.replace("k4096.visidx.npy", "k2048.visidx.npy")
         try:
             video_data, frame_indices, total_frames = self._load_video_data(video_path)
             video_visible_indices = np.load(video_visible_indices_path, mmap_mode="r").astype(np.int16)
