@@ -383,8 +383,8 @@ def create_animated_cube_building(
         # Create canvas with white background (RGBA for transparency support)
         canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
         
-        # Draw frames from back to front, but only up to current_frame_count
-        for i in range(current_frame_count - 1, -1, -1):
+        # Draw frames in order (0 to current_frame_count-1), so later frames overlay earlier frames
+        for i in range(current_frame_count):
             frame = frames[i]
             
             # Resize frame
@@ -395,10 +395,10 @@ def create_animated_cube_building(
             if frame_img.mode != 'RGBA':
                 frame_img = frame_img.convert('RGBA')
             
-            # Apply transparency for depth effect (back frames more transparent)
+            # Apply transparency for depth effect (earlier frames more transparent, later frames more opaque)
             if transparency:
-                # Calculate alpha: front frames (higher i) are more opaque
-                # Range from 60% (back) to 100% (front)
+                # Calculate alpha: later frames (higher i, drawn last) are more opaque
+                # Range from 60% (earlier frames) to 100% (later frames)
                 # For single frame (current_frame_count=1), use 100% opacity
                 if current_frame_count == 1:
                     alpha_factor = 1.0
@@ -409,7 +409,7 @@ def create_animated_cube_building(
                 alpha = alpha.point(lambda p: int(p * alpha_factor))
                 frame_img.putalpha(alpha)
             
-            # Calculate position (back frames at top-left, front frames at bottom-right)
+            # Calculate position (earlier frames at top-left, later frames at bottom-right)
             x = 50 + i * offset_x
             y = 50 + i * offset_y
             
@@ -528,15 +528,15 @@ def create_spatiotemporal_cube(
     print(f"  Canvas size: {canvas_width}x{canvas_height}")
     print(f"  Offset: ({offset_x}, {offset_y})")
     
-    # Draw frames from back to front (reverse order for proper layering)
-    for i in range(num_frames - 1, -1, -1):
+    # Draw frames in order (0 to num_frames-1), so later frames overlay earlier frames
+    for i in range(num_frames):
         frame = frames[i]
         
         # Resize frame
         frame_img = Image.fromarray(frame)
         frame_img = frame_img.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
         
-        # Calculate position (back frames at top-left, front frames at bottom-right)
+        # Calculate position (earlier frames at top-left, later frames at bottom-right)
         x = 50 + i * offset_x
         y = 50 + i * offset_y
         
