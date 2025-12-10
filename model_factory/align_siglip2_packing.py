@@ -289,7 +289,16 @@ def main():
         
         # Get the script's directory to construct absolute paths
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        image_dir = os.path.join(script_dir, "images") if args.image_dir == "model_factory/images" else args.image_dir
+        
+        # Handle image directory path
+        if os.path.isabs(args.image_dir):
+            image_dir = args.image_dir
+        elif args.image_dir == "model_factory/images":
+            # Default case: use images directory relative to script
+            image_dir = os.path.join(script_dir, "images")
+        else:
+            # User provided a relative path
+            image_dir = os.path.abspath(args.image_dir)
         
         # Define test images
         test_images = [
@@ -333,8 +342,9 @@ def main():
                     new_height = (height // patch_size) * patch_size
                     new_width = (width // patch_size) * patch_size
                     
-                    if new_height == 0 or new_width == 0:
-                        print(f"❌ ERROR: Image too small for patch size {patch_size}")
+                    # Ensure minimum size is at least one patch
+                    if new_height < patch_size or new_width < patch_size:
+                        print(f"❌ ERROR: Image dimensions ({width}x{height}) are smaller than patch size ({patch_size})")
                         all_tests_passed = False
                         continue
                     
@@ -397,13 +407,13 @@ def main():
             target_h = max(h1, h2)
             target_w = max(w1, w2)
             
-            # Round to nearest multiple of patch size
-            target_h = (target_h // patch_size) * patch_size
-            target_w = (target_w // patch_size) * patch_size
+            # Round up to nearest multiple of patch size
+            target_h = ((target_h + patch_size - 1) // patch_size) * patch_size
+            target_w = ((target_w + patch_size - 1) // patch_size) * patch_size
             
-            if target_h == 0 or target_w == 0:
-                target_h = max(patch_size, target_h)
-                target_w = max(patch_size, target_w)
+            # Ensure minimum size
+            target_h = max(patch_size, target_h)
+            target_w = max(patch_size, target_w)
             
             print(f"Resizing images to common size: {target_w}x{target_h}")
             

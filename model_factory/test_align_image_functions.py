@@ -57,17 +57,17 @@ def test_generate_image():
             
             # Check if file was created
             if not os.path.exists(test_image_path):
-                print(f"✗ Image file was not created at {test_image_path}")
+                print(f"❌ Image file was not created at {test_image_path}")
                 return False
             
             # Check file size
             file_size = os.path.getsize(test_image_path)
             if file_size == 0:
-                print(f"✗ Image file is empty")
+                print(f"❌ Image file is empty")
                 return False
             
-            print(f"✓ Successfully generated image: {file_size} bytes")
-            print(f"✓ Image dimensions: {width}x{height}")
+            print(f"✅ Successfully generated image: {file_size} bytes")
+            print(f"✅ Image dimensions: {width}x{height}")
             return True
             
         finally:
@@ -75,7 +75,7 @@ def test_generate_image():
             shutil.rmtree(temp_dir)
             
     except Exception as e:
-        print(f"✗ Error in image generation test: {e}")
+        print(f"❌ Error in image generation test: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -118,36 +118,36 @@ def test_load_image():
                 
                 # Check shape
                 if len(img_array.shape) != 3:
-                    print(f"✗ Unexpected array shape: {img_array.shape}")
+                    print(f"❌ Unexpected array shape: {img_array.shape}")
                     return False
                 
                 h, w, c = img_array.shape
                 if c != 3:
-                    print(f"✗ Expected 3 channels, got {c}")
+                    print(f"❌ Expected 3 channels, got {c}")
                     return False
                 
                 # Check value range
                 if img_array.min() < 0 or img_array.max() > 1:
-                    print(f"✗ Values not in [0, 1] range: [{img_array.min()}, {img_array.max()}]")
+                    print(f"❌ Values not in [0, 1] range: [{img_array.min()}, {img_array.max()}]")
                     return False
                 
-                print(f"✓ Successfully loaded {img_name}")
+                print(f"✅ Successfully loaded {img_name}")
                 print(f"  Shape: {w}x{h}x{c}")
                 print(f"  Value range: [{img_array.min():.3f}, {img_array.max():.3f}]")
                 
             except Exception as e:
-                print(f"✗ Error loading {img_name}: {e}")
+                print(f"❌ Error loading {img_name}: {e}")
                 return False
         
         if not found_at_least_one:
             print("⚠️  No test images found, skipping test")
             return True
         
-        print("\n✓ Image loading test completed successfully")
+        print("\n✅ Image loading test completed successfully")
         return True
         
     except Exception as e:
-        print(f"✗ Error in image loading test: {e}")
+        print(f"❌ Error in image loading test: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -168,39 +168,39 @@ def test_cli_arguments():
         
         # Check for use_real_images argument
         if '--use_real_images' in code:
-            print("✓ Found --use_real_images argument")
+            print("✅ Found --use_real_images argument")
         else:
-            print("✗ Missing --use_real_images argument")
+            print("❌ Missing --use_real_images argument")
             return False
         
         # Check for image_dir argument
         if '--image_dir' in code:
-            print("✓ Found --image_dir argument")
+            print("✅ Found --image_dir argument")
         else:
-            print("✗ Missing --image_dir argument")
+            print("❌ Missing --image_dir argument")
             return False
         
         # Check for PIL import
         if 'from PIL import Image' in code or 'import PIL' in code:
-            print("✓ Found PIL import")
+            print("✅ Found PIL import")
         else:
-            print("✗ Missing PIL import")
+            print("❌ Missing PIL import")
             return False
         
         # Check for new functions
         expected_functions = ['generate_test_image', 'load_image_as_tensor']
         for func in expected_functions:
             if f'def {func}' in code:
-                print(f"✓ Found function: {func}")
+                print(f"✅ Found function: {func}")
             else:
-                print(f"✗ Missing function: {func}")
+                print(f"❌ Missing function: {func}")
                 return False
         
-        print("\n✓ All CLI arguments and functions are present")
+        print("\n✅ All CLI arguments and functions are present")
         return True
         
     except Exception as e:
-        print(f"✗ Error checking CLI arguments: {e}")
+        print(f"❌ Error checking CLI arguments: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -232,7 +232,7 @@ def main():
     total = len(results)
     
     for test_name, result in results:
-        status = "✓ PASS" if result else "✗ FAIL"
+        status = "✅ PASS" if result else "❌ FAIL"
         print(f"{status}: {test_name}")
     
     print(f"\nTotal: {passed}/{total} tests passed")
