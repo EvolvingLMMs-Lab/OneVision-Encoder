@@ -362,11 +362,12 @@ def create_residual_gif_preview(
         final_hold_frames: Number of times to repeat final frame for emphasis (default: 3)
     """
     # Limit number of frames if needed
-    if max_frames is not None and len(frames) > max_frames:
+    original_frame_count = len(frames)
+    if max_frames is not None and original_frame_count > max_frames:
         # Sample frames evenly
-        indices = np.linspace(0, len(frames) - 1, max_frames, dtype=int)
+        indices = np.linspace(0, original_frame_count - 1, max_frames, dtype=int)
         frames = frames[indices]
-        print(f"Using {max_frames} frames sampled from total frames")
+        print(f"Using {max_frames} frames sampled from {original_frame_count} total frames")
     
     # Process frames with residual highlighting
     reference_frame = frames[0]
