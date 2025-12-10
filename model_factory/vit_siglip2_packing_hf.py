@@ -32,6 +32,7 @@ from torch.nn.init import _calculate_fan_in_and_fan_out
 
 
 
+from transformers import AutoModel
 from transformers.activations import ACT2FN
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
 from transformers.modeling_layers import GradientCheckpointingLayer
@@ -1190,10 +1191,103 @@ class Siglip2ForImageClassification(Siglip2PreTrainedModel):
         )
 
 
+class Siglip2NaflexPacking(nn.Module):
+    """
+    Siglip2 Naflex Packing variant for efficient variable-length sequence processing.
+    
+    This model accepts pre-patchified input in packing format:
+    - hidden_states: torch.Tensor of shape [total_num_patches, patch_dim]
+      where patch_dim = patch_size * patch_size * num_channels
+    - grid_thw: torch.Tensor of shape [num_images, 3] containing [t, h, w] for each image
+    
+    This is optimized for batch processing where all images are concatenated into a single sequence.
+    Only vision components are included (no text model).
+    """
+    
+    DEFAULT_PATCH_SIZE = 16
+    
+    def __init__(self, ckpt: str = "google/siglip2-so400m-patch16-naflex", device="cuda" if torch.cuda.is_available() else "cpu"):
+        """
+        Initialize the Siglip2 Naflex Packing model.
+        
+        Args:
+            ckpt (str): HuggingFace checkpoint for the pre-trained model.
+            device (str): Device to map the model for inference.
+        """
+        super(Siglip2NaflexPacking, self).__init__()
+        self.device = torch.device(device)
+        
+        # Load the full model to get vision_model
+        full_model = AutoModel.from_pretrained(ckpt)
+        self.model = full_model.vision_model.to(self.device).eval()
+        
+        # Get patch size from config
+        if hasattr(self.model.config, 'patch_size'):
+            self.patch_size = self.model.config.patch_size
+        else:
+            self.patch_size = self.DEFAULT_PATCH_SIZE
+    
+    def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
+        """
+        Forward pass with pre-patchified input.
+        
+        Args:
+            hidden_states (torch.Tensor): Pre-patchified input of shape 
+                [total_num_patches, patch_dim] where 
+                patch_dim = patch_size * patch_size * num_channels
+            grid_thw (torch.Tensor): Grid dimensions of shape [num_images, 3]
+                containing [t, h, w] for each image, where:
+                - t: temporal dimension (usually 1 for single images)
+                - h: height in patches
+                - w: width in patches
+        
+        Returns:
+            torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
+        """
+        with torch.no_grad():
+            # Move inputs to device
+            hidden_states = hidden_states.to(device=self.device, dtype=self.model.embeddings.patch_embedding.weight.dtype)
+            grid_thw = grid_thw.to(device=self.device)
+            
+            # Calculate spatial_shapes from grid_thw
+            # For packing format, spatial_shapes is [num_images, 2] containing [h, w]
+            spatial_shapes = grid_thw[:, 1:].long()  # Extract [h, w] from [t, h, w]
+            
+            # Calculate attention_mask
+            # For packing format, we need to create attention_mask for each image
+            # and concatenate them
+            attention_masks = []
+            for i in range(grid_thw.shape[0]):
+                t, h, w = grid_thw[i][0].item(), grid_thw[i][1].item(), grid_thw[i][2].item()
+                num_patches = int(t * h * w)
+                mask = torch.ones(num_patches, dtype=torch.long, device=self.device)
+                attention_masks.append(mask)
+            
+            attention_mask = torch.cat(attention_masks, dim=0)
+            
+            # Call the vision model with the required parameters
+            # The vision model expects:
+            # - pixel_values: already patchified input
+            # - attention_mask: mask for valid tokens
+            # - spatial_shapes: spatial dimensions for positional embeddings
+            outputs = self.model(
+                pixel_values=hidden_states,
+                attention_mask=attention_mask,
+                spatial_shapes=spatial_shapes,
+                output_hidden_states=True
+            )
+            
+            # Get the last layer's hidden state
+            last_hidden_state = outputs.last_hidden_state  # [total_num_patches, hidden_size]
+        
+        return last_hidden_state
+
+
 __all__ = [
     "Siglip2Model",
     "Siglip2PreTrainedModel",
     "Siglip2TextModel",
     "Siglip2VisionModel",
     "Siglip2ForImageClassification",
+    "Siglip2NaflexPacking",
 ]
