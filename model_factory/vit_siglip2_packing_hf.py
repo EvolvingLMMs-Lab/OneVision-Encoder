@@ -1233,7 +1233,7 @@ class Siglip2NaflexPacking(nn.Module):
     
     def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
-        Forward pass with pre-patchified input.
+        Forward pass with pre-patchified input using FlashAttention varlen approach.
         
         Args:
             hidden_states (torch.Tensor): Pre-patchified input of shape 
@@ -1264,7 +1264,6 @@ class Siglip2NaflexPacking(nn.Module):
             # For Siglip2, spatial_shapes is [num_images, 2] containing [h, w]
             spatial_shapes = grid_thw[:, 1:].long()  # Extract [h, w] from [t, h, w]
             
-            # Reshape hidden_states from [total_num_patches, patch_dim] to [batch_size, max_num_patches, patch_dim]
             # Calculate number of patches per image from grid_thw
             num_images = grid_thw.shape[0]
             patches_per_image = []
@@ -1273,43 +1272,67 @@ class Siglip2NaflexPacking(nn.Module):
                 num_patches = int(t * h * w)
                 patches_per_image.append(num_patches)
             
-            # Find max number of patches
-            max_num_patches = max(patches_per_image)
-            patch_dim = hidden_states.shape[1]
+            # Check if all images have the same number of patches
+            all_same_length = len(set(patches_per_image)) == 1
             
-            # Reshape and pad if necessary
-            pixel_values = torch.zeros(num_images, max_num_patches, patch_dim, 
-                                      dtype=hidden_states.dtype, device=self.device)
-            pixel_attention_mask = torch.zeros(num_images, max_num_patches, 
-                                        dtype=torch.long, device=self.device)
-            
-            # Fill in the actual patches and attention masks
-            start_idx = 0
-            for i in range(num_images):
-                num_patches = patches_per_image[i]
-                pixel_values[i, :num_patches] = hidden_states[start_idx:start_idx + num_patches]
-                pixel_attention_mask[i, :num_patches] = 1
-                start_idx += num_patches
-            
-            # Call the vision model with the required parameters
-            outputs = self.model.vision_model(
-                pixel_values=pixel_values,
-                attention_mask=pixel_attention_mask,
-                spatial_shapes=spatial_shapes,
-                output_hidden_states=True
-            )
-            
-            # Get the last layer's hidden state: [batch_size, max_num_patches, hidden_size]
-            last_hidden_state = outputs.last_hidden_state
-            
-            # Convert back to packing format: [total_num_patches, hidden_size]
-            # Extract only the valid patches (remove padding)
-            output_list = []
-            for i in range(num_images):
-                num_patches = patches_per_image[i]
-                output_list.append(last_hidden_state[i, :num_patches])
-            
-            packed_output = torch.cat(output_list, dim=0)
+            if all_same_length:
+                # Optimized path: no padding needed, process directly without attention mask
+                num_patches_per_image = patches_per_image[0]
+                patch_dim = hidden_states.shape[1]
+                
+                # Reshape to [batch_size, num_patches, patch_dim]
+                pixel_values = hidden_states.reshape(num_images, num_patches_per_image, patch_dim)
+                
+                # Call vision model without attention mask (no padding)
+                outputs = self.model.vision_model(
+                    pixel_values=pixel_values,
+                    attention_mask=None,  # No mask needed - all sequences same length
+                    spatial_shapes=spatial_shapes,
+                    output_hidden_states=True
+                )
+                
+                # Get the last layer's hidden state and reshape back to packed format
+                last_hidden_state = outputs.last_hidden_state
+                packed_output = last_hidden_state.reshape(-1, last_hidden_state.shape[-1])
+                
+            else:
+                # Variable length path: need to use attention mask for padding
+                max_num_patches = max(patches_per_image)
+                patch_dim = hidden_states.shape[1]
+                
+                # Reshape and pad if necessary
+                pixel_values = torch.zeros(num_images, max_num_patches, patch_dim, 
+                                          dtype=hidden_states.dtype, device=self.device)
+                pixel_attention_mask = torch.zeros(num_images, max_num_patches, 
+                                            dtype=torch.long, device=self.device)
+                
+                # Fill in the actual patches and attention masks
+                start_idx = 0
+                for i in range(num_images):
+                    num_patches = patches_per_image[i]
+                    pixel_values[i, :num_patches] = hidden_states[start_idx:start_idx + num_patches]
+                    pixel_attention_mask[i, :num_patches] = 1
+                    start_idx += num_patches
+                
+                # Call the vision model with attention mask
+                outputs = self.model.vision_model(
+                    pixel_values=pixel_values,
+                    attention_mask=pixel_attention_mask,
+                    spatial_shapes=spatial_shapes,
+                    output_hidden_states=True
+                )
+                
+                # Get the last layer's hidden state: [batch_size, max_num_patches, hidden_size]
+                last_hidden_state = outputs.last_hidden_state
+                
+                # Convert back to packing format: [total_num_patches, hidden_size]
+                # Extract only the valid patches (remove padding)
+                output_list = []
+                for i in range(num_images):
+                    num_patches = patches_per_image[i]
+                    output_list.append(last_hidden_state[i, :num_patches])
+                
+                packed_output = torch.cat(output_list, dim=0)
         
         return packed_output
 
