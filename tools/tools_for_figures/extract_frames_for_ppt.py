@@ -395,10 +395,10 @@ def create_animated_cube_building(
             if frame_img.mode != 'RGBA':
                 frame_img = frame_img.convert('RGBA')
             
-            # Apply transparency for depth effect (back frames more transparent)
+            # Apply transparency for depth effect (earlier frames more transparent, later frames more opaque)
             if transparency:
-                # Calculate alpha: front frames (higher i) are more opaque
-                # Range from 60% (back) to 100% (front)
+                # Calculate alpha: later frames (higher i, drawn last) are more opaque
+                # Range from 60% (earlier frames) to 100% (later frames)
                 # For single frame (current_frame_count=1), use 100% opacity
                 if current_frame_count == 1:
                     alpha_factor = 1.0
@@ -409,7 +409,7 @@ def create_animated_cube_building(
                 alpha = alpha.point(lambda p: int(p * alpha_factor))
                 frame_img.putalpha(alpha)
             
-            # Calculate position (back frames at top-left, front frames at bottom-right)
+            # Calculate position (earlier frames at top-left, later frames at bottom-right)
             x = 50 + i * offset_x
             y = 50 + i * offset_y
             
@@ -536,7 +536,7 @@ def create_spatiotemporal_cube(
         frame_img = Image.fromarray(frame)
         frame_img = frame_img.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
         
-        # Calculate position (back frames at top-left, front frames at bottom-right)
+        # Calculate position (earlier frames at top-left, later frames at bottom-right)
         x = 50 + i * offset_x
         y = 50 + i * offset_y
         
