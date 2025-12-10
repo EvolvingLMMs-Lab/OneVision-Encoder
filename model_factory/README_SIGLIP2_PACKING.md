@@ -197,6 +197,7 @@ output = packing_model(hidden_states, grid_thw)
 
 Use the provided alignment script to verify consistency between standard and packing models:
 
+**Testing with Random Tensors (default):**
 ```bash
 python align_siglip2_packing.py \
     --ckpt google/siglip2-so400m-patch16-naflex \
@@ -206,29 +207,52 @@ python align_siglip2_packing.py \
     --threshold 0.99
 ```
 
+**Testing with Real Images:**
+```bash
+# Test with real images from model_factory/images/ directory
+python align_siglip2_packing.py \
+    --ckpt google/siglip2-so400m-patch16-naflex \
+    --device cuda \
+    --use_real_images \
+    --threshold 0.99
+```
+
 The script will:
 1. Load both models
-2. Create random test images
+2. Create random test images OR load real images (1.jpg, 2.jpg)
 3. Process with standard model
 4. Convert to packing format and process with packing model
 5. Compare outputs and report similarity metrics
+
+When using `--use_real_images`:
+- The script loads images from `model_factory/images/1.jpg` and `model_factory/images/2.jpg`
+- Each image is tested individually with its native dimensions (resized to be divisible by patch size)
+- Both images are also tested together in a batch (resized to a common size)
+- If images don't exist, the script will generate random test images
 
 Expected output:
 ```
 Siglip2 Naflex Packing Alignment Script
 ================================================================================
 ...
-Results
+Testing with Real Images
 ================================================================================
-Max Diff:        0.000XXX
-Mean Diff:       0.000XXX
-Min Cosine Sim:  0.99XXXXXX
-Mean Cosine Sim: 0.99XXXXXX
-Max Cosine Sim:  1.00000000
+
+Testing image: 1.jpg
+...
+✅ PASS: 1.jpg (min cosine similarity > 0.99)
+
+Testing image: 2.jpg
+...
+✅ PASS: 2.jpg (min cosine similarity > 0.99)
+
+Testing with batched real images
+...
+✅ PASS: Batched images (min cosine similarity > 0.99)
 
 Summary
 ================================================================================
-✅ PASS: Models are aligned (min cosine similarity > 0.99)
+✅ ALL TESTS PASSED: Models are aligned
 ```
 
 ## Advantages of Packing Format
