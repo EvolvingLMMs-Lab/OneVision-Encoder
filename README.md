@@ -28,6 +28,26 @@
 
 LLaVA-ViT is a vision encoder designed for multimodal large language models, featuring efficient video representation with sparse video input. This project provides training code, data processing tools, and model evaluation utilities.
 
+### Input Method Comparison
+
+<table>
+  <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">Comparison of Frame Sampling Input vs Codec Input</caption>
+  <tr>
+    <td align="center">
+      <img src="pages/images/example.gif" alt="Animated demonstration of traditional uniform frame sampling method for video processing" width="400"><br>
+      <b>抽帧输入 (Frame Sampling Input)</b><br>
+      Traditional uniform frame sampling approach
+    </td>
+    <td align="center">
+      <img src="pages/images/example_codec_input.gif" alt="Animated demonstration of efficient codec-based input decomposition with I-frames and P-frames" width="400"><br>
+      <b>Codec Input</b><br>
+      Our efficient codec-based input decomposition
+    </td>
+  </tr>
+</table>
+
+### Cluster Discrimination Visualization
+
 <p align="center">
   <img src="pages/images/global_contrastive_comparison.gif" alt="Global Contrastive Comparison" width="800" style="max-width: 100%;">
 </p>
