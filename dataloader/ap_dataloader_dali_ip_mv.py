@@ -407,80 +407,49 @@ def dali_pipeline(mode, source_params):
             return videos, res_zero_masks, labels, indices, total_frames
 
 
-def get_dali_dataloader(data_root_path,
-                    data_csv_path,
-                    data_set,
-                    dali_num_threads = 4,
-                    dali_py_num_workers = 8,
-                    batch_size = 32,
-                    input_size = 224,
-                    short_side_size = 239,
-                    sequence_length = 16,
-                    decord_num_threads: int = 2,
-                    use_rgb = False,
-                    multi_views=False,
-                    mean = [0.48145466, 0.4578275, 0.40821073],
-                    std = [0.26862954, 0.26130258, 0.27577711],
-                    mode = "val",
-                    num_shots = None,
-                    seed = 0):
+def get_dali_dataloader_codec(
+    data_root_path: str,
+    data_csv_path: str,
+    mode: str = "val",
+    batch_size: int = 32,
+    sequence_length: int = 16,
+    input_size: int = 224,
+    short_side_size: int = 224,
+    use_rgb: bool = True,
+    mean: List[float] = [0.48145466, 0.4578275, 0.40821073],
+    std: List[float] = [0.26862954, 0.26130258, 0.27577711],
+    dali_num_threads: int = 4,
+    dali_py_num_workers: int = 8,
+    decord_num_threads: int = 2,
+    seed: int = 0,
+    feature_extract: bool = True,
+) -> DALIWarper:
+    """
+    """
+    print(f"[{mode} loader] Reading for: {data_csv_path}")
 
-    if num_shots is not None:
-        if mode == "train":
-            txt_file_name = "{}_{}_{}_replaced.txt".format(data_set, mode, "fewshot{}".format(num_shots))
-        else:
-            txt_file_name = "{}_hevc_{}.txt".format(data_set, mode)
-            if data_set != "ssv2":
-                old_data_set = data_set
-                data_set = data_set + "_hevc"
-        file_list = []
-
-        with open(os.path.join(data_csv_path, data_set, txt_file_name), 'r') as file:
-            reader = file.readlines()
-            if mode == "train":
-                for line in reader:
-                    offset_viedo_path, video_label = line.strip().split(',')
-                    if data_set == "ssv2":
-                        video_path = os.path.join(data_root_path, "ssv2_hevc", offset_viedo_path)
-                    elif data_set == "ucf101":
-                        video_path = os.path.join(data_root_path, "ucf101_hevc", offset_viedo_path)
-                    elif data_set == "k400":
-                        video_path = os.path.join(data_root_path, "k400_hevc", offset_viedo_path)
-                    elif data_set == "hmdb51":
-                        video_path = os.path.join(data_root_path, "hmdb51_hevc", offset_viedo_path)
-                    elif data_set == "perception_test":
-                        video_path = os.path.join(data_root_path, "perception_test_hevc", offset_viedo_path)
-                    elif data_set == "diving48":
-                        video_path = os.path.join(data_root_path, "diving48_hevc", offset_viedo_path)
-                    else:
-                        video_path = os.path.join(data_root_path, data_set, offset_viedo_path)
-                    file_list.append([video_path, int(video_label)])
-            else:
-                for line in reader:
-                    offset_viedo_path, video_label = line.strip().split(',')
-                    if data_set in ["ssv2", "ucf101_hevc", "k400_hevc", "hmdb51_hevc", "perception_test_hevc", "diving48_hevc"]:
-                        video_path = offset_viedo_path
-                    else:
-                        video_path = os.path.join(data_root_path, data_set, offset_viedo_path)
-                    file_list.append([video_path, int(video_label)])
-    elif num_shots is None:
-        print(f"[{mode} loader] Reading for: {data_csv_path}")
-        file_list = []
-        try:
-            with open(data_csv_path, "r") as f:
-                for line in f:
-                    offset_path, label = line.strip().split(",")
+    file_list = []
+    try:
+        with open(data_csv_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(",")
+                if len(parts) >= 2:
+                    offset_path, label = parts[0], parts[1]
                     full_path = os.path.join(data_root_path, offset_path)
                     file_list.append((full_path, int(label)))
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Data list file not found at: {data_csv_path}")
-        if not file_list:
-            raise ValueError(f"File list from {data_csv_path} is empty.")
-    else:
-        raise NotImplementedError("This function is not implemented yet")
-    rank = int(os.getenv("RANK", 0))
-    local_rank = int(os.getenv("LOCAL_RANK", 0))
-    world_size = int(os.getenv("WORLD_SIZE", 1))
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Data list file not found at: {data_csv_path}")
+    
+    if not file_list:
+        raise ValueError(f"File list from {data_csv_path} is empty.")
+
+    rank = int(os.getenv("RANK", "0"))
+    local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+
     source_params = {
         "num_shards": world_size,
         "shard_id": rank,
@@ -491,7 +460,7 @@ def get_dali_dataloader(data_root_path,
         "use_rgb": use_rgb,
         "input_size": input_size,
         "short_side_size": short_side_size,
-        "multi_views": multi_views,
+        "multi_views": False,
         "mean": mean,
         "std": std,
         "enable_res_zero_mask":  True,
