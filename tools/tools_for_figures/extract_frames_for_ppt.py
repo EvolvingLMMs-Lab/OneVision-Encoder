@@ -7,7 +7,7 @@ animated cube building, and save selected frames with perspective transformation
 This tool extracts frames from a video (either sampled or all frames at full frame rate),
 generates various visualizations including:
 - Animated GIF preview
-- Residual-based GIF with high-residual patches highlighted
+- Residual-based animated cube (with high-residual patches highlighted, shown as 3D cube)
 - Spatiotemporal volume visualization (space-time cube with oblique projection)
 - Animated cube building (GIF showing frames being added one by one with transparency)
 - Individual frames with 3D perspective effect
@@ -15,7 +15,7 @@ generates various visualizations including:
 Features:
 - Extract N evenly-spaced frames OR all frames at full frame rate
 - Generate an animated GIF preview
-- Generate residual-based GIF (highlights changed regions, darkens unchanged regions)
+- Generate residual-based animated cube (highlights changed regions, darkens unchanged regions, displayed as 3D cube)
 - Create spatiotemporal cube visualization (video cube / space-time cube)
 - Create animated cube building with transparency effects
 - Select specific frames by their indices
@@ -23,10 +23,10 @@ Features:
 - Save individual frames with perspective effect
 
 Usage Examples:
-    # Extract frames and create both original and residual GIFs
-    python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif --residual-gif residual_preview.gif
+    # Extract frames and create both original and residual cube GIFs
+    python extract_frames_for_ppt.py --video /path/to/video.mp4 --output preview.gif --residual-gif residual_cube.gif
     
-    # Create residual GIF with custom parameters
+    # Create residual cube GIF with custom parameters
     python extract_frames_for_ppt.py --video /path/to/video.mp4 --residual-gif residual.gif --residual-threshold 15.0 --residual-darken-factor 0.2
     
     # Extract all frames and create spatiotemporal cube visualization
@@ -51,7 +51,7 @@ Usage Examples:
     # Do everything in one command
     python extract_frames_for_ppt.py --video /path/to/video.mp4 \
         --all-frames --spacetime-cube spacetime.png --animated-cube cube_anim.gif \
-        --output preview.gif --residual-gif residual.gif --select 0,10,20,30 --output-dir frames/
+        --output preview.gif --residual-gif residual_cube.gif --select 0,10,20,30 --output-dir frames/
 """
 
 import argparse
@@ -329,11 +329,19 @@ def create_residual_gif_preview(
     add_labels: bool = True,
     patch_size: int = 16,
     threshold: float = 10.0,
-    darken_factor: float = 0.3
+    darken_factor: float = 0.3,
+    offset_x: int = 15,
+    offset_y: int = 15,
+    max_frames: Optional[int] = None,
+    frame_scale: float = 0.5,
+    transparency: bool = True,
+    final_hold_frames: int = 3
 ) -> None:
     """
-    Create an animated GIF with high-residual patches highlighted and low-residual patches darkened.
+    Create an animated GIF showing the residual cube being built frame by frame.
     
+    This creates an animation that starts from a single frame (reference) and progressively adds
+    more frames to build the complete spatiotemporal cube visualization with residual highlighting.
     The first frame is shown normally as the reference. Subsequent frames have their
     low-residual patches (patches with little change from the first frame) darkened,
     while high-residual patches (patches with significant change) remain bright.
@@ -341,67 +349,154 @@ def create_residual_gif_preview(
     Args:
         frames: np.ndarray of shape (num_frames, height, width, 3)
         output_path: Path to save the residual GIF
-        duration: Duration of each frame in milliseconds (default: 500)
+        duration: Duration of each animation frame in milliseconds (default: 500)
         add_labels: Whether to add frame numbers to each frame
         patch_size: Size of patches for residual computation (default: 16)
         threshold: Threshold for high residual detection (default: 10.0)
         darken_factor: Factor to darken low-residual regions (default: 0.3)
+        offset_x: Horizontal offset between consecutive frames (default: 15)
+        offset_y: Vertical offset between consecutive frames (default: 15)
+        max_frames: Maximum number of frames to include (None = all frames)
+        frame_scale: Scale factor for frames (default: 0.5)
+        transparency: Whether to apply transparency effects for depth (default: True)
+        final_hold_frames: Number of times to repeat final frame for emphasis (default: 3)
     """
-    gif_frames = []
-    font = get_font(24, bold=True)
+    # Limit number of frames if needed
+    if max_frames is not None and len(frames) > max_frames:
+        # Sample frames evenly
+        indices = np.linspace(0, len(frames) - 1, max_frames, dtype=int)
+        frames = frames[indices]
+        print(f"Using {max_frames} frames sampled from total frames")
+    
+    # Process frames with residual highlighting
     reference_frame = frames[0]
-
+    processed_frames = []
+    
     for idx, frame in enumerate(frames):
         if idx == 0:
             # First frame is the reference - show it normally
             processed_frame = frame.copy()
-            mask = None  # No mask for reference frame
         else:
             # Compute residual mask and apply darkening
             mask = compute_residual_mask(frame, reference_frame, patch_size, threshold)
             processed_frame = apply_residual_darkening(frame, mask, darken_factor)
         
-        # Convert to PIL Image
-        img = Image.fromarray(processed_frame)
-
-        if add_labels:
-            # Add frame number overlay with residual info
-            draw = ImageDraw.Draw(img)
-            if idx == 0:
-                label = f"Frame {idx} (Reference)"
+        processed_frames.append(processed_frame)
+    
+    num_frames = len(processed_frames)
+    frame_height, frame_width = processed_frames[0].shape[:2]
+    
+    # Scale frames
+    scaled_width = int(frame_width * frame_scale)
+    scaled_height = int(frame_height * frame_scale)
+    
+    # Calculate canvas size
+    canvas_width = scaled_width + (num_frames - 1) * offset_x + 100
+    canvas_height = scaled_height + (num_frames - 1) * offset_y + 100
+    
+    # Font for labels
+    font = get_font(16, bold=True) if add_labels else None
+    
+    print(f"Creating animated residual cube building visualization...")
+    print(f"  Frames: {num_frames}")
+    print(f"  Frame size: {scaled_width}x{scaled_height}")
+    print(f"  Canvas size: {canvas_width}x{canvas_height}")
+    print(f"  Offset: ({offset_x}, {offset_y})")
+    print(f"  Transparency: {transparency}")
+    print(f"  Patch size: {patch_size}x{patch_size}")
+    print(f"  Residual threshold: {threshold}")
+    
+    gif_frames = []
+    
+    # Create animation: add frames one by one
+    for current_frame_count in range(1, num_frames + 1):
+        # Create canvas with white background (RGBA for transparency support)
+        canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
+        
+        # Draw frames in order (0 to current_frame_count-1), so later frames overlay earlier frames
+        for i in range(current_frame_count):
+            frame = processed_frames[i]
+            
+            # Resize frame
+            frame_img = Image.fromarray(frame)
+            frame_img = frame_img.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+            
+            # Convert to RGBA for transparency effects
+            if frame_img.mode != 'RGBA':
+                frame_img = frame_img.convert('RGBA')
+            
+            # Apply transparency for depth effect (earlier frames more transparent, later frames more opaque)
+            if transparency:
+                # Calculate alpha: later frames (higher i, drawn last) are more opaque
+                # Range from 60% (earlier frames) to 100% (later frames)
+                # For single frame (current_frame_count=1), use 100% opacity
+                if current_frame_count == 1:
+                    alpha_factor = 1.0
+                else:
+                    alpha_factor = 0.6 + (0.4 * i / (current_frame_count - 1))
+                # Create alpha mask
+                alpha = frame_img.split()[3]
+                alpha = alpha.point(lambda p: int(p * alpha_factor))
+                frame_img.putalpha(alpha)
+            
+            # Calculate position (earlier frames at top-left, later frames at bottom-right)
+            x = 50 + i * offset_x
+            y = 50 + i * offset_y
+            
+            # Add subtle shadow for depth
+            shadow = Image.new('RGBA', (scaled_width + 4, scaled_height + 4), (0, 0, 0, 50))
+            canvas.paste(shadow, (x + 2, y + 2), shadow)
+            
+            # Paste frame with transparency
+            canvas.paste(frame_img, (x, y), frame_img)
+            
+            # Add frame border for clarity
+            draw = ImageDraw.Draw(canvas)
+            # Use different colors for reference frame vs residual frames
+            if i == 0:
+                border_color = (100, 255, 150, 255)  # Green for reference frame
             else:
-                # Calculate percentage of high-residual patches
-                high_residual_ratio = np.sum(mask > 0.5) / (mask.shape[0] * mask.shape[1]) * 100
-                label = f"Frame {idx} ({high_residual_ratio:.1f}% changed)"
-
-            # Get text bounding box for background
-            bbox = draw.textbbox((0, 0), label, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-
-            # Position at top-left with padding
-            padding = 10
-            bg_box = [
-                padding,
-                padding,
-                padding + text_width + padding * 2,
-                padding + text_height + padding * 2
-            ]
-
-            # Draw semi-transparent background
-            draw.rectangle(bg_box, fill=(0, 0, 0, 180))
-
-            # Draw text
-            draw.text(
-                (padding * 2, padding * 1.5),
-                label,
-                fill=(255, 255, 255),
-                font=font
+                border_color = (255, 150, 100, 255)  # Orange for residual frames
+            draw.rectangle(
+                [x, y, x + scaled_width, y + scaled_height],
+                outline=border_color,
+                width=2
             )
-
-        gif_frames.append(img)
-
-    # Save as GIF
+            
+            # Add label if requested (only for the most recent frames)
+            if add_labels and i >= current_frame_count - min(5, current_frame_count):
+                if i == 0:
+                    label = f"Ref"
+                else:
+                    label = f"t={i}"
+                # Get text size
+                bbox = draw.textbbox((0, 0), label, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                
+                # Position label at bottom-right of frame
+                label_x = x + scaled_width - text_width - 5
+                label_y = y + scaled_height - text_height - 5
+                
+                # Draw background for label
+                draw.rectangle(
+                    [label_x - 3, label_y - 2, label_x + text_width + 3, label_y + text_height + 2],
+                    fill=(255, 255, 255, 230)
+                )
+                
+                # Draw text
+                draw.text((label_x, label_y), label, fill=(0, 0, 0, 255), font=font)
+        
+        # Convert RGBA to RGB for GIF (with white background)
+        rgb_canvas = Image.new('RGB', canvas.size, (255, 255, 255))
+        rgb_canvas.paste(canvas, (0, 0), canvas)
+        gif_frames.append(rgb_canvas)
+    
+    # Hold the final frame for longer
+    for _ in range(final_hold_frames):
+        gif_frames.append(gif_frames[-1])
+    
+    # Save as animated GIF
     gif_frames[0].save(
         output_path,
         save_all=True,
@@ -409,12 +504,10 @@ def create_residual_gif_preview(
         duration=duration,
         loop=0
     )
-
-    print(f"Residual GIF preview saved to: {output_path}")
-    print(f"  - Total frames: {len(gif_frames)}")
-    print(f"  - Duration per frame: {duration}ms")
-    print(f"  - Patch size: {patch_size}x{patch_size}")
-    print(f"  - Residual threshold: {threshold}")
+    
+    print(f"\nAnimated residual cube GIF saved to: {output_path}")
+    print(f"  Total animation frames: {len(gif_frames)}")
+    print(f"  Duration per frame: {duration}ms")
 
 
 def apply_perspective_transform(
@@ -913,7 +1006,7 @@ def main():
     parser.add_argument(
         "--residual-gif",
         type=str,
-        help="Create residual-based GIF with high-residual patches highlighted (e.g., 'residual_preview.gif')"
+        help="Create animated residual cube GIF with high-residual patches highlighted (e.g., 'residual_cube.gif')"
     )
     parser.add_argument(
         "--residual-patch-size",
@@ -1006,15 +1099,20 @@ def main():
     
     # Create residual GIF (if requested)
     if args.residual_gif:
-        print(f"\nStep {step_num}: Creating residual-based GIF preview...")
+        print(f"\nStep {step_num}: Creating residual-based cube GIF...")
         create_residual_gif_preview(
             frames,
             args.residual_gif,
-            duration=args.duration,
+            duration=args.animation_duration,
             add_labels=not args.no_labels,
             patch_size=args.residual_patch_size,
             threshold=args.residual_threshold,
-            darken_factor=args.residual_darken_factor
+            darken_factor=args.residual_darken_factor,
+            offset_x=args.cube_offset_x,
+            offset_y=args.cube_offset_y,
+            max_frames=args.cube_max_frames,
+            frame_scale=args.cube_scale,
+            transparency=not args.no_transparency
         )
         step_num += 1
 
@@ -1049,7 +1147,7 @@ def main():
         print(f"  ✓ Animated cube building: {args.animated_cube}")
     print(f"  ✓ GIF preview: {args.output}")
     if args.residual_gif:
-        print(f"  ✓ Residual GIF: {args.residual_gif}")
+        print(f"  ✓ Residual cube GIF: {args.residual_gif}")
     if args.select:
         print(f"  ✓ Perspective frames: {args.output_dir}/")
     print("="*60)
