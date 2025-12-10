@@ -196,6 +196,10 @@ def compute_residual_mask(
         
     Returns:
         Binary mask where 1 = high residual (keep), 0 = low residual (darken)
+        
+    Note:
+        Partial patches at image boundaries (when dimensions are not evenly divisible
+        by patch_size) are not processed and will have mask value of 0 (darkened).
     """
     # Compute raw residual
     residual = current_frame.astype(np.float32) - reference_frame.astype(np.float32)
@@ -351,6 +355,7 @@ def create_residual_gif_preview(
         if idx == 0:
             # First frame is the reference - show it normally
             processed_frame = frame.copy()
+            mask = None  # No mask for reference frame
         else:
             # Compute residual mask and apply darkening
             mask = compute_residual_mask(frame, reference_frame, patch_size, threshold)
@@ -999,7 +1004,7 @@ def main():
     )
     step_num += 1
     
-    # Step 3/4/5: Create residual GIF (if requested)
+    # Create residual GIF (if requested)
     if args.residual_gif:
         print(f"\nStep {step_num}: Creating residual-based GIF preview...")
         create_residual_gif_preview(
@@ -1013,7 +1018,7 @@ def main():
         )
         step_num += 1
 
-    # Step 3/4/5/6: Save selected frames with perspective (if requested)
+    # Save selected frames with perspective (if requested)
     if args.select:
         print(f"\nStep {step_num}: Saving selected frames with perspective effect...")
         try:
