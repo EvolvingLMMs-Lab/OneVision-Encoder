@@ -1217,13 +1217,12 @@ class Siglip2NaflexPacking(nn.Module):
         super(Siglip2NaflexPacking, self).__init__()
         self.device = torch.device(device)
         
-        # Load the full model to get vision_model
-        full_model = AutoModel.from_pretrained(ckpt)
-        self.model = full_model.vision_model.to(self.device).eval()
+        # Load the full model
+        self.model = AutoModel.from_pretrained(ckpt).to(self.device).eval()
         
-        # Get patch size from config
-        if hasattr(self.model.config, 'patch_size'):
-            self.patch_size = self.model.config.patch_size
+        # Get patch size from vision config
+        if hasattr(self.model.vision_model.config, 'patch_size'):
+            self.patch_size = self.model.vision_model.config.patch_size
         else:
             self.patch_size = self.DEFAULT_PATCH_SIZE
     
@@ -1246,41 +1245,61 @@ class Siglip2NaflexPacking(nn.Module):
         """
         with torch.no_grad():
             # Move inputs to device
-            hidden_states = hidden_states.to(device=self.device, dtype=self.model.embeddings.patch_embedding.weight.dtype)
+            hidden_states = hidden_states.to(device=self.device, dtype=self.model.vision_model.embeddings.patch_embedding.weight.dtype)
             grid_thw = grid_thw.to(device=self.device)
             
             # Calculate spatial_shapes from grid_thw
-            # For packing format, spatial_shapes is [num_images, 2] containing [h, w]
+            # For Siglip2, spatial_shapes is [num_images, 2] containing [h, w]
             spatial_shapes = grid_thw[:, 1:].long()  # Extract [h, w] from [t, h, w]
             
-            # Calculate attention_mask
-            # For packing format, we need to create attention_mask for each image
-            # and concatenate them
-            attention_masks = []
-            for i in range(grid_thw.shape[0]):
+            # Reshape hidden_states from [total_num_patches, patch_dim] to [batch_size, max_num_patches, patch_dim]
+            # Calculate number of patches per image from grid_thw
+            num_images = grid_thw.shape[0]
+            patches_per_image = []
+            for i in range(num_images):
                 t, h, w = grid_thw[i][0].item(), grid_thw[i][1].item(), grid_thw[i][2].item()
                 num_patches = int(t * h * w)
-                mask = torch.ones(num_patches, dtype=torch.long, device=self.device)
-                attention_masks.append(mask)
+                patches_per_image.append(num_patches)
             
-            attention_mask = torch.cat(attention_masks, dim=0)
+            # Find max number of patches
+            max_num_patches = max(patches_per_image)
+            patch_dim = hidden_states.shape[1]
+            
+            # Reshape and pad if necessary
+            pixel_values = torch.zeros(num_images, max_num_patches, patch_dim, 
+                                      dtype=hidden_states.dtype, device=self.device)
+            attention_mask = torch.zeros(num_images, max_num_patches, 
+                                        dtype=torch.long, device=self.device)
+            
+            # Fill in the actual patches and attention masks
+            start_idx = 0
+            for i in range(num_images):
+                num_patches = patches_per_image[i]
+                pixel_values[i, :num_patches] = hidden_states[start_idx:start_idx + num_patches]
+                attention_mask[i, :num_patches] = 1
+                start_idx += num_patches
             
             # Call the vision model with the required parameters
-            # The vision model expects:
-            # - pixel_values: already patchified input
-            # - attention_mask: mask for valid tokens
-            # - spatial_shapes: spatial dimensions for positional embeddings
-            outputs = self.model(
-                pixel_values=hidden_states,
+            outputs = self.model.vision_model(
+                pixel_values=pixel_values,
                 attention_mask=attention_mask,
                 spatial_shapes=spatial_shapes,
                 output_hidden_states=True
             )
             
-            # Get the last layer's hidden state
-            last_hidden_state = outputs.last_hidden_state  # [total_num_patches, hidden_size]
+            # Get the last layer's hidden state: [batch_size, max_num_patches, hidden_size]
+            last_hidden_state = outputs.last_hidden_state
+            
+            # Convert back to packing format: [total_num_patches, hidden_size]
+            # Extract only the valid patches (remove padding)
+            output_list = []
+            for i in range(num_images):
+                num_patches = patches_per_image[i]
+                output_list.append(last_hidden_state[i, :num_patches])
+            
+            packed_output = torch.cat(output_list, dim=0)
         
-        return last_hidden_state
+        return packed_output
 
 
 __all__ = [
