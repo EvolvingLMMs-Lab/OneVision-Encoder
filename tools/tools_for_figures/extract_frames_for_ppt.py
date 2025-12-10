@@ -2,18 +2,20 @@
 # -*- coding: utf-8 -*-
 """
 Extract frames from a video, create a GIF preview, spatiotemporal volume visualization,
-and save selected frames with perspective transformation for PowerPoint presentations.
+animated cube building, and save selected frames with perspective transformation for PowerPoint presentations.
 
 This tool extracts frames from a video (either sampled or all frames at full frame rate),
 generates various visualizations including:
 - Animated GIF preview
 - Spatiotemporal volume visualization (space-time cube with oblique projection)
+- Animated cube building (GIF showing frames being added one by one with transparency)
 - Individual frames with 3D perspective effect
 
 Features:
 - Extract N evenly-spaced frames OR all frames at full frame rate
 - Generate an animated GIF preview
 - Create spatiotemporal cube visualization (video cube / space-time cube)
+- Create animated cube building with transparency effects
 - Select specific frames by their indices
 - Apply 3D perspective transformation for visual appeal
 - Save individual frames with perspective effect
@@ -21,6 +23,12 @@ Features:
 Usage Examples:
     # Extract all frames and create spatiotemporal cube visualization
     python extract_frames_for_ppt.py --video /path/to/video.mp4 --all-frames --spacetime-cube spacetime.png
+    
+    # Create animated cube building GIF with transparency effects
+    python extract_frames_for_ppt.py --video /path/to/video.mp4 --animated-cube cube_animation.gif
+    
+    # Create animated cube building without transparency
+    python extract_frames_for_ppt.py --video /path/to/video.mp4 --animated-cube cube_animation.gif --no-transparency
     
     # Extract all frames with custom cube parameters
     python extract_frames_for_ppt.py --video /path/to/video.mp4 --all-frames \
@@ -34,7 +42,7 @@ Usage Examples:
 
     # Do everything in one command
     python extract_frames_for_ppt.py --video /path/to/video.mp4 \
-        --all-frames --spacetime-cube spacetime.png \
+        --all-frames --spacetime-cube spacetime.png --animated-cube cube_anim.gif \
         --output preview.gif --select 0,10,20,30 --output-dir frames/
 """
 
@@ -309,6 +317,162 @@ def apply_perspective_transform(
     return result
 
 
+def create_animated_cube_building(
+    frames: np.ndarray,
+    output_path: str,
+    offset_x: int = 15,
+    offset_y: int = 15,
+    max_frames: Optional[int] = None,
+    frame_scale: float = 0.5,
+    add_labels: bool = True,
+    duration: int = 300,
+    transparency: bool = True,
+    final_hold_frames: int = 3
+) -> None:
+    """
+    Create an animated GIF showing the spatiotemporal cube being built frame by frame.
+    
+    This creates an animation that starts from a single frame and progressively adds
+    more frames to build the complete spatiotemporal cube visualization with optional
+    transparency effects for depth perception.
+    
+    Args:
+        frames: np.ndarray of shape (num_frames, height, width, 3)
+        output_path: Path to save the animated GIF
+        offset_x: Horizontal offset between consecutive frames (default: 15)
+        offset_y: Vertical offset between consecutive frames (default: 15)
+        max_frames: Maximum number of frames to include (None = all frames)
+        frame_scale: Scale factor for frames (default: 0.5)
+        add_labels: Whether to add frame numbers
+        duration: Duration of each animation frame in milliseconds (default: 300)
+        transparency: Whether to apply transparency effects for depth (default: True)
+        final_hold_frames: Number of times to repeat final frame for emphasis (default: 3)
+    """
+    # Limit number of frames if needed
+    if max_frames is not None and len(frames) > max_frames:
+        # Sample frames evenly
+        indices = np.linspace(0, len(frames) - 1, max_frames, dtype=int)
+        frames = frames[indices]
+        print(f"Using {max_frames} frames sampled from total frames")
+    
+    num_frames = len(frames)
+    frame_height, frame_width = frames[0].shape[:2]
+    
+    # Scale frames
+    scaled_width = int(frame_width * frame_scale)
+    scaled_height = int(frame_height * frame_scale)
+    
+    # Calculate canvas size
+    canvas_width = scaled_width + (num_frames - 1) * offset_x + 100
+    canvas_height = scaled_height + (num_frames - 1) * offset_y + 100
+    
+    # Font for labels
+    font = get_font(16, bold=True) if add_labels else None
+    
+    print(f"Creating animated cube building visualization...")
+    print(f"  Frames: {num_frames}")
+    print(f"  Frame size: {scaled_width}x{scaled_height}")
+    print(f"  Canvas size: {canvas_width}x{canvas_height}")
+    print(f"  Offset: ({offset_x}, {offset_y})")
+    print(f"  Transparency: {transparency}")
+    
+    gif_frames = []
+    
+    # Create animation: add frames one by one
+    for current_frame_count in range(1, num_frames + 1):
+        # Create canvas with white background (RGBA for transparency support)
+        canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
+        
+        # Draw frames from back to front, but only up to current_frame_count
+        for i in range(current_frame_count - 1, -1, -1):
+            frame = frames[i]
+            
+            # Resize frame
+            frame_img = Image.fromarray(frame)
+            frame_img = frame_img.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+            
+            # Convert to RGBA for transparency effects
+            if frame_img.mode != 'RGBA':
+                frame_img = frame_img.convert('RGBA')
+            
+            # Apply transparency for depth effect (back frames more transparent)
+            if transparency:
+                # Calculate alpha: front frames (higher i) are more opaque
+                # Range from 60% (back) to 100% (front)
+                # For single frame (current_frame_count=1), use 100% opacity
+                if current_frame_count == 1:
+                    alpha_factor = 1.0
+                else:
+                    alpha_factor = 0.6 + (0.4 * i / (current_frame_count - 1))
+                # Create alpha mask
+                alpha = frame_img.split()[3]
+                alpha = alpha.point(lambda p: int(p * alpha_factor))
+                frame_img.putalpha(alpha)
+            
+            # Calculate position (back frames at top-left, front frames at bottom-right)
+            x = 50 + i * offset_x
+            y = 50 + i * offset_y
+            
+            # Add subtle shadow for depth
+            shadow = Image.new('RGBA', (scaled_width + 4, scaled_height + 4), (0, 0, 0, 50))
+            canvas.paste(shadow, (x + 2, y + 2), shadow)
+            
+            # Paste frame with transparency
+            canvas.paste(frame_img, (x, y), frame_img)
+            
+            # Add frame border for clarity
+            draw = ImageDraw.Draw(canvas)
+            draw.rectangle(
+                [x, y, x + scaled_width, y + scaled_height],
+                outline=(100, 100, 100, 255),
+                width=2
+            )
+            
+            # Add label if requested (only for the most recent frames)
+            if add_labels and i >= current_frame_count - min(5, current_frame_count):
+                label = f"t={i}"
+                # Get text size
+                bbox = draw.textbbox((0, 0), label, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                
+                # Position label at bottom-right of frame
+                label_x = x + scaled_width - text_width - 5
+                label_y = y + scaled_height - text_height - 5
+                
+                # Draw background for label
+                draw.rectangle(
+                    [label_x - 3, label_y - 2, label_x + text_width + 3, label_y + text_height + 2],
+                    fill=(255, 255, 255, 230)
+                )
+                
+                # Draw text
+                draw.text((label_x, label_y), label, fill=(0, 0, 0, 255), font=font)
+        
+        # Convert RGBA to RGB for GIF (with white background)
+        rgb_canvas = Image.new('RGB', canvas.size, (255, 255, 255))
+        rgb_canvas.paste(canvas, (0, 0), canvas)
+        gif_frames.append(rgb_canvas)
+    
+    # Hold the final frame for longer
+    for _ in range(final_hold_frames):
+        gif_frames.append(gif_frames[-1])
+    
+    # Save as animated GIF
+    gif_frames[0].save(
+        output_path,
+        save_all=True,
+        append_images=gif_frames[1:],
+        duration=duration,
+        loop=0
+    )
+    
+    print(f"\nAnimated cube building GIF saved to: {output_path}")
+    print(f"  Total animation frames: {len(gif_frames)}")
+    print(f"  Duration per frame: {duration}ms")
+    print(f"  Total duration: {len(gif_frames) * duration / 1000:.1f}s")
+
+
 def create_spatiotemporal_cube(
     frames: np.ndarray,
     output_path: str,
@@ -548,6 +712,24 @@ def main():
         default=0.5,
         help="Scale factor for frames in space-time cube (default: 0.5)"
     )
+    
+    # Animated cube building options
+    parser.add_argument(
+        "--animated-cube",
+        type=str,
+        help="Create animated GIF showing cube being built frame by frame (e.g., 'cube_animation.gif')"
+    )
+    parser.add_argument(
+        "--animation-duration",
+        type=int,
+        default=300,
+        help="Duration of each frame in animated cube GIF in milliseconds (default: 300)"
+    )
+    parser.add_argument(
+        "--no-transparency",
+        action="store_true",
+        help="Disable transparency effects in animated cube (frames won't fade with depth)"
+    )
 
     args = parser.parse_args()
 
@@ -579,8 +761,9 @@ def main():
     print(f"Successfully loaded {len(frames)} frames with shape: {frames[0].shape}")
 
     # Step 2: Create spatiotemporal cube if requested
+    step_num = 2
     if args.spacetime_cube:
-        print(f"\nStep 2: Creating spatiotemporal cube visualization...")
+        print(f"\nStep {step_num}: Creating spatiotemporal cube visualization...")
         create_spatiotemporal_cube(
             frames,
             args.spacetime_cube,
@@ -590,11 +773,25 @@ def main():
             frame_scale=args.cube_scale,
             add_labels=not args.no_labels
         )
-        step_num = 3
-    else:
-        step_num = 2
+        step_num += 1
+    
+    # Step 2/3: Create animated cube building if requested
+    if args.animated_cube:
+        print(f"\nStep {step_num}: Creating animated cube building GIF...")
+        create_animated_cube_building(
+            frames,
+            args.animated_cube,
+            offset_x=args.cube_offset_x,
+            offset_y=args.cube_offset_y,
+            max_frames=args.cube_max_frames,
+            frame_scale=args.cube_scale,
+            add_labels=not args.no_labels,
+            duration=args.animation_duration,
+            transparency=not args.no_transparency
+        )
+        step_num += 1
 
-    # Step 2/3: Create GIF preview
+    # Step 2/3/4: Create GIF preview
     print(f"\nStep {step_num}: Creating GIF preview...")
     create_gif_preview(
         frames,
@@ -631,6 +828,8 @@ def main():
     print(f"  ✓ Extracted {len(frames)} frames from video")
     if args.spacetime_cube:
         print(f"  ✓ Spatiotemporal cube: {args.spacetime_cube}")
+    if args.animated_cube:
+        print(f"  ✓ Animated cube building: {args.animated_cube}")
     print(f"  ✓ GIF preview: {args.output}")
     if args.select:
         print(f"  ✓ Perspective frames: {args.output_dir}/")

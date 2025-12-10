@@ -44,18 +44,28 @@ python generate_vit_residual_gif.py --demo --output custom.mp4 \
 
 ### 2. extract_frames_for_ppt.py
 
-Extract frames from a video, create an animated GIF preview, spatiotemporal volume visualization (space-time cube), and save selected frames with 3D perspective transformation for PowerPoint presentations.
+Extract frames from a video, create an animated GIF preview, spatiotemporal volume visualization (space-time cube), animated cube building, and save selected frames with 3D perspective transformation for PowerPoint presentations.
 
 **Features:**
 - Extract N evenly-spaced frames OR all frames at full frame rate
 - Generate an animated GIF preview with frame labels
 - **NEW:** Create spatiotemporal cube visualization (video cube / space-time cube with oblique projection)
+- **NEW:** Create animated cube building GIF showing frames being added progressively with transparency effects
 - Select specific frames to save separately
 - Apply 3D perspective transformation with rotation for visual appeal
 - Varying angles for each frame for dynamic presentation
 
 **Usage:**
 ```bash
+# NEW: Create animated cube building GIF with transparency effects
+python extract_frames_for_ppt.py --video /path/to/video.mp4 \
+    --animated-cube cube_animation.gif
+
+# Create animated cube building without transparency
+python extract_frames_for_ppt.py --video /path/to/video.mp4 \
+    --animated-cube cube_animation.gif \
+    --no-transparency
+
 # NEW: Extract all frames and create spatiotemporal cube visualization
 python extract_frames_for_ppt.py --video /path/to/video.mp4 \
     --all-frames \
@@ -83,6 +93,7 @@ python extract_frames_for_ppt.py --video /path/to/video.mp4 \
 python extract_frames_for_ppt.py --video /path/to/video.mp4 \
     --all-frames \
     --spacetime-cube spacetime.png \
+    --animated-cube cube_animation.gif \
     --output preview.gif \
     --select 0,10,20,30 \
     --output-dir ppt_frames/
@@ -107,9 +118,21 @@ python extract_frames_for_ppt.py --video /path/to/video.mp4 \
 - `--cube-max-frames`: Maximum number of frames to include (default: all frames)
 - `--cube-scale`: Scale factor for frames (default: 0.5, smaller = more compact)
 
+**Animated Cube Building Parameters (NEW):**
+- `--animated-cube`: Path to save animated cube building GIF (e.g., 'cube_animation.gif')
+- `--animation-duration`: Duration per frame in milliseconds (default: 300)
+- `--no-transparency`: Disable transparency effects (frames won't fade with depth)
+
 **Workflows:**
 
-*Spatiotemporal Cube Workflow (NEW):*
+*Animated Cube Building Workflow (NEW):*
+1. Extract frames from your video
+2. Create an animated GIF with `--animated-cube` showing the cube being built progressively
+3. Use transparency effects (enabled by default) to show depth perception
+4. Control animation speed with `--animation-duration` parameter
+5. Use the generated GIF in your PowerPoint or web presentations
+
+*Spatiotemporal Cube Workflow:*
 1. Extract all frames from your video at full frame rate with `--all-frames`
 2. Create a space-time cube visualization with `--spacetime-cube`
 3. Adjust offset and scale parameters to control the 3D appearance
@@ -123,8 +146,19 @@ python extract_frames_for_ppt.py --video /path/to/video.mp4 \
 
 **Output:**
 - GIF preview: Animated preview showing frames with frame numbers
+- **Animated cube building:** GIF animation showing frames being added progressively to form the spatiotemporal cube
 - **Spatiotemporal cube:** PNG image showing all frames stacked with oblique projection (cascade/stacked view)
 - Perspective frames: Individual PNG files with 3D rotation effect, saved with transparency
+
+**Animated Cube Building (NEW):**
+
+The animated cube building creates a dynamic visualization where:
+- Starts with a single frame
+- Progressively adds frames one by one to build the complete cube
+- Uses transparency effects (optional) where back frames are more transparent for depth perception
+- Frame opacity ranges from 60% (back) to 100% (front) when transparency is enabled
+- Holds the final complete cube for emphasis
+- Perfect for presentations to show how the spatiotemporal visualization is constructed
 
 **Spatiotemporal Cube Visualization:**
 
@@ -232,10 +266,13 @@ All parameters are now centralized at the top of the script for easy modificatio
 
 Install dependencies:
 ```bash
-pip install imageio imageio-ffmpeg pillow numpy opencv-python
+pip install imageio imageio-ffmpeg pillow numpy opencv-python decord
 ```
 
-**Note:** `opencv-python` is required for video processing in both `generate_vit_residual_gif.py` and `extract_frames_for_ppt.py`.
+**Note:** 
+- `opencv-python` is required for video processing in `generate_vit_residual_gif.py`
+- `decord` is required for efficient video frame extraction in `extract_frames_for_ppt.py`
+- Both can work with alternative backends if unavailable
 
 ## Output Examples
 
