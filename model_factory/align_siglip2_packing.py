@@ -338,15 +338,13 @@ def main():
                     print(f"⚠️  Warning: Image dimensions ({width}x{height}) are not divisible by patch size ({patch_size})")
                     print(f"Resizing to nearest multiple of patch size...")
                     
-                    # Resize to nearest multiple of patch size
-                    new_height = (height // patch_size) * patch_size
-                    new_width = (width // patch_size) * patch_size
+                    # Round up to nearest multiple of patch size (consistent with batch processing)
+                    new_height = ((height + patch_size - 1) // patch_size) * patch_size
+                    new_width = ((width + patch_size - 1) // patch_size) * patch_size
                     
                     # Ensure minimum size is at least one patch
-                    if new_height < patch_size or new_width < patch_size:
-                        print(f"❌ ERROR: Image dimensions ({width}x{height}) are smaller than patch size ({patch_size})")
-                        all_tests_passed = False
-                        continue
+                    new_height = max(patch_size, new_height)
+                    new_width = max(patch_size, new_width)
                     
                     test_input = F.interpolate(
                         test_input,
