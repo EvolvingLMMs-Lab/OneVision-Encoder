@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from timm.models.registry import register_model
 
-from transformers import AutoImageProcessor, AutoModel
+from transformers import Aimv2VisionModel
 class AIMv2(nn.Module):
     def __init__(
         self,
@@ -12,7 +12,7 @@ class AIMv2(nn.Module):
         super(AIMv2, self).__init__()
         self.device = torch.device(device)
         # Note: trust_remote_code is required for AIMv2 models
-        model = AutoModel.from_pretrained(ckpt, trust_remote_code=True)
+        model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
         self.model = model.to(self.device)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
@@ -33,15 +33,14 @@ class AIMv2(nn.Module):
 
 @register_model
 def aimv2_large_patch14_native_ap(pretrained: bool = False, **kwargs):
-    model = AIMv2("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
+    model = AIMv2("apple/aimv2-large-patch14-native")
     return model
 
 if __name__ == "__main__":
     import timm
 
     # 创建模型
-    model = timm.create_model("aimv2_large_patch14_native", pretrained=False)
-    model: AutoModel
+    model = timm.create_model("aimv2_large_patch14_native_ap")
     model.model.save_pretrained("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
 
     bs = 4
