@@ -604,6 +604,7 @@ def main():
                 print(f"    Mean Diff:       {metrics['mean_diff']:.6f}")
                 print(f"    Min Cosine Sim:  {metrics['min_cosine']:.8f}")
                 print(f"    Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+                print(f"    Max Cosine Sim:  {metrics['max_cosine']:.8f}")
                 
                 test_passed = metrics['min_cosine'] > args.threshold
                 if not test_passed:
