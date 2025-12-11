@@ -6,18 +6,12 @@ from transformers import AutoImageProcessor, AutoModel
 class AIMv2(nn.Module):
     def __init__(
         self,
-        ckpt: str = "apple/aimv2-large-patch14-224",
+        ckpt: str = "apple/aimv2-large-patch14-native",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         super(AIMv2, self).__init__()
         self.device = torch.device(device)
-
-
-        model = AutoModel.from_pretrained(
-            "apple/aimv2-large-patch14-224",
-            revision="ac764a25c832c7dc5e11871daa588e98e3cdbfb7",
-            trust_remote_code=True,
-        )
+        model = AutoModel.from_pretrained(ckpt)
         self.model = model.to(self.device)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
@@ -37,15 +31,17 @@ class AIMv2(nn.Module):
         return last_hidden_state
 
 @register_model
-def aimv2_large_patch14_224(pretrained: bool = False, **kwargs):
-    model = AIMv2("/video_vit/pretrain_models/aimv2-large-patch14-224")
+def aimv2_large_patch14_native_ap(pretrained: bool = False, **kwargs):
+    model = AIMv2("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
     return model
 
 if __name__ == "__main__":
     import timm
 
     # 创建模型
-    model = timm.create_model("aimv2_large_patch14_224", pretrained=False)
+    model = timm.create_model("aimv2_large_patch14_native", pretrained=False)
+    model: AutoModel
+    model.model.save_pretrained("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
 
     bs = 4
     # AIMv2 Large Patch14 通常输入大小为 224x224
