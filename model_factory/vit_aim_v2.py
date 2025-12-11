@@ -11,7 +11,8 @@ class AIMv2(nn.Module):
     ):
         super(AIMv2, self).__init__()
         self.device = torch.device(device)
-        model = AutoModel.from_pretrained(ckpt)
+        # Note: trust_remote_code is required for AIMv2 models
+        model = AutoModel.from_pretrained(ckpt, trust_remote_code=True)
         self.model = model.to(self.device)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
