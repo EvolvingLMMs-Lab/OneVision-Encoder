@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import torch
 from torch import nn
 from transformers import AutoModel
@@ -50,23 +51,31 @@ class AIMv2Packing(nn.Module):
         Initialize the AIMv2 Packing model with FlashAttention.
         
         Args:
-            ckpt (str): HuggingFace checkpoint for the pre-trained model.
+            ckpt (str): HuggingFace checkpoint for the pre-trained model or local path.
             device (str): Device to map the model for inference.
             revision (str): Specific git revision to use. Default is the verified working version.
+                           Only used for HuggingFace Hub checkpoints, ignored for local paths.
         """
         super(AIMv2Packing, self).__init__()
         self.device = torch.device(device)
         
+        # Detect if checkpoint is a local path or HuggingFace Hub ID
+        is_local_path = os.path.exists(ckpt) and os.path.isdir(ckpt)
+        
         # Load the full model with FlashAttention enabled
         # Note: trust_remote_code is required for AIMv2
-        # Using specific revision for stability and reproducibility
-        self.model = AutoModel.from_pretrained(
-            ckpt,
-            revision=revision,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2",
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
-        ).to(self.device).eval()
+        # Using specific revision for stability and reproducibility (Hub only)
+        model_kwargs = {
+            "trust_remote_code": True,
+            "attn_implementation": "flash_attention_2",
+            "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        }
+        
+        # Only add revision parameter for HuggingFace Hub checkpoints
+        if not is_local_path:
+            model_kwargs["revision"] = revision
+        
+        self.model = AutoModel.from_pretrained(ckpt, **model_kwargs).to(self.device).eval()
         
         # Get patch size from config
         if hasattr(self.model.config, 'patch_size'):
