@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # coding=utf-8
 """
-Siglip2 Naflex Packing Alignment Script
+DINOv3 ViT Packing Alignment Script
 
 This script verifies consistency between:
-- vit_siglip2.py (Siglip2Naflex) - standard format that accepts [B, C, H, W] images
-- vit_siglip2_packing_hf.py (Siglip2NaflexPacking) - packing format that accepts pre-patchified input
+- vit_dinov3.py (Dinov3) - standard format that accepts [B, C, H, W] images
+- vit_dinov3_packing_hf.py (DINOv3ViTPacking) - packing format that accepts pre-patchified input
 
 The script performs the following:
 1. Loads both standard and packing models with the same checkpoint
@@ -20,23 +20,26 @@ Expected Result:
 Both models should produce identical (or near-identical) outputs since they share
 the same weights and architecture, just with different I/O formats.
 
+Note: DINOv3 includes CLS token and register tokens, so the output will exclude these
+prefix tokens when comparing patch representations.
+
 Usage:
     # Test with random tensors
-    python align_siglip2_packing.py --ckpt <model_checkpoint> [--device cuda]
+    python align_dinov3_packing.py --ckpt <model_checkpoint> [--device cuda]
     
     # Test with real images from model_factory/images/
-    python align_siglip2_packing.py --ckpt <model_checkpoint> --use_real_images
+    python align_dinov3_packing.py --ckpt <model_checkpoint> --use_real_images
     
 Example:
-    python align_siglip2_packing.py \
-        --ckpt google/siglip2-so400m-patch16-naflex \
+    python align_dinov3_packing.py \
+        --ckpt facebook/dinov3-base \
         --device cuda \
         --batch_size 2 \
         --image_size 224 \
         --threshold 0.99
     
-    python align_siglip2_packing.py \
-        --ckpt google/siglip2-so400m-patch16-naflex \
+    python align_dinov3_packing.py \
+        --ckpt facebook/dinov3-base \
         --device cuda \
         --use_real_images \
         --image_dir model_factory/images
@@ -49,8 +52,8 @@ import traceback
 import torch
 import torch.nn.functional as F
 import numpy as np
-from vit_siglip2 import Siglip2Naflex
-from vit_siglip2_packing_hf import Siglip2NaflexPacking
+from vit_dinov3 import Dinov3
+from vit_dinov3_packing_hf import DINOv3ViTPacking
 
 try:
     from PIL import Image
@@ -118,7 +121,7 @@ def round_up_to_multiple(value, multiple):
     Returns:
         int: Rounded up value (at least `multiple`)
     """
-    return max(multiple, ((value + multiple - 1) // multiple) * multiple)
+    return max(multiple, math.ceil(value / multiple) * multiple)
 
 
 def generate_test_image(path, width, height):
@@ -206,8 +209,8 @@ def test_alignment(standard_model, packing_model, test_input, patch_size, device
     Test alignment between standard and packing models.
     
     Args:
-        standard_model: Siglip2Naflex model
-        packing_model: Siglip2NaflexPacking model
+        standard_model: Dinov3 model
+        packing_model: DINOv3ViTPacking model
         test_input: Input tensor of shape [bs, channels, height, width]
         patch_size: Patch size
         device: Device to run on
@@ -221,11 +224,18 @@ def test_alignment(standard_model, packing_model, test_input, patch_size, device
     test_input = test_input.to(device)
     
     # Get output from standard model
-    print("Running standard model (Siglip2Naflex)...")
+    print("Running standard model (Dinov3)...")
     with torch.no_grad():
         standard_output = standard_model(test_input)
     
     print(f"Standard model output shape: {standard_output.shape}")
+    
+    # DINOv3 has CLS token and register tokens at the beginning
+    # We need to extract only the patch tokens for comparison
+    num_register_tokens = standard_model.model.config.num_register_tokens
+    prefix_length = 1 + num_register_tokens  # CLS + register tokens
+    standard_patch_tokens = standard_output[:, prefix_length:, :]
+    print(f"Standard model patch tokens shape (excluding CLS and register tokens): {standard_patch_tokens.shape}")
     
     # Convert input to packing format
     print("Converting input to packing format...")
@@ -235,7 +245,7 @@ def test_alignment(standard_model, packing_model, test_input, patch_size, device
     print(f"grid_thw values:\n{grid_thw}")
     
     # Get output from packing model
-    print("Running packing model (Siglip2NaflexPacking)...")
+    print("Running packing model (DINOv3ViTPacking)...")
     with torch.no_grad():
         packing_output = packing_model(packed_input, grid_thw)
     
@@ -249,16 +259,16 @@ def test_alignment(standard_model, packing_model, test_input, patch_size, device
     
     # Compute similarity metrics
     print("\nComputing similarity metrics...")
-    metrics = compute_similarity_metrics(standard_output, packing_output_reshaped)
+    metrics = compute_similarity_metrics(standard_patch_tokens, packing_output_reshaped)
     
-    return metrics, standard_output, packing_output_reshaped
+    return metrics, standard_patch_tokens, packing_output_reshaped
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Verify alignment between Siglip2Naflex and Siglip2NaflexPacking"
+        description="Verify alignment between Dinov3 and DINOv3ViTPacking"
     )
-    parser.add_argument("--ckpt", type=str, default="google/siglip2-so400m-patch16-naflex",
+    parser.add_argument("--ckpt", type=str, default="facebook/dinov3-base",
                        help="Model checkpoint path")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                        help="Device to run on (default: cuda if available)")
@@ -276,7 +286,7 @@ def main():
     args = parser.parse_args()
     
     print("=" * 80)
-    print("Siglip2 Naflex Packing Alignment Script")
+    print("DINOv3 ViT Packing Alignment Script")
     print("=" * 80)
     print(f"Model checkpoint: {args.ckpt}")
     print(f"Device: {args.device}")
@@ -285,11 +295,11 @@ def main():
     
     # Initialize models
     print("\nInitializing models...")
-    print("Loading standard model (Siglip2Naflex)...")
-    standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
+    print("Loading standard model (Dinov3)...")
+    standard_model = Dinov3(ckpt=args.ckpt, device=args.device)
     
-    print("Loading packing model (Siglip2NaflexPacking)...")
-    packing_model = Siglip2NaflexPacking(ckpt=args.ckpt, device=args.device)
+    print("Loading packing model (DINOv3ViTPacking)...")
+    packing_model = DINOv3ViTPacking(ckpt=args.ckpt, device=args.device)
     
     patch_size = packing_model.patch_size
     print(f"Patch size: {patch_size}")
@@ -393,7 +403,6 @@ def main():
             except Exception as e:
                 print(f"❌ ERROR processing {img_name}: {e}")
                 all_tests_passed = False
-                import traceback
                 traceback.print_exc()
         
         # Test with both images together in a batch
@@ -452,7 +461,6 @@ def main():
         except Exception as e:
             print(f"❌ ERROR processing batched images: {e}")
             all_tests_passed = False
-            import traceback
             traceback.print_exc()
         
     else:
@@ -537,8 +545,12 @@ def main():
             for i, (img, resolution) in enumerate(zip(images, test_resolutions)):
                 with torch.no_grad():
                     output = standard_model(img)
-                standard_outputs.append(output.squeeze(0))  # Remove batch dimension
-                print(f"  Image {i+1} ({resolution}x{resolution}): output shape {output.shape}")
+                # Extract patch tokens (excluding CLS and register tokens)
+                num_register_tokens = standard_model.model.config.num_register_tokens
+                prefix_length = 1 + num_register_tokens
+                patch_tokens = output[:, prefix_length:, :]
+                standard_outputs.append(patch_tokens.squeeze(0))  # Remove batch dimension
+                print(f"  Image {i+1} ({resolution}x{resolution}): output shape {patch_tokens.shape}")
             
             # Convert all images to packing format
             print("\nConverting to packing format...")
