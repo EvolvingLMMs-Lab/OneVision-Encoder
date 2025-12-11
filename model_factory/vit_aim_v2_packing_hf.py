@@ -192,16 +192,15 @@ class AIMv2Packing(nn.Module):
                     # If output is a tuple, first element is usually last_hidden_state
                     last_hidden_state = outputs[0]
                 
-                # AIMv2 typically has a CLS token at position 0
-                # Extract patch tokens (excluding CLS token)
-                prefix_length = 1  # CLS token
+                # Aimv2VisionModel returns last_hidden_state without CLS token
+                # So we don't need to skip any prefix tokens
                 
                 # Convert back to packing format: [total_num_patches, hidden_size]
                 output_list = []
                 for i in range(num_images):
                     num_patches = patches_per_image[i]
-                    # Extract patch tokens starting after CLS token
-                    patch_tokens = last_hidden_state[i, prefix_length:prefix_length + num_patches]
+                    # Extract all patch tokens (CLS already excluded by model)
+                    patch_tokens = last_hidden_state[i, :num_patches]
                     output_list.append(patch_tokens)
                 
                 packed_output = torch.cat(output_list, dim=0)
@@ -235,10 +234,10 @@ class AIMv2Packing(nn.Module):
                     else:
                         last_hidden_state = outputs[0]
                     
-                    # Extract patch tokens (excluding CLS token)
-                    prefix_length = 1  # CLS token
+                    # Aimv2VisionModel returns last_hidden_state without CLS token
+                    # So we don't need to skip any prefix tokens
                     
-                    patch_tokens = last_hidden_state[0, prefix_length:prefix_length + num_patches]
+                    patch_tokens = last_hidden_state[0, :num_patches]
                     output_list.append(patch_tokens)
                     
                     start_idx += num_patches
