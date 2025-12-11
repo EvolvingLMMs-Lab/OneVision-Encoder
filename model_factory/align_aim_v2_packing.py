@@ -406,11 +406,10 @@ def main():
             for i, (img, resolution) in enumerate(zip(images, test_resolutions)):
                 with torch.no_grad():
                     output = standard_model(img)
-                # Extract patch tokens (excluding CLS token)
-                prefix_length = 1  # CLS token
-                patch_tokens = output[:, prefix_length:, :]
-                standard_outputs.append(patch_tokens.squeeze(0))  # Remove batch dimension
-                print(f"  Image {i+1} ({resolution}x{resolution}): output shape {patch_tokens.shape}")
+                # Aimv2VisionModel already excludes CLS token from last_hidden_state
+                # So we can use the output directly
+                standard_outputs.append(output.squeeze(0))  # Remove batch dimension
+                print(f"  Image {i+1} ({resolution}x{resolution}): output shape {output.shape}")
             
             # Convert all images to packing format
             print("\nConverting to packing format...")
