@@ -13,9 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import torch
 from torch import nn
-from transformers import AutoModel
+from transformers import Aimv2VisionModel
 
 # =============================================================================
 # CUSTOM EXTENSION: AIMv2 Packing implementation for LLaVA-ViT
@@ -50,23 +51,31 @@ class AIMv2Packing(nn.Module):
         Initialize the AIMv2 Packing model with FlashAttention.
         
         Args:
-            ckpt (str): HuggingFace checkpoint for the pre-trained model.
+            ckpt (str): HuggingFace checkpoint for the pre-trained model or local path.
             device (str): Device to map the model for inference.
             revision (str): Specific git revision to use. Default is the verified working version.
+                           Only used for HuggingFace Hub checkpoints, ignored for local paths.
         """
         super(AIMv2Packing, self).__init__()
         self.device = torch.device(device)
         
+        # Detect if checkpoint is a local path or HuggingFace Hub ID
+        is_local_path = os.path.exists(ckpt) and os.path.isdir(ckpt)
+        
         # Load the full model with FlashAttention enabled
         # Note: trust_remote_code is required for AIMv2
-        # Using specific revision for stability and reproducibility
-        self.model = AutoModel.from_pretrained(
-            ckpt,
-            revision=revision,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2",
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
-        ).to(self.device).eval()
+        # Using specific revision for stability and reproducibility (Hub only)
+        model_kwargs = {
+            "trust_remote_code": True,
+            "attn_implementation": "flash_attention_2",
+            "dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        }
+        
+        # Only add revision parameter for HuggingFace Hub checkpoints
+        if not is_local_path:
+            model_kwargs["revision"] = revision
+        
+        self.model = Aimv2VisionModel.from_pretrained(ckpt, **model_kwargs).to(self.device).eval()
         
         # Get patch size from config
         if hasattr(self.model.config, 'patch_size'):
@@ -183,16 +192,15 @@ class AIMv2Packing(nn.Module):
                     # If output is a tuple, first element is usually last_hidden_state
                     last_hidden_state = outputs[0]
                 
-                # AIMv2 typically has a CLS token at position 0
-                # Extract patch tokens (excluding CLS token)
-                prefix_length = 1  # CLS token
+                # Aimv2VisionModel returns last_hidden_state without CLS token
+                # So we don't need to skip any prefix tokens
                 
                 # Convert back to packing format: [total_num_patches, hidden_size]
                 output_list = []
                 for i in range(num_images):
                     num_patches = patches_per_image[i]
-                    # Extract patch tokens starting after CLS token
-                    patch_tokens = last_hidden_state[i, prefix_length:prefix_length + num_patches]
+                    # Extract all patch tokens (CLS already excluded by model)
+                    patch_tokens = last_hidden_state[i, :num_patches]
                     output_list.append(patch_tokens)
                 
                 packed_output = torch.cat(output_list, dim=0)
@@ -226,10 +234,10 @@ class AIMv2Packing(nn.Module):
                     else:
                         last_hidden_state = outputs[0]
                     
-                    # Extract patch tokens (excluding CLS token)
-                    prefix_length = 1  # CLS token
+                    # Aimv2VisionModel returns last_hidden_state without CLS token
+                    # So we don't need to skip any prefix tokens
                     
-                    patch_tokens = last_hidden_state[0, prefix_length:prefix_length + num_patches]
+                    patch_tokens = last_hidden_state[0, :num_patches]
                     output_list.append(patch_tokens)
                     
                     start_idx += num_patches

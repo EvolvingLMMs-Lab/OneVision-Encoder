@@ -54,154 +54,17 @@ import torch.nn.functional as F
 import numpy as np
 from vit_aim_v2 import AIMv2
 from vit_aim_v2_packing_hf import AIMv2Packing
+from alignment_utils import (
+    convert_to_patches,
+    round_up_to_multiple,
+    generate_test_image,
+    load_image_as_tensor,
+    compute_similarity_metrics,
+    print_metrics,
+    PIL_AVAILABLE
+)
 
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-    print("Warning: PIL not available. Real image tests will be disabled.")
-
-
-def convert_to_patches(pixel_values, patch_size):
-    """
-    Convert image tensor to patches for packing format.
-    
-    Args:
-        pixel_values (torch.Tensor): Input tensor of shape [bs, channels, height, width]
-        patch_size (int): Size of each patch
-    
-    Returns:
-        torch.Tensor: Patches of shape [total_num_patches, channels * patch_size * patch_size]
-        torch.Tensor: grid_thw of shape [bs, 3] containing [t, h, w] for each image
-    """
-    batch_size, channels, height, width = pixel_values.shape
-    num_patches_height = height // patch_size
-    num_patches_width = width // patch_size
-    
-    # Reshape to patches: [bs, channels, num_patches_h, patch_size, num_patches_w, patch_size]
-    patches = pixel_values.reshape(
-        batch_size, channels,
-        num_patches_height, patch_size,
-        num_patches_width, patch_size
-    )
-    
-    # Rearrange to: [bs, num_patches_h, num_patches_w, patch_size, patch_size, channels]
-    patches = patches.permute(0, 2, 4, 3, 5, 1)
-    
-    # Flatten patches: [bs, num_patches_h * num_patches_w, patch_size * patch_size * channels]
-    patches = patches.reshape(
-        batch_size,
-        num_patches_height * num_patches_width,
-        patch_size * patch_size * channels
-    )
-    
-    # Concatenate all batches: [total_num_patches, patch_dim]
-    packed_patches = patches.reshape(-1, patch_size * patch_size * channels)
-    
-    # Create grid_thw: [bs, 3] where each row is [t, h, w]
-    # For single images, t=1
-    grid_thw = torch.tensor(
-        [[1, num_patches_height, num_patches_width]] * batch_size,
-        dtype=torch.long,
-        device=pixel_values.device
-    )
-    
-    return packed_patches, grid_thw
-
-
-def round_up_to_multiple(value, multiple):
-    """
-    Round up a value to the nearest multiple.
-    
-    Args:
-        value (int): Value to round up
-        multiple (int): Multiple to round up to
-    
-    Returns:
-        int: Rounded up value (at least `multiple`)
-    """
-    return max(multiple, math.ceil(value / multiple) * multiple)
-
-
-def generate_test_image(path, width, height):
-    """
-    Generate a test image with random colors if it doesn't exist.
-    
-    Args:
-        path: Path to save the image
-        width: Width of the image
-        height: Height of the image
-    """
-    if not PIL_AVAILABLE:
-        raise ImportError("PIL is required to generate images. Please install Pillow.")
-    
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    
-    # Create a random colorful image
-    img_array = np.random.randint(0, 256, (height, width, 3), dtype=np.uint8)
-    img = Image.fromarray(img_array, 'RGB')
-    img.save(path)
-    print(f"Generated test image: {path} ({width}x{height})")
-
-
-def load_image_as_tensor(image_path, device):
-    """
-    Load an image from disk and convert it to a tensor.
-    
-    Args:
-        image_path: Path to the image file
-        device: Device to load the tensor to
-    
-    Returns:
-        torch.Tensor: Image tensor of shape [1, 3, H, W] with values in [0, 1]
-    """
-    if not PIL_AVAILABLE:
-        raise ImportError("PIL is required to load images. Please install Pillow.")
-    
-    img = Image.open(image_path).convert('RGB')
-    img_array = np.array(img, dtype=np.float32) / 255.0  # Normalize to [0, 1]
-    
-    # Convert to tensor: [H, W, C] -> [C, H, W] -> [1, C, H, W]
-    img_tensor = torch.from_numpy(img_array).permute(2, 0, 1).unsqueeze(0)
-    
-    return img_tensor.to(device)
-
-
-def compute_similarity_metrics(feat1: torch.Tensor, feat2: torch.Tensor):
-    """
-    Compute similarity metrics between two feature tensors.
-    
-    Args:
-        feat1: First feature tensor
-        feat2: Second feature tensor
-    
-    Returns:
-        dict: Dictionary containing similarity metrics
-    """
-    # Ensure same shape
-    assert feat1.shape == feat2.shape, f"Shape mismatch: {feat1.shape} vs {feat2.shape}"
-    
-    # Compute metrics
-    max_diff = (feat1 - feat2).abs().max().item()
-    mean_diff = (feat1 - feat2).abs().mean().item()
-    
-    # Flatten for cosine similarity computation
-    feat1_flat = feat1.reshape(-1, feat1.shape[-1])
-    feat2_flat = feat2.reshape(-1, feat2.shape[-1])
-    
-    cos_sim = F.cosine_similarity(feat1_flat, feat2_flat, dim=-1)
-    min_cos = cos_sim.min().item()
-    mean_cos = cos_sim.mean().item()
-    max_cos = cos_sim.max().item()
-    
-    return {
-        'max_diff': max_diff,
-        'mean_diff': mean_diff,
-        'min_cosine': min_cos,
-        'mean_cosine': mean_cos,
-        'max_cosine': max_cos,
-    }
+# Note: PIL availability is checked in alignment_utils
 
 
 def test_alignment(standard_model, packing_model, test_input, patch_size, device):
@@ -230,11 +93,10 @@ def test_alignment(standard_model, packing_model, test_input, patch_size, device
     
     print(f"Standard model output shape: {standard_output.shape}")
     
-    # AIMv2 has CLS token at the beginning
-    # We need to extract only the patch tokens for comparison
-    prefix_length = 1  # CLS token
-    standard_patch_tokens = standard_output[:, prefix_length:, :]
-    print(f"Standard model patch tokens shape (excluding CLS token): {standard_patch_tokens.shape}")
+    # Aimv2VisionModel already excludes CLS token from last_hidden_state
+    # So we can use the output directly without removing any prefix tokens
+    standard_patch_tokens = standard_output
+    print(f"Standard model patch tokens shape: {standard_patch_tokens.shape}")
     
     # Convert input to packing format
     print("Converting input to packing format...")
@@ -544,11 +406,10 @@ def main():
             for i, (img, resolution) in enumerate(zip(images, test_resolutions)):
                 with torch.no_grad():
                     output = standard_model(img)
-                # Extract patch tokens (excluding CLS token)
-                prefix_length = 1  # CLS token
-                patch_tokens = output[:, prefix_length:, :]
-                standard_outputs.append(patch_tokens.squeeze(0))  # Remove batch dimension
-                print(f"  Image {i+1} ({resolution}x{resolution}): output shape {patch_tokens.shape}")
+                # Aimv2VisionModel already excludes CLS token from last_hidden_state
+                # So we can use the output directly
+                standard_outputs.append(output.squeeze(0))  # Remove batch dimension
+                print(f"  Image {i+1} ({resolution}x{resolution}): output shape {output.shape}")
             
             # Convert all images to packing format
             print("\nConverting to packing format...")
@@ -604,6 +465,7 @@ def main():
                 print(f"    Mean Diff:       {metrics['mean_diff']:.6f}")
                 print(f"    Min Cosine Sim:  {metrics['min_cosine']:.8f}")
                 print(f"    Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+                print(f"    Max Cosine Sim:  {metrics['max_cosine']:.8f}")
                 
                 test_passed = metrics['min_cosine'] > args.threshold
                 if not test_passed:
@@ -612,18 +474,40 @@ def main():
             
             if all_mixed_passed:
                 print(f"\n✅ PASS: Mixed resolution batch test (all resolutions aligned)")
-                # Compute minimum cosine similarity across all resolutions
+                # Compute minimum and mean cosine similarity across all resolutions
                 min_cosines = []
+                mean_cosines = []
                 for i in range(len(test_resolutions)):
                     metrics = compute_similarity_metrics(
                         standard_outputs[i].unsqueeze(0), 
                         packing_outputs[i].unsqueeze(0)
                     )
                     min_cosines.append(metrics['min_cosine'])
-                test_results.append(("mixed_batch", True, {"min_cosine": min(min_cosines)}))
+                    mean_cosines.append(metrics['mean_cosine'])
+                test_results.append(("mixed_batch", True, {
+                    "min_cosine": min(min_cosines),
+                    "mean_cosine": sum(mean_cosines) / len(mean_cosines)
+                }))
             else:
                 print(f"\n❌ FAIL: Mixed resolution batch test (some resolutions misaligned)")
-                test_results.append(("mixed_batch", False, {"min_cosine": 0.0}))
+                # Still compute metrics even for failed tests
+                min_cosines = []
+                mean_cosines = []
+                for i in range(len(test_resolutions)):
+                    try:
+                        metrics = compute_similarity_metrics(
+                            standard_outputs[i].unsqueeze(0), 
+                            packing_outputs[i].unsqueeze(0)
+                        )
+                        min_cosines.append(metrics['min_cosine'])
+                        mean_cosines.append(metrics['mean_cosine'])
+                    except:
+                        min_cosines.append(0.0)
+                        mean_cosines.append(0.0)
+                test_results.append(("mixed_batch", False, {
+                    "min_cosine": min(min_cosines) if min_cosines else 0.0,
+                    "mean_cosine": sum(mean_cosines) / len(mean_cosines) if mean_cosines else 0.0
+                }))
                 
         except Exception as e:
             print(f"❌ ERROR in mixed resolution batch test: {e}")
@@ -638,8 +522,16 @@ def main():
     if len(test_results) > 1:
         print(f"\nTest Results:")
         for name, passed, metrics in test_results:
-            status = "✅ PASS" if passed else "❌ FAIL"
-            print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f})")
+            # Check pass/fail for both min and mean thresholds
+            min_pass = metrics['min_cosine'] > args.threshold
+            mean_pass = metrics['mean_cosine'] > args.threshold
+            
+            min_status = "✅" if min_pass else "❌"
+            mean_status = "✅" if mean_pass else "❌"
+            
+            print(f"  {name}:")
+            print(f"    {min_status} Min cosine:  {metrics['min_cosine']:.8f} ({'PASS' if min_pass else 'FAIL'})")
+            print(f"    {mean_status} Mean cosine: {metrics['mean_cosine']:.8f} ({'PASS' if mean_pass else 'FAIL'})")
     
     if all_tests_passed:
         print(f"\n✅ ALL TESTS PASSED: Models are aligned")
