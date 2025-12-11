@@ -37,20 +37,56 @@ This document describes the packing format implementation for multiple Vision Tr
 
 ### Basic Usage
 
+**AIMv2:**
 ```python
 import torch
 from vit_aim_v2_packing_hf import AIMv2Packing
 
-# Initialize model
+# Initialize model (Hub or local path)
 model = AIMv2Packing(ckpt="apple/aimv2-large-patch14-native", device="cuda")
+# Or use local checkpoint
+model = AIMv2Packing(ckpt="/video_vit/pretrain_models/apple/aimv2-large-patch14-native/", device="cuda")
 
 # Prepare input (2 images of 224x224, patch_size=14)
-# 224/14 = 16 patches per side, 16×16 = 256 patches per image
-hidden_states = torch.randn(512, 588).cuda()  # 2×256, 14×14×3
+hidden_states = torch.randn(512, 588).cuda()  # 2×256 patches, 14×14×3
 grid_thw = torch.tensor([[1, 16, 16], [1, 16, 16]]).cuda()
 
 # Forward pass
 output = model(hidden_states, grid_thw)  # [512, 1024]
+```
+
+**DINOv3:**
+```python
+from vit_dinov3_packing_hf import DINOv3ViTPacking
+
+# Initialize model (Hub or local path)
+model = DINOv3ViTPacking(ckpt="facebook/dinov3-large", device="cuda")
+# Or use local checkpoint
+model = DINOv3ViTPacking(ckpt="/video_vit/pretrain_models/dinov3-vitl16-pretrain-lvd1689m/", device="cuda")
+
+# Prepare input (2 images of 224x224, patch_size=14)
+hidden_states = torch.randn(512, 588).cuda()  # 2×256 patches, 14×14×3
+grid_thw = torch.tensor([[1, 16, 16], [1, 16, 16]]).cuda()
+
+# Forward pass
+output = model(hidden_states, grid_thw)  # [512, 1024]
+```
+
+**SigLIP2:**
+```python
+from vit_siglip2_packing_hf import Siglip2NaflexPacking
+
+# Initialize model (Hub or local path)
+model = Siglip2NaflexPacking(ckpt="google/siglip2-so400m-patch16-naflex", device="cuda")
+# Or use local checkpoint
+model = Siglip2NaflexPacking(ckpt="/video_vit/pretrain_models/siglip2-so400m-patch16-naflex/", device="cuda")
+
+# Prepare input (2 images of 224x224, patch_size=16)
+hidden_states = torch.randn(392, 768).cuda()  # 2×196 patches, 16×16×3
+grid_thw = torch.tensor([[1, 14, 14], [1, 14, 14]]).cuda()
+
+# Forward pass
+output = model(hidden_states, grid_thw)  # [392, 1152]
 ```
 
 ### Converting Standard Images to Packing Format
@@ -120,15 +156,28 @@ Each model includes an alignment verification script to ensure the packing imple
 
 ### Running Alignment Tests
 
+**With HuggingFace Hub:**
 ```bash
 # AIMv2
-python align_aim_v2_packing.py --ckpt /path/to/aimv2-checkpoint
+python align_aim_v2_packing.py --ckpt apple/aimv2-large-patch14-native
 
 # DINOv3
-python align_dinov3_packing.py --ckpt facebook/dinov3-base
+python align_dinov3_packing.py --ckpt facebook/dinov3-large
 
 # SigLIP2
 python align_siglip2_packing.py --ckpt google/siglip2-so400m-patch16-naflex
+```
+
+**With Local Checkpoints:**
+```bash
+# AIMv2
+python align_aim_v2_packing.py --ckpt /video_vit/pretrain_models/apple/aimv2-large-patch14-native/
+
+# DINOv3
+python align_dinov3_packing.py --ckpt /video_vit/pretrain_models/dinov3-vitl16-pretrain-lvd1689m/
+
+# SigLIP2
+python align_siglip2_packing.py --ckpt /video_vit/pretrain_models/siglip2-so400m-patch16-naflex/
 ```
 
 ### Test Options
@@ -198,22 +247,53 @@ image = F.interpolate(image, size=(new_h, new_w), mode='bilinear')
 - Try lowering threshold: `--threshold 0.98`
 - Note: Some numerical precision differences are expected
 
-### Local Checkpoint Loading (AIMv2)
+### Local Checkpoint Loading
 
-For local checkpoints, the implementation automatically detects the path and excludes the `revision` parameter:
+All three packing implementations support both HuggingFace Hub IDs and local filesystem paths. The implementation automatically detects the path type and handles the loading appropriately.
 
-```python
-# Works with both
-model = AIMv2Packing(ckpt="apple/aimv2-large-patch14-native")  # Hub
-model = AIMv2Packing(ckpt="/local/path/to/checkpoint")  # Local
-```
-
-## Example: Multi-Image Processing
-
+**AIMv2:**
 ```python
 from vit_aim_v2_packing_hf import AIMv2Packing
 
+# HuggingFace Hub
 model = AIMv2Packing(ckpt="apple/aimv2-large-patch14-native")
+
+# Local path
+model = AIMv2Packing(ckpt="/video_vit/pretrain_models/apple/aimv2-large-patch14-native/")
+```
+
+**DINOv3:**
+```python
+from vit_dinov3_packing_hf import DINOv3ViTPacking
+
+# HuggingFace Hub
+model = DINOv3ViTPacking(ckpt="facebook/dinov3-large")
+
+# Local path
+model = DINOv3ViTPacking(ckpt="/video_vit/pretrain_models/dinov3-vitl16-pretrain-lvd1689m/")
+```
+
+**SigLIP2:**
+```python
+from vit_siglip2_packing_hf import Siglip2NaflexPacking
+
+# HuggingFace Hub
+model = Siglip2NaflexPacking(ckpt="google/siglip2-so400m-patch16-naflex")
+
+# Local path
+model = Siglip2NaflexPacking(ckpt="/video_vit/pretrain_models/siglip2-so400m-patch16-naflex/")
+```
+
+**Note:** For AIMv2, the implementation automatically detects local paths and excludes the `revision` parameter to avoid `OSError`. DINOv3 and SigLIP2 work seamlessly with both Hub and local checkpoints.
+
+## Example: Multi-Image Processing
+
+### AIMv2 Example
+```python
+from vit_aim_v2_packing_hf import AIMv2Packing
+
+# Load model from local checkpoint
+model = AIMv2Packing(ckpt="/video_vit/pretrain_models/apple/aimv2-large-patch14-native/")
 
 # Process multiple images with different sizes (all divisible by 14)
 image1 = torch.randn(3, 224, 224)  # 16×16 = 256 patches
@@ -239,6 +319,46 @@ for i, grid in enumerate([grid1, grid2, grid3]):
     image_output = output[start:start + num_patches]
     print(f"Image {i+1} output: {image_output.shape}")
     start += num_patches
+```
+
+### DINOv3 Example
+```python
+from vit_dinov3_packing_hf import DINOv3ViTPacking
+
+# Load model from local checkpoint
+model = DINOv3ViTPacking(ckpt="/video_vit/pretrain_models/dinov3-vitl16-pretrain-lvd1689m/")
+
+# Process images with patch_size=14
+image1 = torch.randn(3, 224, 224)
+image2 = torch.randn(3, 336, 336)
+
+patches1, grid1 = convert_to_packing_format(image1.unsqueeze(0), 14)
+patches2, grid2 = convert_to_packing_format(image2.unsqueeze(0), 14)
+
+hidden_states = torch.cat([patches1, patches2], dim=0)  # [832, 588]
+grid_thw = torch.cat([grid1, grid2], dim=0)  # [2, 3]
+
+output = model(hidden_states, grid_thw)  # [832, 1024]
+```
+
+### SigLIP2 Example
+```python
+from vit_siglip2_packing_hf import Siglip2NaflexPacking
+
+# Load model from local checkpoint
+model = Siglip2NaflexPacking(ckpt="/video_vit/pretrain_models/siglip2-so400m-patch16-naflex/")
+
+# Process images with patch_size=16
+image1 = torch.randn(3, 224, 224)  # 14×14 = 196 patches
+image2 = torch.randn(3, 384, 384)  # 24×24 = 576 patches
+
+patches1, grid1 = convert_to_packing_format(image1.unsqueeze(0), 16)
+patches2, grid2 = convert_to_packing_format(image2.unsqueeze(0), 16)
+
+hidden_states = torch.cat([patches1, patches2], dim=0)  # [772, 768]
+grid_thw = torch.cat([grid1, grid2], dim=0)  # [2, 3]
+
+output = model(hidden_states, grid_thw)  # [772, 1152]
 ```
 
 ## License
