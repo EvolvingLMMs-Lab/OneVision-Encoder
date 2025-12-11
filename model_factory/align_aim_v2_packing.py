@@ -501,7 +501,7 @@ def main():
         print(f"\nTest Results:")
         for name, passed, metrics in test_results:
             status = "✅ PASS" if passed else "❌ FAIL"
-            print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f})")
+            print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f}, mean cosine: {metrics['mean_cosine']:.8f})")
     
     if all_tests_passed:
         print(f"\n✅ ALL TESTS PASSED: Models are aligned")
