@@ -16,7 +16,7 @@
 import os
 import torch
 from torch import nn
-from transformers import AutoModel
+from transformers import Aimv2VisionModel
 
 # =============================================================================
 # CUSTOM EXTENSION: AIMv2 Packing implementation for LLaVA-ViT
@@ -68,14 +68,14 @@ class AIMv2Packing(nn.Module):
         model_kwargs = {
             "trust_remote_code": True,
             "attn_implementation": "flash_attention_2",
-            "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            "dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32
         }
         
         # Only add revision parameter for HuggingFace Hub checkpoints
         if not is_local_path:
             model_kwargs["revision"] = revision
         
-        self.model = AutoModel.from_pretrained(ckpt, **model_kwargs).to(self.device).eval()
+        self.model = Aimv2VisionModel.from_pretrained(ckpt, **model_kwargs).to(self.device).eval()
         
         # Get patch size from config
         if hasattr(self.model.config, 'patch_size'):
