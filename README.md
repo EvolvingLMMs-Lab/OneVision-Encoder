@@ -481,28 +481,12 @@ Thanks so much to all of our amazing contributors!
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/wideyard">
-                    <img src="https://avatars.githubusercontent.com/u/101321826?v=4" width="80;" alt="wideyard"/>
-                    <br />
-                    <sub><b>wideyard</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/YunyaoYan">
                     <img src="https://avatars.githubusercontent.com/u/109638667?v=4" width="80;" alt="YunyaoYan"/>
                     <br />
                     <sub><b>YunyaoYan</b></sub>
                 </a>
             </td>
-            <td align="center">
-                <a href="https://github.com/zhangquanchen">
-                    <img src="https://avatars.githubusercontent.com/u/140872772?v=4" width="80;" alt="zhangquanchen"/>
-                    <br />
-                    <sub><b>zhangquanchen</b></sub>
-                </a>
-            </td>
-		</tr>
-		<tr>
             <td align="center">
                 <a href="https://github.com/FeilongTangmonash">
                     <img src="https://avatars.githubusercontent.com/u/152372878?v=4" width="80;" alt="FeilongTangmonash"/>

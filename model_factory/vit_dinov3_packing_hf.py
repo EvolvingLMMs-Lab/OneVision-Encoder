@@ -545,7 +545,7 @@ from transformers import AutoModel
 
 class DINOv3ViTPacking(nn.Module):
     """
-    DINOv3 ViT Packing variant for efficient variable-length sequence processing.
+    DINOv3 ViT Packing variant for efficient variable-length sequence processing using FlashAttention.
     
     This model accepts pre-patchified input in packing format:
     - hidden_states: torch.Tensor of shape [total_num_patches, patch_dim]
@@ -553,6 +553,7 @@ class DINOv3ViTPacking(nn.Module):
     - grid_thw: torch.Tensor of shape [num_images, 3] containing [t, h, w] for each image
     
     This is optimized for batch processing where all images are concatenated into a single sequence.
+    Uses FlashAttention for efficient processing without explicit attention masks.
     
     Note: Unlike Siglip2, DINOv3 uses Conv2d for patch embeddings, so this packing implementation
     reconstructs the images from patches before processing.
@@ -562,7 +563,7 @@ class DINOv3ViTPacking(nn.Module):
     
     def __init__(self, ckpt: str = "facebook/dinov3-base", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
-        Initialize the DINOv3 ViT Packing model.
+        Initialize the DINOv3 ViT Packing model with FlashAttention.
         
         Args:
             ckpt (str): HuggingFace checkpoint for the pre-trained model.
@@ -571,8 +572,12 @@ class DINOv3ViTPacking(nn.Module):
         super(DINOv3ViTPacking, self).__init__()
         self.device = torch.device(device)
         
-        # Load the full model
-        self.model = AutoModel.from_pretrained(ckpt).to(self.device).eval()
+        # Load the full model with FlashAttention enabled
+        self.model = AutoModel.from_pretrained(
+            ckpt, 
+            attn_implementation="flash_attention_2",
+            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        ).to(self.device).eval()
         
         # Get patch size from config
         if hasattr(self.model.config, 'patch_size'):
@@ -631,7 +636,7 @@ class DINOv3ViTPacking(nn.Module):
     
     def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
-        Forward pass with pre-patchified input.
+        Forward pass with pre-patchified input using FlashAttention.
         
         Args:
             hidden_states (torch.Tensor): Pre-patchified input of shape 
@@ -647,12 +652,12 @@ class DINOv3ViTPacking(nn.Module):
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
         with torch.no_grad():
-            # Get target dtype from patch embedding
+            # Get target dtype from model parameters
             try:
-                target_dtype = self.model.embeddings.patch_embeddings.weight.dtype
-            except AttributeError:
-                # Fallback to float32 if structure is different
-                target_dtype = torch.float32
+                target_dtype = next(self.model.parameters()).dtype
+            except (StopIteration, AttributeError):
+                # Fallback to bfloat16 or float32 if parameters not accessible
+                target_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             
             # Move inputs to device
             hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
@@ -673,9 +678,10 @@ class DINOv3ViTPacking(nn.Module):
             
             if all_same_size:
                 # Optimized path: batch process all images together
+                # FlashAttention handles this efficiently without needing explicit masks
                 pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
                 
-                # Process through model
+                # Process through model - no attention mask needed with FlashAttention
                 outputs = self.model(
                     pixel_values=pixel_values,
                     output_hidden_states=True
@@ -700,6 +706,7 @@ class DINOv3ViTPacking(nn.Module):
                 packed_output = torch.cat(output_list, dim=0)
             else:
                 # Variable size path: process each image separately
+                # FlashAttention automatically handles variable-length sequences efficiently
                 output_list = []
                 start_idx = 0
                 
@@ -715,7 +722,7 @@ class DINOv3ViTPacking(nn.Module):
                         image_hidden_states.squeeze(0), image_grid_thw
                     )
                     
-                    # Process through model
+                    # Process through model - no attention mask needed
                     outputs = self.model(
                         pixel_values=pixel_values,
                         output_hidden_states=True
