@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from timm.models.registry import register_model
 
-from transformers import AutoImageProcessor, AutoModel
+from transformers import Aimv2VisionModel
 class AIMv2(nn.Module):
     def __init__(
         self,
@@ -11,7 +11,8 @@ class AIMv2(nn.Module):
     ):
         super(AIMv2, self).__init__()
         self.device = torch.device(device)
-        model = AutoModel.from_pretrained(ckpt)
+        # Note: trust_remote_code is required for AIMv2 models
+        model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
         self.model = model.to(self.device)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
@@ -39,9 +40,8 @@ if __name__ == "__main__":
     import timm
 
     # 创建模型
-    model = timm.create_model("aimv2_large_patch14_native", pretrained=False)
-    model: AutoModel
-    model.model.save_pretrained("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
+    model = timm.create_model("aimv2_large_patch14_native_ap")
+    # model.model.save_pretrained("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
 
     bs = 4
     # AIMv2 Large Patch14 通常输入大小为 224x224
