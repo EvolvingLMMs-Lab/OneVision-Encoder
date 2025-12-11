@@ -33,7 +33,7 @@ class AIMv2(nn.Module):
 
 @register_model
 def aimv2_large_patch14_native_ap(pretrained: bool = False, **kwargs):
-    model = AIMv2("apple/aimv2-large-patch14-native")
+    model = AIMv2("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
     return model
 
 if __name__ == "__main__":
@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     # 创建模型
     model = timm.create_model("aimv2_large_patch14_native_ap")
-    model.model.save_pretrained("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
+    # model.model.save_pretrained("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
 
     bs = 4
     # AIMv2 Large Patch14 通常输入大小为 224x224
