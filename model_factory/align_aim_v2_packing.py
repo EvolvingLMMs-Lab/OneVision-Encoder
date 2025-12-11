@@ -93,11 +93,10 @@ def test_alignment(standard_model, packing_model, test_input, patch_size, device
     
     print(f"Standard model output shape: {standard_output.shape}")
     
-    # AIMv2 has CLS token at the beginning
-    # We need to extract only the patch tokens for comparison
-    prefix_length = 1  # CLS token
-    standard_patch_tokens = standard_output[:, prefix_length:, :]
-    print(f"Standard model patch tokens shape (excluding CLS token): {standard_patch_tokens.shape}")
+    # Aimv2VisionModel already excludes CLS token from last_hidden_state
+    # So we can use the output directly without removing any prefix tokens
+    standard_patch_tokens = standard_output
+    print(f"Standard model patch tokens shape: {standard_patch_tokens.shape}")
     
     # Convert input to packing format
     print("Converting input to packing format...")
