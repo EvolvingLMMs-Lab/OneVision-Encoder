@@ -474,18 +474,40 @@ def main():
             
             if all_mixed_passed:
                 print(f"\n✅ PASS: Mixed resolution batch test (all resolutions aligned)")
-                # Compute minimum cosine similarity across all resolutions
+                # Compute minimum and mean cosine similarity across all resolutions
                 min_cosines = []
+                mean_cosines = []
                 for i in range(len(test_resolutions)):
                     metrics = compute_similarity_metrics(
                         standard_outputs[i].unsqueeze(0), 
                         packing_outputs[i].unsqueeze(0)
                     )
                     min_cosines.append(metrics['min_cosine'])
-                test_results.append(("mixed_batch", True, {"min_cosine": min(min_cosines)}))
+                    mean_cosines.append(metrics['mean_cosine'])
+                test_results.append(("mixed_batch", True, {
+                    "min_cosine": min(min_cosines),
+                    "mean_cosine": sum(mean_cosines) / len(mean_cosines)
+                }))
             else:
                 print(f"\n❌ FAIL: Mixed resolution batch test (some resolutions misaligned)")
-                test_results.append(("mixed_batch", False, {"min_cosine": 0.0}))
+                # Still compute metrics even for failed tests
+                min_cosines = []
+                mean_cosines = []
+                for i in range(len(test_resolutions)):
+                    try:
+                        metrics = compute_similarity_metrics(
+                            standard_outputs[i].unsqueeze(0), 
+                            packing_outputs[i].unsqueeze(0)
+                        )
+                        min_cosines.append(metrics['min_cosine'])
+                        mean_cosines.append(metrics['mean_cosine'])
+                    except:
+                        min_cosines.append(0.0)
+                        mean_cosines.append(0.0)
+                test_results.append(("mixed_batch", False, {
+                    "min_cosine": min(min_cosines) if min_cosines else 0.0,
+                    "mean_cosine": sum(mean_cosines) / len(mean_cosines) if mean_cosines else 0.0
+                }))
                 
         except Exception as e:
             print(f"❌ ERROR in mixed resolution batch test: {e}")
@@ -500,8 +522,16 @@ def main():
     if len(test_results) > 1:
         print(f"\nTest Results:")
         for name, passed, metrics in test_results:
-            status = "✅ PASS" if passed else "❌ FAIL"
-            print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f}, mean cosine: {metrics['mean_cosine']:.8f})")
+            # Check pass/fail for both min and mean thresholds
+            min_pass = metrics['min_cosine'] > args.threshold
+            mean_pass = metrics['mean_cosine'] > args.threshold
+            
+            min_status = "✅" if min_pass else "❌"
+            mean_status = "✅" if mean_pass else "❌"
+            
+            print(f"  {name}:")
+            print(f"    {min_status} Min cosine:  {metrics['min_cosine']:.8f} ({'PASS' if min_pass else 'FAIL'})")
+            print(f"    {mean_status} Mean cosine: {metrics['mean_cosine']:.8f} ({'PASS' if mean_pass else 'FAIL'})")
     
     if all_tests_passed:
         print(f"\n✅ ALL TESTS PASSED: Models are aligned")
