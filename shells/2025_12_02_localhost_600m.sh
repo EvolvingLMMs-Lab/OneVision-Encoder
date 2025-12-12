@@ -63,7 +63,7 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --embedding_size 1024 \
   --list_batch_sizes 16 \
   --debug 1 \
-  --lr 0.001 \
+  --lr 0.0008 \
   --warmup_ratio 0.1 \
   --list_datasets llava_vit_si_2025_12_12 \
   --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
