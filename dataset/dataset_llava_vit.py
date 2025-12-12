@@ -41,6 +41,7 @@ list_coyo = [
     "/vlm/data/coyo400m_part3/coyo700m_29",
     "/vlm/data/coyo400m_part4/coyo700m_30",
     "/vlm/data/coyo400m_part4/coyo700m_31",
+    "/vlm/data/coyo400m_part4/coyo700m_31",
 ]
 list_laion = [
     "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-20-tencentos",
@@ -52,6 +53,118 @@ list_laion = [
     "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-62-tencentos",
     "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-85-tencentos",
 ]
+
+
+@DATASET_REGISTRY.register()
+def llava_vit_si_2025_12_12():
+    list_coyo = [
+        "/vlm/data/coyo400m_part1/coyo700m_00",
+        "/vlm/data/coyo400m_part1/coyo700m_01",
+        "/vlm/data/coyo400m_part1/coyo700m_02",
+        "/vlm/data/coyo400m_part1/coyo700m_03",
+        "/vlm/data/coyo400m_part1/coyo700m_04",
+        "/vlm/data/coyo400m_part1/coyo700m_05",
+        "/vlm/data/coyo400m_part1/coyo700m_06",
+        "/vlm/data/coyo400m_part1/coyo700m_07",
+        "/vlm/data/coyo400m_part1/coyo700m_08",
+        "/vlm/data/coyo400m_part1/coyo700m_09",
+        "/vlm/data/coyo400m_part2/coyo700m_10",
+        "/vlm/data/coyo400m_part2/coyo700m_11",
+        "/vlm/data/coyo400m_part2/coyo700m_12",
+        "/vlm/data/coyo400m_part2/coyo700m_13",
+        "/vlm/data/coyo400m_part2/coyo700m_14",
+        "/vlm/data/coyo400m_part2/coyo700m_15",
+        "/vlm/data/coyo400m_part2/coyo700m_16",
+        "/vlm/data/coyo400m_part2/coyo700m_17",
+        "/vlm/data/coyo400m_part2/coyo700m_18",
+        "/vlm/data/coyo400m_part2/coyo700m_19",
+        "/vlm/data/coyo400m_part3/coyo700m_20",
+        "/vlm/data/coyo400m_part3/coyo700m_21",
+        "/vlm/data/coyo400m_part3/coyo700m_22",
+        "/vlm/data/coyo400m_part3/coyo700m_24",
+        "/vlm/data/coyo400m_part3/coyo700m_25",
+        "/vlm/data/coyo400m_part3/coyo700m_26",
+        "/vlm/data/coyo400m_part3/coyo700m_27",
+        "/vlm/data/coyo400m_part3/coyo700m_28",
+        "/vlm/data/coyo400m_part3/coyo700m_29",
+        "/vlm/data/coyo400m_part4/coyo700m_30",
+        "/vlm/data/coyo400m_part4/coyo700m_31",
+        "/vlm/data/coyo400m_part4/coyo700m_31",
+    ]
+    list_laion = [
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-20-tencentos",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-21-tencentos",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-23-tencentos",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-28-tencentos",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-34-tencentos",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-58-tencentos",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-62-tencentos",
+        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-85-tencentos",
+    ]
+    rank = int(os.getenv("RANK", "0"))
+    world_size = int(os.getenv("WORLD_SIZE", "1")) # Expected to be 128
+
+    if world_size == 128:
+        # Sharing factors defined by user
+        coyo_share_num = 3
+        laion_share_num = 4
+    elif world_size == 256:
+        coyo_share_num = 6
+        laion_share_num = 8
+    else:
+        raise ValueError
+
+    # Calculate the boundary for the split
+    # 32 files * 3 cards = 96 cards for Coyo
+    # Using len(list_coyo) to be dynamic, assuming it contains 32 items as per description
+    boundary_rank = len(list_coyo) * coyo_share_num
+
+    if rank < boundary_rank:
+        # === Coyo Assignment (Ranks 0 to 95) ===
+        # Map rank to a file index: 0,1,2 -> File 0; 3,4,5 -> File 1...
+        file_index = rank // coyo_share_num
+
+        if file_index < len(list_coyo):
+            list_prefix = [list_coyo[file_index]]
+        else:
+            # Fallback if math drifts
+            list_prefix = [list_coyo[file_index % len(list_coyo)]]
+
+        num_shards = coyo_share_num
+        shard_id = rank % coyo_share_num
+
+    else:
+        # === Laion Assignment (Ranks 96 to 127) ===
+        # Shift rank to 0-based for this section
+        laion_rank = rank - boundary_rank
+
+        # Map local rank to file index: 0,1,2,3 -> File 0...
+        file_index = laion_rank // laion_share_num
+
+        if file_index < len(list_laion):
+            list_prefix = [list_laion[file_index]]
+        else:
+             # Fallback
+            list_prefix = [list_laion[file_index % len(list_laion)]]
+
+        num_shards = laion_share_num
+        shard_id = laion_rank % laion_share_num
+
+    # Debug print to verify distribution
+    print(f"[Rank {rank}] Assigned File: {list_prefix[0]}, num_shards: {num_shards}, shard_id: {shard_id}")
+
+    return Property(
+        num_classes=2000000,
+        num_examples=0,
+        prefixes=list_prefix,
+        name="llava_vit_si_2025_12_12",
+        label_select=0,
+        label_start=0,
+        num_shards=num_shards,
+        shard_id=shard_id,
+        dali_type="origin",
+        random_diff=10,
+    )
 
 @DATASET_REGISTRY.register()
 def llava_vit_si():
