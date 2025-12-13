@@ -606,7 +606,6 @@ def dali_pipeline(mode, source_params):
         labels = labels.gpu()
         indices = indices.gpu()
         total_frames = total_frames.gpu()
-        visible_indices = fn.cast(visible_indices, dtype=types.FLOAT)
         return videos, visible_indices, labels, indices, total_frames
     else:
         video, visible_indices, labels, indices, total_frames = fn.external_source(
@@ -637,7 +636,6 @@ def dali_pipeline(mode, source_params):
         labels = labels.gpu()
         indices = indices.gpu()
         total_frames = total_frames.gpu()
-        visible_indices = fn.cast(visible_indices, dtype=types.FLOAT)
         return videos, visible_indices, labels, indices, total_frames
 
 
