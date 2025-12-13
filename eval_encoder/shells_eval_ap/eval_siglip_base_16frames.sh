@@ -4,10 +4,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 # Model configuration
-MODEL_FAMILY="siglip2"
-MODEL_NAME="siglip2_base"
+MODEL_FAMILY="siglip"
+MODEL_NAME="siglip_base"
 FRAMES_TOKEN_NUM=196
 EMBEDDING_SIZE=768
+NUM_FRAMES=16
+REPORT_DIR_SUFFIX="_16frames"
 
 # Custom dataset list
 DATASETS=(

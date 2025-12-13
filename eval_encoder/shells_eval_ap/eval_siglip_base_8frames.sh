@@ -8,6 +8,8 @@ MODEL_FAMILY="siglip"
 MODEL_NAME="siglip_base"
 FRAMES_TOKEN_NUM=196
 EMBEDDING_SIZE=768
+NUM_FRAMES=8
+REPORT_DIR_SUFFIX="_8frames"
 
 # Custom dataset list
 DATASETS=(

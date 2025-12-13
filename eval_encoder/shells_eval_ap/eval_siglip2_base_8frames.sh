@@ -4,10 +4,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 # Model configuration
-MODEL_FAMILY="metaclip"
-MODEL_NAME="metaclip_large14_fullcc"
-FRAMES_TOKEN_NUM=256
-EMBEDDING_SIZE=1024
+MODEL_FAMILY="siglip2"
+MODEL_NAME="siglip2_base"
+FRAMES_TOKEN_NUM=196
+EMBEDDING_SIZE=768
+NUM_FRAMES=8
+REPORT_DIR_SUFFIX="_8frames"
 
 # Custom dataset list
 DATASETS=(

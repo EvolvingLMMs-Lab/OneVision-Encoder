@@ -8,6 +8,8 @@ MODEL_FAMILY="clip"
 MODEL_NAME="clip_vit_base_patch16"
 FRAMES_TOKEN_NUM=196
 EMBEDDING_SIZE=768
+NUM_FRAMES=16
+REPORT_DIR_SUFFIX="_16frames"
 
 # Custom dataset list
 DATASETS=(
