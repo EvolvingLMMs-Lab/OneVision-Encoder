@@ -37,16 +37,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_family", default="llava_vit_codec")
     parser.add_argument("--model_name", default="llava_vit_base_ln")
     parser.add_argument("--model_weight", default="NULL")
-    parser.add_argument("--num_frames", type=int, default=8)
+    parser.add_argument("--num_frames", type=int, default=64)
     parser.add_argument("--num_tokens", type=int, default=1568)
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--tubelet_size", type=int, default=1)
-    parser.add_argument("--embedding_size", type=int, default=768)
-    parser.add_argument("--num_classes", type=int, default=0)
+    parser.add_argument("--patch_size", type=int, default=14, help="Patch size used for residual patching (default: 14)")
+    parser.add_argument("--cache_dir", type=str, default=None, help="Directory to store/load visible_indices cache (default: None, no cache)")
+    parser.add_argument("--K_keep", type=int, default=2048, help="Number of top-K patches to keep as visible (default: 2048)")
+    parser.add_argument("--embedding_size", type=int, default=768, help="Embedding size of the transformer backbone (default: 768)")
+    parser.add_argument("--num_classes", type=int, default=0, help="Number of classes for classification head (default: 0 for no head / feature extraction)")
     # ===> 新增：目标帧数参数 <===
-    parser.add_argument("--target_frames", type=int, default=64,
-                        help="Target number of frames to interpolate to (default: 64)")
-
+    parser.add_argument("--target_frames", type=int, default=64, help="Target number of frames to interpolate to (default: 64)")
     # Train
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--default_epoch", type=int, default=10)
@@ -234,6 +235,10 @@ def get_feature(
                 bs, C, T, H, W = videos.shape
                 device = videos.device
                 assert args.num_frames >= 64, "要64帧输入,请检查"
+
+                # topk_idx = torch.topk(visible_indices, k=4000, dim=1, largest=True, sorted=False).indices
+                # visible_indices = torch.sort(topk_idx, dim=1).values
+
                 enc_out = model(videos, visible_indices)
                 if hasattr(enc_out, "last_hidden_state"):
                     outputs = enc_out.last_hidden_state
@@ -490,13 +495,11 @@ def main() -> None:
         args.val_data_root_path = os.path.join(args.data_root, "k400_hevc")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
-
     if args.dataset == "COIN":
         args.train_data_root_path = args.data_root
         args.val_data_root_path = args.data_root
         args.train_data_csv_path = "/video_vit/feilong/LLaVA-ViT/eval_encoder/annotations/train_new.csv"
         args.val_data_csv_path = "/video_vit/feilong/LLaVA-ViT/eval_encoder/annotations/val_new.csv"
-
     try:
         args.rank = int(os.environ["RANK"])
         args.local_rank = int(os.environ["LOCAL_RANK"])
@@ -536,6 +539,9 @@ def main() -> None:
         "dali_num_threads": args.dali_num_threads,
         "dali_py_num_workers": args.dali_py_num_workers,
         "decord_num_threads": args.decord_num_threads,
+        "patch_size": args.patch_size,
+        "cache_dir": args.cache_dir,
+        "K_keep": args.K_keep,
         "seed": 1024,
     }
 
@@ -552,6 +558,9 @@ def main() -> None:
         "dali_num_threads": args.dali_num_threads,
         "dali_py_num_workers": args.dali_py_num_workers,
         "decord_num_threads": args.decord_num_threads,
+        "patch_size": args.patch_size,
+        "cache_dir": args.cache_dir,
+        "K_keep": args.K_keep,        
         "seed": 1024,
     }
 
