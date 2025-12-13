@@ -9,6 +9,8 @@ MODEL_NAME="dinov2_base"
 FRAMES_TOKEN_NUM=256
 EMBEDDING_SIZE=768
 INPUT_SIZE=224
+NUM_FRAMES=16
+REPORT_DIR_SUFFIX="_16frames"
 
 # Run evaluation
 run_attentive_probe
