@@ -49,22 +49,100 @@ def _residual_energy_norm(res_y: np.ndarray, pct: float = 95.0):
     a = max(a, 1.0)
     norm = np.clip(x / a, 0.0, 1.0)
     return norm.astype(np.float32), a
+import cv2
+import numpy as np
 
-def compute_visible_indices_cpu(residuals_y: np.ndarray, patch_size: int, input_size: int, sequence_length: int, K: int) -> np.ndarray:
+def resize_and_center_crop_residuals(residuals_y, input_size):
     """
-    Compute visible indices from residuals using CPU-based computation.
-    
+    residuals_y: numpy 数组，形状 (F, H, W) 或 (F, H, W, 1)
+    返回: res_zero_masks，形状 (F, input_size, input_size, 1)，dtype=uint8
+    """
+    # 如果是 (F, H, W, 1)，先去掉最后一维
+    if residuals_y.ndim == 4 and residuals_y.shape[-1] == 1:
+        residuals_y = residuals_y[..., 0]  # -> (F, H, W)
+
+    F, H, W = residuals_y.shape
+
+    # 按你 DALI 里的逻辑：resize_shorter=input_size -> 按短边缩放
+    scale = input_size / min(H, W)
+    new_w = int(round(W * scale))
+    new_h = int(round(H * scale))
+
+    # 中心裁剪坐标（所有帧分辨率相同，只算一次）
+    x1 = (new_w - input_size) // 2
+    y1 = (new_h - input_size) // 2
+    x2 = x1 + input_size
+    y2 = y1 + input_size
+
+    # 预分配输出: (F, input_size, input_size, 1) 对应 DALI 的 "FHWC"
+    res_zero_masks = np.empty((F, input_size, input_size, 1), dtype=np.uint8)
+
+    for i in range(F):
+        frame = residuals_y[i]  # (H, W)
+
+        # INTER_CUBIC 对应 DALI 的 INTERP_CUBIC
+        resized_long = cv2.resize(
+            frame,
+            (new_w, new_h),
+            interpolation=cv2.INTER_CUBIC
+        )  # (new_h, new_w)
+
+        cropped = resized_long[y1:y2, x1:x2]  # (input_size, input_size)
+
+        # DALI 输出是 UINT8，这里也转成 uint8；如果你 residual 本来是 float，可以自定义归一化/阈值
+        res_zero_masks[i, :, :, 0] = cropped.astype(np.uint8)
+
+    return res_zero_masks
+
+import numpy as np
+
+def compute_visible_indices_cpu(
+    residuals_y: np.ndarray,
+    patch_size: int | tuple[int, int],
+    K: int,
+) -> np.ndarray:
+    """
+    CPU 版的 Top-K 可见 patch 选择逻辑，对应 PyTorch 版 mask_by_residual_topk 的单样本情形 (B=1)，
+    只返回 visible_indices（不返回 mask 和 ids_restore）。
+
     Args:
-        residuals_y: np.ndarray of shape (F, H, W, 1) - residual data
-        patch_size: int - size of each patch
-        input_size: int - target input size (H and W)
-        sequence_length: int - number of frames (F)
-        k_keep_ratio: float - ratio of patches to keep (default 0.5)
-    
+        residuals_y: np.ndarray
+            形状 (F, H, W, 1) 或 (F, H, W)，表示单个样本的残差。
+            注意：建议在调用前就把 residuals_y 处理成“带符号”的残差，
+            即与训练时喂给 mask_by_residual_topk 的 res.abs() 语义一致。
+            如果 residuals_y 目前是 uint8 (0~255)，你可以在外部先做:
+                residuals_y = residuals_y.astype(np.int16) - 128
+        patch_size: int 或 (ph, pw)
+            patch 的高宽。
+        input_size: int
+            目标输入尺寸 H=W=input_size。
+            如果 residuals_y 的 H,W 已经是 input_size，可以不用它；
+            此参数主要是为了兼容原函数签名。
+        sequence_length: int
+            序列长度 F（帧数），主要用于接口兼容；实际以 residuals_y 的第 0 维为准。
+        K: int
+            要保留的 Top-K patch 数量（k_keep）。
+
     Returns:
-        visible_indices: np.ndarray of shape (K,) - indices of visible patches
+        visible_indices: np.ndarray, 形状 (K',)，dtype=int32
+            选中的 patch 线性索引（升序），K' = clamp(K, 0, L)，L 为总 patch 数。
     """
-    F, H, W = sequence_length, input_size, input_size
+    # ---------- 1. 统一 residuals_y 形状 ----------
+    # 支持 (F, H, W, 1) 或 (F, H, W)
+    if residuals_y.ndim == 4 and residuals_y.shape[-1] == 1:
+        residuals_y = residuals_y.squeeze(-1)  # (F, H, W)
+
+    if residuals_y.ndim != 3:
+        raise ValueError(f"residuals_y 必须是 (F,H,W) 或 (F,H,W,1)，当前形状: {residuals_y.shape}")
+
+    F, H, W = residuals_y.shape  # 实际使用的 F,H,W 以数据为准
+    # sequence_length 和 input_size 主要是接口兼容，如果你想强约束可加检查：
+    # if F != sequence_length:
+    #     raise ValueError(f"sequence_length={sequence_length}, 但 residuals_y.shape[0]={F}")
+    # if H != input_size or W != input_size:
+    #     raise ValueError(f"input_size={input_size}, 但 residuals_y 形状为 H={H}, W={W}")
+
+    # ---------- 2. patch 网格划分 ----------
     if isinstance(patch_size, int):
         ph = pw = patch_size
     else:
@@ -75,29 +153,38 @@ def compute_visible_indices_cpu(residuals_y: np.ndarray, patch_size: int, input_
             f"H/W 必须能被 patch 大小整除，当前 H={H}, W={W}, ph={ph}, pw={pw}"
         )
 
-    hb, wb = H // ph, W // pw     # 每帧的 patch 网格
-    L = F * hb * wb               # 总 patch 数
-    
-    # Squeeze the last dimension if it's 1
-    if residuals_y.ndim == 4 and residuals_y.shape[-1] == 1:
-        residuals_y = residuals_y.squeeze(-1)  # (F, H, W)
-    
-    # Ensure residuals_y is int16 for proper computation
-    res_signed = residuals_y.astype(np.int16) - 128  # Convert from uint8 to signed
-    
-    # Reshape to (F, hb, ph, wb, pw) and compute patch scores
-    res_reshaped = res_signed.reshape(F, hb, ph, wb, pw)
-    patch_scores = np.abs(res_reshaped).sum(axis=(2, 4))  # (F, hb, wb)
-    patch_scores_flat = patch_scores.reshape(L)  # (L,)
-    
-    # Get top-K indices
-    if K > 0:
-        topk_indices = np.argpartition(patch_scores_flat, -K)[-K:]
-        visible_indices = np.sort(topk_indices).astype(np.int32)
-    else:
-        visible_indices = np.array([], dtype=np.int32)
-    
+    hb, wb = H // ph, W // pw  # 每帧的 patch 网格数
+    L = F * hb * wb            # 总 patch 数
+
+    # ---------- 3. K 边界处理（与 PyTorch 版一致） ----------
+    K_clamped = int(max(0, min(K, L)))
+    if K_clamped == 0:
+        return np.empty((0,), dtype=np.int32)
+
+    # ---------- 4. 计算每个 patch 的残差得分 ----------
+    # PyTorch 版是：res_abs = res.abs().squeeze(1);
+    #               scores = res_abs.reshape(B,T,hb,ph,wb,pw).sum(dim=(3,5))
+    # 这里是单样本 (B=1)，且 residuals_y 已经是绝对值或带符号残差：
+    res_abs = np.abs(residuals_y)  # (F,H,W)
+
+    # reshape 成 (F, hb, ph, wb, pw)，对 patch 内求和 -> (F, hb, wb)
+    res_reshaped = res_abs.reshape(F, hb, ph, wb, pw)
+    patch_scores = res_reshaped.sum(axis=(2, 4))      # (F, hb, wb)
+
+    # 展平为一维 (L,) —— 对应 PyTorch 版 scores.reshape(B,L) 中 B=1 的情况
+    patch_scores_flat = patch_scores.reshape(L)       # (L,)
+
+    # ---------- 5. 选 Top-K 索引（与 PyTorch 版逻辑对应） ----------
+    # PyTorch: topk_idx = torch.topk(scores, k=K, dim=1, largest=True, sorted=False).indices
+    #         visible_indices = torch.sort(topk_idx, dim=1).values
+    # NumPy 等价写法：
+    # - argpartition 到倒数第 K_clamped 个，再取这 K_clamped 个；
+    # - 再排序，得到升序索引。
+    topk_indices = np.argpartition(patch_scores_flat, -K_clamped)[-K_clamped:]
+    visible_indices = np.sort(topk_indices).astype(np.int32)  # (K_clamped,)
+
     return visible_indices
+
 
 def _get_cache_path(video_path: str, cache_dir: str) -> str:
     """
@@ -439,52 +526,12 @@ class ExternalInputCallable:
             except:
                 video_path, video_label = self.replace_example_info
                 video_data, residuals_y, duration, frame_id_list = self.get_frame_id_list(video_path, self.sequence_length)
-            
-            # Resize residuals to input_size before computing visible_indices
-            # residuals_y shape: (F, H, W, 1)
-            F = residuals_y.shape[0]
-            resized_residuals = []
-            for i in range(F):
-                frame = residuals_y[i]  # (H, W, 1) or (H, W)
-                if frame.ndim == 3:
-                    frame = frame.squeeze(-1)  # (H, W)
-
-                # -------- 按短边缩放 + 中心裁剪，模拟 DALI 的 resize_shorter + crop --------
-                h, w = frame.shape[:2]
-
-                # 1. 按短边缩放到 self.input_size
-                scale = self.input_size / min(h, w)
-                new_w = int(round(w * scale))
-                new_h = int(round(h * scale))
-
-                resized_long = cv2.resize(
-                    frame,
-                    (new_w, new_h),
-                    interpolation=cv2.INTER_CUBIC
-                )
-
-                # 2. 从中心裁剪成 self.input_size x self.input_size
-                h2, w2 = resized_long.shape[:2]
-                x1 = (w2 - self.input_size) // 2
-                y1 = (h2 - self.input_size) // 2
-                x2 = x1 + self.input_size
-                y2 = y1 + self.input_size
-
-                resized = resized_long[y1:y2, x1:x2]  # (input_size, input_size)
-
-                resized_residuals.append(resized)
-                # -----------------------------------------------------------------------
-
-            residuals_y_resized = np.stack(resized_residuals, axis=0)[..., np.newaxis]  # (F, input_size, input_size, 1)
-            # Compute visible_indices on CPU
+            residuals_y = resize_and_center_crop_residuals(residuals_y, input_size=self.input_size)
             visible_indices = compute_visible_indices_cpu(
-                residuals_y=residuals_y_resized,
+                residuals_y=residuals_y,
                 patch_size=self.patch_size,
-                input_size=self.input_size,
-                sequence_length=self.sequence_length,
                 K=self.K_keep,
             )
-
             save_cache(visible_indices, video_path, self.cache_dir)
         else:
             try:
@@ -559,7 +606,7 @@ def dali_pipeline(mode, source_params):
         labels = labels.gpu()
         indices = indices.gpu()
         total_frames = total_frames.gpu()
-
+        visible_indices = fn.cast(visible_indices, dtype=types.FLOAT)
         return videos, visible_indices, labels, indices, total_frames
     else:
         video, visible_indices, labels, indices, total_frames = fn.external_source(
@@ -590,6 +637,7 @@ def dali_pipeline(mode, source_params):
         labels = labels.gpu()
         indices = indices.gpu()
         total_frames = total_frames.gpu()
+        visible_indices = fn.cast(visible_indices, dtype=types.FLOAT)
         return videos, visible_indices, labels, indices, total_frames
 
 
