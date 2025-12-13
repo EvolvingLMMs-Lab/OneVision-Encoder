@@ -9,14 +9,14 @@ export PYTHONPATH=../
 
 # Default dataset list (can be overridden in calling script)
 DEFAULT_DATASETS=(
-    "ssv2"
+    # "ssv2"
     "diving48"
     "perception_test"
-    "epic_verb"
-    "epic_noun"
-    "hmdb51"
-    "k400"
-    "charadesego"
+    # "epic_verb"
+    # "epic_noun"
+    # "hmdb51"
+    # "k400"
+    # "charadesego"
 )
 
 # ============================================================================
