@@ -21,6 +21,8 @@ This module consumes packed patches `[total_patches, patch_dim]` and grid_thw me
 and runs the AIMv2 transformer with FlashAttention varlen kernels (no per-image loops).
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,11 +33,12 @@ try:
 
     _flash_attn_available = True
 except ImportError:
+    flash_attn_varlen_func = None
     _flash_attn_available = False
 
 
 def _get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: torch.Tensor) -> torch.Tensor:
-    omega = torch.arange(float(embed_dim) // 2, device=pos.device, dtype=pos.dtype)
+    omega = torch.arange(embed_dim // 2, device=pos.device, dtype=pos.dtype)
     omega /= embed_dim / 2.0
     omega = 1.0 / 10000**omega
     pos = pos.reshape(-1)
@@ -50,9 +53,10 @@ def get_sincos_pos_embed(h: int, w: int, embed_dim: int, device: torch.device, d
     grid_w = torch.arange(w, device=device, dtype=dtype)
     grid = torch.meshgrid(grid_w, grid_h, indexing="xy")
     grid = torch.stack(grid, dim=0).reshape(2, 1, h, w)
-    emb_h = _get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])
-    emb_w = _get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])
-    return torch.cat([emb_h, emb_w], dim=1)
+    x_grid, y_grid = grid  # x_grid: width axis, y_grid: height axis (xy indexing)
+    emb_x = _get_1d_sincos_pos_embed_from_grid(embed_dim // 2, x_grid)
+    emb_y = _get_1d_sincos_pos_embed_from_grid(embed_dim // 2, y_grid)
+    return torch.cat([emb_x, emb_y], dim=1)
 
 
 class RMSNorm(nn.Module):
@@ -110,6 +114,12 @@ class AIMv2PackingAttention(nn.Module):
         qkv = qkv.permute(1, 0, 2, 3)
         query_states, key_states, value_states = qkv.unbind(0)
 
+        if flash_attn_varlen_func is None:
+            raise ImportError(
+                "FlashAttention 2 is required for AIMv2Packing. Please install flash-attn: "
+                "pip install flash-attn --no-build-isolation"
+            )
+
         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         attn_output = flash_attn_varlen_func(
             query_states,
@@ -156,7 +166,12 @@ class AIMv2PackingEncoder(nn.Module):
 class AIMv2Packing(nn.Module):
     DEFAULT_PATCH_SIZE = 14
 
-    def __init__(self, ckpt: str = "apple/aimv2-large-patch14-224", device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(
+        self,
+        ckpt: str = "apple/aimv2-large-patch14-224",
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        revision: Optional[str] = None,
+    ):
         super().__init__()
 
         if not _flash_attn_available:
@@ -165,7 +180,10 @@ class AIMv2Packing(nn.Module):
                 "pip install flash-attn --no-build-isolation"
             )
 
-        base_model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
+        from_kwargs = {"trust_remote_code": True}
+        if revision is not None:
+            from_kwargs["revision"] = revision
+        base_model = Aimv2VisionModel.from_pretrained(ckpt, **from_kwargs)
         self.config = base_model.config
         self.device = torch.device(device)
         self.patch_size = getattr(self.config, "patch_size", self.DEFAULT_PATCH_SIZE)
@@ -175,13 +193,37 @@ class AIMv2Packing(nn.Module):
         self.post_norm = RMSNorm(self.config.hidden_size, eps=self.config.rms_norm_eps)
 
         # Load weights from the pretrained model
+        if not hasattr(base_model, "vision_model"):
+            raise AttributeError("Unexpected AIMv2 model structure; missing vision_model on base_model.")
+        if not hasattr(base_model.vision_model, "trunk"):
+            raise AttributeError(
+                f"Unexpected AIMv2 model structure; missing trunk on vision_model (type={type(base_model.vision_model).__name__})."
+            )
+
         patchifier = base_model.vision_model.preprocessor.patchifier
-        self.patch_embed.proj.weight.data.copy_(patchifier.proj.weight.reshape(self.config.hidden_size, -1))
+        if (
+            patchifier.proj.weight.dim() != 4
+            or patchifier.proj.weight.shape[2] != self.patch_size
+            or patchifier.proj.weight.shape[3] != self.patch_size
+        ):
+            raise ValueError(
+                f"Unexpected patchifier.proj weight shape for AIMv2 packing conversion. "
+                f"Expected (*, *, {self.patch_size}, {self.patch_size}), got {tuple(patchifier.proj.weight.shape)}."
+            )
+        patch_dim = self.patch_embed.proj.in_features
+        self.patch_embed.proj.weight.data.copy_(patchifier.proj.weight.reshape(self.config.hidden_size, patch_dim))
         if patchifier.proj.bias is not None:
             self.patch_embed.proj.bias.data.copy_(patchifier.proj.bias)
+        else:
+            self.patch_embed.proj.bias.data.zero_()
         self.patch_embed.norm.weight.data.copy_(patchifier.norm.weight)
 
-        for packing_layer, standard_layer in zip(self.encoder.layers, base_model.vision_model.trunk.blocks):
+        standard_layers = base_model.vision_model.trunk.blocks
+        if len(self.encoder.layers) != len(standard_layers):
+            raise ValueError("Layer count mismatch between packing encoder and base AIMv2 model.")
+
+        # Map standard layer names (norm_1/norm_2) to packing equivalents (norm1/norm2)
+        for packing_layer, standard_layer in zip(self.encoder.layers, standard_layers):
             packing_layer.norm1.load_state_dict(standard_layer.norm_1.state_dict())
             packing_layer.norm2.load_state_dict(standard_layer.norm_2.state_dict())
             packing_layer.attn.qkv.load_state_dict(standard_layer.attn.qkv.state_dict())
@@ -194,10 +236,10 @@ class AIMv2Packing(nn.Module):
     def _build_position_embeddings(self, grid_thw: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
         pos_embeds = []
         for t, h, w in grid_thw:
-            h_int, w_int = int(h.item()), int(w.item())
+            t_int, h_int, w_int = int(t.item()), int(h.item()), int(w.item())
             pos = get_sincos_pos_embed(h_int, w_int, self.config.hidden_size, device=self.device, dtype=dtype)
-            if int(t.item()) > 1:
-                pos = pos.unsqueeze(0).repeat(int(t.item()), 1, 1).reshape(-1, self.config.hidden_size)
+            if t_int > 1:
+                pos = pos.unsqueeze(0).expand(t_int, -1, -1).reshape(-1, self.config.hidden_size)
             pos_embeds.append(pos)
         return torch.cat(pos_embeds, dim=0)
 
@@ -206,7 +248,8 @@ class AIMv2Packing(nn.Module):
         hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
         grid_thw = grid_thw.to(device=self.device)
 
-        seq_lengths = (grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]).to(torch.int32)
+        t, h, w = grid_thw.unbind(dim=1)
+        seq_lengths = (t * h * w).to(torch.int32)
         cu_seqlens = F.pad(seq_lengths.cumsum(dim=0), (1, 0), value=0)
 
         embeddings = self.patch_embed(hidden_states)
