@@ -396,9 +396,9 @@ def main():
                 import traceback
                 traceback.print_exc()
         
-        # Test with both images together in a batch
+        # Test with both images together in a batch (using original sizes, no resize)
         print(f"\n{'=' * 80}")
-        print(f"Testing with batched real images")
+        print(f"Testing with batched real images (original sizes)")
         print(f"{'=' * 80}")
         
         try:
@@ -413,40 +413,114 @@ def main():
             _, _, h1, w1 = img1.shape
             _, _, h2, w2 = img2.shape
             
-            # Resize both to a common size (use max dimensions, rounded up to patch size)
-            target_h = round_up_to_multiple(max(h1, h2), patch_size)
-            target_w = round_up_to_multiple(max(w1, w2), patch_size)
+            print(f"Image 1 size: {w1}x{h1}")
+            print(f"Image 2 size: {w2}x{h2}")
             
-            print(f"Resizing images to common size: {target_w}x{target_h}")
+            # Check if dimensions are divisible by patch size, resize if necessary
+            images_to_batch = []
+            for img_idx, (img, h, w) in enumerate([(img1, h1, w1), (img2, h2, w2)], 1):
+                if h % patch_size != 0 or w % patch_size != 0:
+                    print(f"⚠️  Warning: Image {img_idx} dimensions ({w}x{h}) are not divisible by patch size ({patch_size})")
+                    print(f"Resizing Image {img_idx} to nearest multiple of patch size...")
+                    
+                    # Round up to nearest multiple of patch size
+                    new_h = round_up_to_multiple(h, patch_size)
+                    new_w = round_up_to_multiple(w, patch_size)
+                    
+                    img = F.interpolate(
+                        img,
+                        size=(new_h, new_w),
+                        mode='bilinear',
+                        align_corners=False
+                    )
+                    print(f"Image {img_idx} resized to: {new_w}x{new_h}")
+                else:
+                    print(f"Image {img_idx} already divisible by patch size, keeping original size: {w}x{h}")
+                
+                images_to_batch.append(img)
             
-            img1_resized = F.interpolate(img1, size=(target_h, target_w), mode='bilinear', align_corners=False)
-            img2_resized = F.interpolate(img2, size=(target_h, target_w), mode='bilinear', align_corners=False)
+            # Process each image through standard model separately
+            print("\nRunning standard model on each image separately...")
+            standard_outputs = []
+            for i, img in enumerate(images_to_batch, 1):
+                with torch.no_grad():
+                    output = standard_model(img)
+                standard_outputs.append(output.squeeze(0))  # Remove batch dimension
+                print(f"  Image {i} output shape: {output.shape}")
             
-            # Batch images together
-            batch_input = torch.cat([img1_resized, img2_resized], dim=0)
+            # Convert all images to packing format
+            print("\nConverting to packing format...")
+            all_patches = []
+            grid_thw_list = []
             
-            # Run alignment test
-            metrics, standard_output, packing_output = test_alignment(
-                standard_model, packing_model, batch_input, patch_size, args.device
-            )
+            for i, img in enumerate(images_to_batch, 1):
+                packed_patches, grid_thw_single = convert_to_patches(img, patch_size)
+                all_patches.append(packed_patches)
+                grid_thw_list.append(grid_thw_single)
+                num_patches = packed_patches.shape[0]
+                _, _, h, w = img.shape
+                print(f"  Image {i} ({w}x{h}): {num_patches} patches")
             
-            # Display results
-            print(f"\nResults for batched images:")
-            print("-" * 80)
-            print(f"Max Diff:        {metrics['max_diff']:.6f}")
-            print(f"Mean Diff:       {metrics['mean_diff']:.6f}")
-            print(f"Min Cosine Sim:  {metrics['min_cosine']:.8f}")
-            print(f"Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
-            print(f"Max Cosine Sim:  {metrics['max_cosine']:.8f}")
+            # Concatenate all patches
+            packed_input = torch.cat(all_patches, dim=0)
+            grid_thw = torch.cat(grid_thw_list, dim=0)
             
-            # Check if test passed
-            test_passed = metrics['min_cosine'] > args.threshold
-            test_results.append(("batch", test_passed, metrics))
+            print(f"Packed input shape: {packed_input.shape}")
+            print(f"grid_thw shape: {grid_thw.shape}")
+            print(f"grid_thw values:\n{grid_thw}")
             
-            if test_passed:
-                print(f"✅ PASS: Batched images (min cosine similarity {metrics['min_cosine']:.8f} > {args.threshold})")
+            # Process through packing model
+            print("\nRunning packing model...")
+            with torch.no_grad():
+                packing_output = packing_model(packed_input, grid_thw)
+            
+            print(f"Packing model output shape: {packing_output.shape}")
+            
+            # Split packing output back into individual images
+            packing_outputs = []
+            start_idx = 0
+            for i, img in enumerate(images_to_batch, 1):
+                _, _, h, w = img.shape
+                num_patches = (h // patch_size) * (w // patch_size)
+                packing_outputs.append(packing_output[start_idx:start_idx + num_patches])
+                start_idx += num_patches
+                print(f"  Image {i} output shape: {packing_outputs[-1].shape}")
+            
+            # Compare each image's output
+            print("\nComparing outputs for each image...")
+            all_batch_passed = True
+            batch_metrics_list = []
+            for i in range(len(images_to_batch)):
+                standard_out = standard_outputs[i]
+                packing_out = packing_outputs[i]
+                
+                # Reshape to add batch dimension for metric computation
+                standard_out = standard_out.unsqueeze(0)
+                packing_out = packing_out.unsqueeze(0)
+                
+                metrics = compute_similarity_metrics(standard_out, packing_out)
+                batch_metrics_list.append(metrics)
+                
+                print(f"\n  Results for Image {i+1} in batch:")
+                print(f"    Max Diff:        {metrics['max_diff']:.6f}")
+                print(f"    Mean Diff:       {metrics['mean_diff']:.6f}")
+                print(f"    Min Cosine Sim:  {metrics['min_cosine']:.8f}")
+                print(f"    Mean Cosine Sim: {metrics['mean_cosine']:.8f}")
+                
+                test_passed = metrics['min_cosine'] > args.threshold
+                if not test_passed:
+                    all_batch_passed = False
+                    all_tests_passed = False
+            
+            # Overall batch metrics
+            min_cosine = min([m['min_cosine'] for m in batch_metrics_list])
+            
+            if all_batch_passed:
+                print(f"\n✅ PASS: Batched images (original sizes) (min cosine similarity {min_cosine:.8f} > {args.threshold})")
+                test_results.append(("batch_original_sizes", True, {"min_cosine": min_cosine}))
             else:
-                print(f"❌ FAIL: Batched images (min cosine similarity {metrics['min_cosine']:.8f} <= {args.threshold})")
+                print(f"\n❌ FAIL: Batched images (original sizes) (min cosine similarity {min_cosine:.8f} <= {args.threshold})")
+                test_results.append(("batch_original_sizes", False, {"min_cosine": min_cosine}))
                 all_tests_passed = False
                 
         except Exception as e:
