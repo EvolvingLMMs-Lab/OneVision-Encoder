@@ -1307,7 +1307,7 @@ class Siglip2PackingEncoder(nn.Module):
     Transformer encoder with packing support using FlashAttention varlen.
     """
 
-    def __init__(self, config: Siglip2Config):
+    def __init__(self, config: Union[Siglip2VisionConfig, Siglip2TextConfig]):
         super().__init__()
         self.config = config
         self.layers = nn.ModuleList([Siglip2PackingEncoderLayer(config) for _ in range(config.num_hidden_layers)])
@@ -1459,4 +1459,7 @@ __all__ = [
     "Siglip2VisionModel",
     "Siglip2ForImageClassification",
     "Siglip2NaflexPacking",
+    "Siglip2PackingAttention",
+    "Siglip2PackingEncoderLayer",
+    "Siglip2PackingEncoder",
 ]
