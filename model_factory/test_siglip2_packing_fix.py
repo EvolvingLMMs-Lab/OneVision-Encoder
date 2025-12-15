@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 # coding=utf-8
 """
-Quick validation test to verify the Siglip2NaflexPacking fix.
+Quick validation test to verify the Siglip2NaflexPacking refactoring.
 
 This test verifies that:
-1. The parameter name issue is resolved (attention_mask vs pixel_attention_mask)
-2. The optimized path works for same-length sequences (no attention mask)
-3. The variable-length path works correctly with attention masks
+1. The model no longer uses AutoModel.from_pretrained
+2. FlashAttention varlen is used instead of attention masks
+3. The implementation follows the vit_preview_v0_packing_hf pattern
 
 Returns:
     0 if all tests pass successfully
     1 if any test fails
 
 Note: This test validates the code structure and signatures without requiring
-a model checkpoint. To test with actual model inference, use:
-    python align_siglip2_packing.py --ckpt <path_to_checkpoint>
+FlashAttention or a model checkpoint. To test with actual model inference, you need:
+    - FlashAttention 2 installed: pip install flash-attn --no-build-isolation
+    - A model checkpoint available
 """
 
 import sys
@@ -79,7 +80,7 @@ def test_forward_signature():
 
 
 def test_code_paths():
-    """Test that both code paths (same-length and variable-length) exist."""
+    """Test that FlashAttention varlen implementation exists."""
     print("\n" + "=" * 80)
     print("Testing implementation code paths...")
     print("=" * 80)
@@ -91,22 +92,27 @@ def test_code_paths():
         # Get the source code of the forward method
         source = inspect.getsource(Siglip2NaflexPacking.forward)
         
-        # Check for optimized path (same-length sequences)
-        has_same_length_check = 'all_same_length' in source
-        has_optimized_path = 'attention_mask=None' in source
+        # Check for FlashAttention varlen usage
+        has_flash_attn = 'flash_attn_varlen_func' in source or 'cu_seqlens' in source
+        has_no_automodel = 'AutoModel.from_pretrained' not in source
         
-        # Check for variable-length path
-        has_variable_length_path = 'pixel_attention_mask' in source
+        print(f"✓ Uses FlashAttention varlen approach: {has_flash_attn}")
+        print(f"✓ Does not use AutoModel.from_pretrained: {has_no_automodel}")
         
-        print(f"✓ Has same-length optimization check: {has_same_length_check}")
-        print(f"✓ Has optimized path (no attention mask): {has_optimized_path}")
-        print(f"✓ Has variable-length path (with attention mask): {has_variable_length_path}")
+        # Check the class structure for FlashAttention components
+        try:
+            from vit_siglip2_packing_hf import Siglip2PackingAttention
+            print("✓ Siglip2PackingAttention class exists")
+            has_packing_attn = True
+        except ImportError:
+            print("✗ Siglip2PackingAttention class not found")
+            has_packing_attn = False
         
-        if has_same_length_check and has_optimized_path and has_variable_length_path:
-            print("\n✓ Both code paths are implemented correctly")
+        if has_flash_attn and has_no_automodel and has_packing_attn:
+            print("\n✓ FlashAttention varlen implementation is correct")
             return True
         else:
-            print("\n✗ Missing expected code paths")
+            print("\n✗ Missing expected FlashAttention components")
             return False
             
     except Exception as e:
@@ -149,8 +155,9 @@ def main():
     
     if passed == total:
         print("\n✅ All validation tests passed!")
-        print("\nNote: To test with actual model loading, you need a model checkpoint:")
-        print("  python align_siglip2_packing.py --ckpt <path_to_checkpoint>")
+        print("\nNote: To test with actual model loading, you need:")
+        print("  1. FlashAttention 2 installed: pip install flash-attn --no-build-isolation")
+        print("  2. A model checkpoint available")
         return 0
     else:
         print("\n❌ Some validation tests failed")
