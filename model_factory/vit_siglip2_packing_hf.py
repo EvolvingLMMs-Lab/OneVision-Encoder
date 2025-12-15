@@ -385,62 +385,61 @@ class Siglip2NaflexPacking(nn.Module):
         Returns:
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
-        with torch.no_grad():
-            # Get target dtype from patch embedding
-            target_dtype = self.embeddings.patch_embedding.weight.dtype
+        # Get target dtype from patch embedding
+        target_dtype = self.embeddings.patch_embedding.weight.dtype
 
-            # Move inputs to device
-            hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
-            grid_thw = grid_thw.to(device=self.device)
+        # Move inputs to device
+        hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
+        grid_thw = grid_thw.to(device=self.device)
 
-            # Calculate spatial_shapes from grid_thw
-            # For Siglip2, spatial_shapes is [num_images, 2] containing [h, w]
-            spatial_shapes = grid_thw[:, 1:].long()  # Extract [h, w] from [t, h, w]
+        # Calculate spatial_shapes from grid_thw
+        # For Siglip2, spatial_shapes is [num_images, 2] containing [h, w]
+        spatial_shapes = grid_thw[:, 1:].long()  # Extract [h, w] from [t, h, w]
 
-            # Reshape hidden_states from [total_patches, patch_dim] to [batch_size, max_patches, patch_dim]
-            # This is needed because embeddings.forward expects 3D input
-            batch_size = grid_thw.shape[0]
-            seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
-            max_num_patches = seq_lengths.max().item()
-            patch_dim = hidden_states.shape[1]
+        # Reshape hidden_states from [total_patches, patch_dim] to [batch_size, max_patches, patch_dim]
+        # This is needed because embeddings.forward expects 3D input
+        batch_size = grid_thw.shape[0]
+        seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
+        max_num_patches = seq_lengths.max().item()
+        patch_dim = hidden_states.shape[1]
 
-            # Create padded batch tensor
-            batched_hidden_states = torch.zeros(
-                (batch_size, max_num_patches, patch_dim),
-                device=hidden_states.device,
-                dtype=hidden_states.dtype
-            )
+        # Create padded batch tensor
+        batched_hidden_states = torch.zeros(
+            (batch_size, max_num_patches, patch_dim),
+            device=hidden_states.device,
+            dtype=hidden_states.dtype
+        )
 
-            # Fill in the actual patches for each image
-            start_idx = 0
-            for i in range(batch_size):
-                num_patches = seq_lengths[i].item()
-                batched_hidden_states[i, :num_patches] = hidden_states[start_idx:start_idx + num_patches]
-                start_idx += num_patches
+        # Fill in the actual patches for each image
+        start_idx = 0
+        for i in range(batch_size):
+            num_patches = seq_lengths[i].item()
+            batched_hidden_states[i, :num_patches] = hidden_states[start_idx:start_idx + num_patches]
+            start_idx += num_patches
 
-            # Apply patch embeddings
-            embeddings = self.embeddings(batched_hidden_states, spatial_shapes)
+        # Apply patch embeddings
+        embeddings = self.embeddings(batched_hidden_states, spatial_shapes)
 
-            # Convert back to packed format by removing padding
-            # embeddings shape: [batch_size, max_num_patches, hidden_size]
-            packed_embeddings = []
-            for i in range(batch_size):
-                num_patches = seq_lengths[i].item()
-                packed_embeddings.append(embeddings[i, :num_patches])
-            embeddings = torch.cat(packed_embeddings, dim=0)
+        # Convert back to packed format by removing padding
+        # embeddings shape: [batch_size, max_num_patches, hidden_size]
+        packed_embeddings = []
+        for i in range(batch_size):
+            num_patches = seq_lengths[i].item()
+            packed_embeddings.append(embeddings[i, :num_patches])
+        embeddings = torch.cat(packed_embeddings, dim=0)
 
-            # Compute cumulative sequence lengths for FlashAttention
-            cu_seqlens = F.pad(seq_lengths.cumsum(dim=0), (1, 0), value=0).to(torch.int32)
+        # Compute cumulative sequence lengths for FlashAttention
+        cu_seqlens = F.pad(seq_lengths.cumsum(dim=0), (1, 0), value=0).to(torch.int32)
 
-            # Encoder with FlashAttention varlen (no attention mask needed)
-            encoder_outputs = self.encoder(
-                inputs_embeds=embeddings,
-                cu_seqlens=cu_seqlens,
-            )
+        # Encoder with FlashAttention varlen (no attention mask needed)
+        encoder_outputs = self.encoder(
+            inputs_embeds=embeddings,
+            cu_seqlens=cu_seqlens,
+        )
 
-            # Post layernorm
-            last_hidden_state = encoder_outputs.last_hidden_state
-            last_hidden_state = self.post_layernorm(last_hidden_state)
+        # Post layernorm
+        last_hidden_state = encoder_outputs.last_hidden_state
+        last_hidden_state = self.post_layernorm(last_hidden_state)
 
         return last_hidden_state
 
