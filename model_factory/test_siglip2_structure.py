@@ -6,10 +6,14 @@ This test validates the code structure without requiring dependencies.
 
 import re
 import sys
+import os
 
 def read_file(filepath):
     """Read file content."""
-    with open(filepath, 'r') as f:
+    # Get absolute path relative to this script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(script_dir, filepath)
+    with open(full_path, 'r') as f:
         return f.read()
 
 def test_flash_attn_import():

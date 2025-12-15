@@ -1265,7 +1265,7 @@ class Siglip2PackingAttention(nn.Module):
             causal=False,
         )
         
-        attn_output = attn_output.reshape(seq_length, self.embed_dim).contiguous()
+        attn_output = attn_output.reshape(seq_length, self.embed_dim)
         attn_output = self.out_proj(attn_output)
         
         return attn_output
@@ -1382,7 +1382,7 @@ class Siglip2NaflexPacking(nn.Module):
         self.embeddings.load_state_dict(vision_model.vision_model.embeddings.state_dict())
         
         # Copy encoder weights (need to map standard attention to packing attention)
-        for i, (packing_layer, standard_layer) in enumerate(zip(self.encoder.layers, vision_model.vision_model.encoder.layers)):
+        for packing_layer, standard_layer in zip(self.encoder.layers, vision_model.vision_model.encoder.layers):
             # Copy layer norms
             packing_layer.layer_norm1.load_state_dict(standard_layer.layer_norm1.state_dict())
             packing_layer.layer_norm2.load_state_dict(standard_layer.layer_norm2.state_dict())
