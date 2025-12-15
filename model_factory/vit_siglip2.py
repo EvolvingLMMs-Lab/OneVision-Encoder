@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn as nn_types
-from transformers import AutoModel
+from transformers import Siglip2VisionModel, AutoModel
 from timm.models.registry import register_model
 
 
@@ -68,7 +68,7 @@ class Siglip2Naflex(nn.Module):
         super(Siglip2Naflex, self).__init__()
         self.device = torch.device(device)
         # Load the model (only vision model)
-        self.model = AutoModel.from_pretrained(ckpt).vision_model.to(self.device).eval()
+        self.model = Siglip2VisionModel.from_pretrained(ckpt).to(self.device).eval()
 
     def _convert_to_patches(self, pixel_values, patch_size):
         """
@@ -158,7 +158,7 @@ class Siglip2Naflex(nn.Module):
             # Use keyword arguments for clarity and robustness
             outputs = self.model(
                 pixel_values=pixel_values,
-                attention_mask=attention_mask,
+                pixel_attention_mask=attention_mask,
                 spatial_shapes=spatial_shapes,
                 output_hidden_states=True
             )
