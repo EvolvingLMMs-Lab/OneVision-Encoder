@@ -158,6 +158,7 @@ class Siglip2Naflex(nn.Module):
             # Use keyword arguments for clarity and robustness
             outputs = self.model(
                 pixel_values=pixel_values,
+                pixel_attention_mask=attention_mask,
                 spatial_shapes=spatial_shapes,
                 output_hidden_states=True
             )
