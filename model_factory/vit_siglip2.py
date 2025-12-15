@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn as nn_types
-from transformers import Siglip2VisionModel
+from transformers import Siglip2VisionModel, AutoModel
 from timm.models.registry import register_model
 
 
@@ -22,7 +22,7 @@ class Siglip2(nn.Module):
         super(Siglip2, self).__init__()
         self.device = torch.device(device)
         # Load the model (only vision model)
-        self.model = Siglip2VisionModel.from_pretrained(ckpt).to(self.device).eval()
+        self.model = AutoModel.from_pretrained(ckpt).vision_model.to(self.device).eval()
 
     def forward(self, pixel_values):
         """
