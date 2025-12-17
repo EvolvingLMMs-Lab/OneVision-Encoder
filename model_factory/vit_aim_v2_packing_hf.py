@@ -46,22 +46,55 @@ except ImportError:
 class Aimv2VisionEmbeddings(nn.Module):
     """
     Vision embeddings for AIMv2 with support for variable image sizes.
-    Handles patch embedding using Conv2d projection.
+    Handles patch embedding using Conv2d projection with position embeddings.
     """
 
     def __init__(self, config: Aimv2VisionConfig):
         super().__init__()
         self.config = config
-        self.embed_dim = config.hidden_size
         self.patch_size = config.patch_size
-
+        
         # AIMv2 uses Conv2d for patch embedding
-        self.patch_embedding = nn.Conv2d(
-            in_channels=config.num_channels,
-            out_channels=self.embed_dim,
-            kernel_size=self.patch_size,
-            stride=self.patch_size,
+        self.patch_embed = nn.Conv2d(
+            config.num_channels, config.hidden_size, kernel_size=config.patch_size, stride=config.patch_size
         )
+        self.rms_norm = Aimv2RMSNorm(config.hidden_size, config.rms_norm_eps)
+
+        num_patches = (config.image_size // config.patch_size) ** 2
+        if not self.config.is_native:
+            self.position_embedding = nn.Embedding(num_patches, config.hidden_size)
+        self.register_buffer("position_ids", torch.arange(num_patches).expand((1, -1)), persistent=False)
+
+    @staticmethod
+    def build_2d_sincos_position_embedding(
+        height, width, embed_dim=256, temperature=10000.0, device="cpu", dtype=torch.float32
+    ) -> torch.Tensor:
+        """
+        Build 2D sinusoidal position embeddings.
+        
+        Args:
+            height: Height in patches
+            width: Width in patches
+            embed_dim: Embedding dimension
+            temperature: Temperature for sinusoidal encoding
+            device: Device for tensor creation
+            dtype: Data type for tensor creation
+            
+        Returns:
+            Position embeddings of shape [1, height*width, embed_dim]
+        """
+        grid_w = torch.arange(int(width), dtype=dtype, device=device)
+        grid_h = torch.arange(int(height), dtype=dtype, device=device)
+        grid_h, grid_w = torch.meshgrid(grid_w, grid_h, indexing="xy")
+
+        pos_dim = embed_dim // 4
+        omega = torch.arange(pos_dim, dtype=dtype, device=device) / pos_dim
+        omega = 1.0 / (temperature**omega)
+
+        out_h = grid_h.flatten()[..., None] @ omega[None, :]
+        out_w = grid_w.flatten()[..., None] @ omega[None, :]
+
+        return torch.concat([out_h.sin(), out_h.cos(), out_w.sin(), out_w.cos()], dim=1)[None, :, :]
 
     def forward(self, pixel_values: torch.FloatTensor) -> torch.Tensor:
         """
@@ -69,15 +102,26 @@ class Aimv2VisionEmbeddings(nn.Module):
             pixel_values (`torch.FloatTensor`):
                 Pixel values of shape (batch_size, num_channels, height, width)
         """
+        _, _, height, width = pixel_values.size()
+        
         # Apply patch embeddings via Conv2d
-        target_dtype = self.patch_embedding.weight.dtype
-        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))
-        
-        # Flatten and transpose: (batch_size, embed_dim, h, w) -> (batch_size, h*w, embed_dim)
-        batch_size, embed_dim, h, w = patch_embeds.shape
-        patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
-        
-        return patch_embeds
+        hidden_states = self.patch_embed(pixel_values).flatten(2).transpose(1, 2)
+        hidden_states = self.rms_norm(hidden_states)
+
+        # Add position embeddings
+        if self.config.is_native:
+            pos_embed = self.build_2d_sincos_position_embedding(
+                height // self.patch_size,
+                width // self.patch_size,
+                embed_dim=self.config.hidden_size,
+                device=hidden_states.device,
+                dtype=hidden_states.dtype,
+            )
+        else:
+            pos_embed = self.position_embedding(self.position_ids)
+
+        hidden_states = hidden_states + pos_embed
+        return hidden_states
 
 
 class Aimv2RMSNorm(nn.Module):
@@ -303,10 +347,9 @@ class AIMv2Packing(nn.Module):
         # Load the weights from the pretrained model
         # Aimv2VisionModel structure: the model itself has embeddings, encoder, layernorm
         try:
-            # Copy embeddings weights (Conv2d patch embedding)
-            self.embeddings.patch_embedding.load_state_dict(
-                base_model.embeddings.patch_embedding.state_dict()
-            )
+            # Copy embeddings weights - use the entire embeddings state dict
+            # This includes patch_embed, rms_norm, and position_embedding (if not native)
+            self.embeddings.load_state_dict(base_model.embeddings.state_dict())
         except AttributeError as e:
             raise RuntimeError(
                 f"Failed to copy embeddings weights. "
@@ -418,7 +461,7 @@ class AIMv2Packing(nn.Module):
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
         # Get target dtype from patch embedding
-        target_dtype = self.embeddings.patch_embedding.weight.dtype
+        target_dtype = self.embeddings.patch_embed.weight.dtype
 
         # Move inputs to device
         hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
@@ -428,19 +471,43 @@ class AIMv2Packing(nn.Module):
         # This is necessary because AIMv2 uses Conv2d for patch projection
         pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
 
-        # Apply patch embeddings via Conv2d
-        embeddings = self.embeddings(pixel_values)
-
-        # Convert embeddings back to packed format
-        # embeddings shape: [batch_size, num_patches, hidden_size]
+        # Process embeddings for each image separately to handle variable position embeddings
+        # Each image may have different dimensions, requiring different position embeddings
         batch_size = grid_thw.shape[0]
         seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
-
-        # Pack embeddings by removing batch dimension
+        
         packed_embeddings = []
         for i in range(batch_size):
+            # Get single image
+            single_pixel_values = pixel_values[i:i+1]
+            _, _, height, width = single_pixel_values.size()
+            
+            # Apply patch embedding and RMS norm
+            patch_embeds = self.embeddings.patch_embed(single_pixel_values).flatten(2).transpose(1, 2)
+            patch_embeds = self.embeddings.rms_norm(patch_embeds)
+            
+            # Add position embeddings based on this image's specific dimensions
+            if self.config.is_native:
+                # Build sincos position embeddings for this specific image size
+                pos_embed = self.embeddings.build_2d_sincos_position_embedding(
+                    height // self.patch_size,
+                    width // self.patch_size,
+                    embed_dim=self.config.hidden_size,
+                    device=patch_embeds.device,
+                    dtype=patch_embeds.dtype,
+                )
+            else:
+                # Use learned position embeddings
+                pos_embed = self.embeddings.position_embedding(self.embeddings.position_ids)
+            
+            # Add position embeddings
+            embeddings_with_pos = patch_embeds + pos_embed
+            
+            # Extract only the actual patches (seq_lengths[i])
             num_patches = seq_lengths[i].item()
-            packed_embeddings.append(embeddings[i, :num_patches])
+            packed_embeddings.append(embeddings_with_pos[0, :num_patches])
+        
+        # Concatenate all embeddings into packed format
         embeddings = torch.cat(packed_embeddings, dim=0)
 
         # Compute cumulative sequence lengths for FlashAttention
