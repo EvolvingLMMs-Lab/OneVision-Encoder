@@ -18,12 +18,23 @@ AIMv2 Packing Implementation
 
 This module provides a packing implementation for AIMv2 models that:
 1. Uses flash_attn_varlen_func for efficient variable-length processing
-2. Uses transformers absolute addresses
+2. Inherits from Aimv2PreTrainedModel for seamless weight loading
 3. Accepts input as (hidden_states: torch.Tensor, grid_thw: torch.Tensor)
 4. Processes all images in ONE forward pass (no single-image processing)
-5. Loads weights from original non-packing Aimv2VisionModel
+5. Can load weights directly using from_pretrained()
 
 Following the Siglip2 packing implementation pattern with FlashAttention varlen.
+
+Usage:
+    from vit_aim_v2_packing_hf import AIMv2Packing
+    
+    # Load model with pretrained weights
+    model = AIMv2Packing.from_pretrained("apple/aimv2-large-patch14-native", trust_remote_code=True)
+    
+    # Or initialize from config
+    from transformers.models.aimv2.configuration_aimv2 import Aimv2VisionConfig
+    config = Aimv2VisionConfig.from_pretrained("apple/aimv2-large-patch14-native")
+    model = AIMv2Packing(config)
 """
 
 import torch
@@ -33,7 +44,7 @@ import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.models.aimv2.configuration_aimv2 import Aimv2VisionConfig
-from transformers.models.aimv2.modeling_aimv2 import Aimv2VisionModel
+from transformers.models.aimv2.modeling_aimv2 import Aimv2PreTrainedModel
 
 # Check if FlashAttention 2 is available
 try:
@@ -286,7 +297,7 @@ class Aimv2PackingEncoder(nn.Module):
         return BaseModelOutput(last_hidden_state=hidden_states)
 
 
-class AIMv2Packing(nn.Module):
+class AIMv2Packing(Aimv2PreTrainedModel):
     """
     AIMv2 Packing variant for efficient variable-length sequence processing.
 
@@ -301,17 +312,14 @@ class AIMv2Packing(nn.Module):
     Processes ALL images in ONE forward pass (no single-image processing).
     """
 
-    DEFAULT_PATCH_SIZE = 14
-
-    def __init__(self, ckpt: str = "apple/aimv2-large-patch14-224", device="cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, config: Aimv2VisionConfig):
         """
         Initialize the AIMv2 Packing model.
 
         Args:
-            ckpt (str): HuggingFace checkpoint for the pre-trained model.
-            device (str): Device to map the model for inference.
+            config: Aimv2VisionConfig configuration object
         """
-        super(AIMv2Packing, self).__init__()
+        super().__init__(config)
 
         if not _flash_attn_available:
             raise ImportError(
@@ -319,76 +327,16 @@ class AIMv2Packing(nn.Module):
                 "Please install flash-attn: pip install flash-attn --no-build-isolation"
             )
 
-        self.device = torch.device(device)
-
-        # Load the vision model from pretrained checkpoint to get config and weights
-        try:
-            base_model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load Aimv2VisionModel from {ckpt}: {e}")
-        
-        self.config = base_model.config
-
-        # Get patch size from config
-        if hasattr(self.config, 'patch_size'):
-            self.patch_size = self.config.patch_size
-        else:
-            self.patch_size = self.DEFAULT_PATCH_SIZE
+        self.config = config
 
         # Build the model components with packing support
-        self.embeddings = Aimv2VisionEmbeddings(self.config)
-        self.encoder = Aimv2PackingEncoder(self.config)
-        # AIMv2 uses RMSNorm for the final normalization
-        self.layernorm = Aimv2RMSNorm(self.config.hidden_size, self.config.rms_norm_eps)
+        # Use the same attribute names as Aimv2VisionModel
+        self.embeddings = Aimv2VisionEmbeddings(config)
+        self.encoder = Aimv2PackingEncoder(config)
+        self.layernorm = Aimv2RMSNorm(config.hidden_size, config.rms_norm_eps)
 
-        # Load the weights from the pretrained model
-        # Aimv2VisionModel structure: the model itself has embeddings, encoder, layernorm
-        try:
-            # Copy embeddings weights - use the entire embeddings state dict
-            # This includes patch_embed, rms_norm, and position_embedding (if not native)
-            self.embeddings.load_state_dict(base_model.embeddings.state_dict())
-        except AttributeError as e:
-            raise RuntimeError(
-                f"Failed to copy embeddings weights. "
-                f"base_model attributes: {dir(base_model)}. "
-                f"Error: {e}"
-            )
-
-        # Copy encoder weights (need to map standard attention to packing attention)
-        try:
-            for packing_layer, standard_layer in zip(self.encoder.layers, base_model.encoder.layers):
-                # Copy RMS norms (rms_norm1, rms_norm2)
-                packing_layer.rms_norm1.load_state_dict(standard_layer.rms_norm1.state_dict())
-                packing_layer.rms_norm2.load_state_dict(standard_layer.rms_norm2.state_dict())
-
-                # Copy attention projections (standard uses 'attention', we use 'attention' too now)
-                packing_layer.attention.q_proj.load_state_dict(standard_layer.attention.q_proj.state_dict())
-                packing_layer.attention.k_proj.load_state_dict(standard_layer.attention.k_proj.state_dict())
-                packing_layer.attention.v_proj.load_state_dict(standard_layer.attention.v_proj.state_dict())
-                packing_layer.attention.out_proj.load_state_dict(standard_layer.attention.out_proj.state_dict())
-
-                # Copy MLP (standard uses 'ffn', we use 'ffn' too now)
-                packing_layer.ffn.load_state_dict(standard_layer.ffn.state_dict())
-        except AttributeError as e:
-            raise RuntimeError(
-                f"Failed to copy encoder weights. "
-                f"base_model.encoder layer attributes: {dir(base_model.encoder.layers[0]) if hasattr(base_model, 'encoder') else 'NO ENCODER'}. "
-                f"Error: {e}"
-            )
-
-        # Copy final layernorm
-        try:
-            self.layernorm.load_state_dict(base_model.layernorm.state_dict())
-        except AttributeError as e:
-            raise RuntimeError(
-                f"Failed to copy layernorm weights. "
-                f"base_model attributes: {dir(base_model)}. "
-                f"Error: {e}"
-            )
-
-        # Move to device and set to eval mode
-        self.to(self.device)
-        self.eval()
+        # Initialize weights and apply final processing
+        self.post_init()
 
     def _reconstruct_images_from_patches(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
@@ -403,10 +351,11 @@ class AIMv2Packing(nn.Module):
         """
         num_images = grid_thw.shape[0]
         patch_dim = hidden_states.shape[1]
+        patch_size = self.config.patch_size
         
         # Infer number of channels from patch_dim
         # patch_dim = patch_size * patch_size * num_channels
-        num_channels = patch_dim // (self.patch_size * self.patch_size)
+        num_channels = patch_dim // (patch_size * patch_size)
         
         images = []
         start_idx = 0
@@ -421,7 +370,7 @@ class AIMv2Packing(nn.Module):
             
             # Reshape patches to [num_patches_h, num_patches_w, patch_size, patch_size, channels]
             image_patches = image_patches.reshape(
-                int(h), int(w), self.patch_size, self.patch_size, num_channels
+                int(h), int(w), patch_size, patch_size, num_channels
             )
             
             # Rearrange to [channels, num_patches_h, patch_size, num_patches_w, patch_size]
@@ -430,8 +379,8 @@ class AIMv2Packing(nn.Module):
             # Reshape to [channels, height, width]
             image = image_patches.reshape(
                 num_channels,
-                int(h) * self.patch_size,
-                int(w) * self.patch_size
+                int(h) * patch_size,
+                int(w) * patch_size
             )
             
             images.append(image)
@@ -472,6 +421,7 @@ class AIMv2Packing(nn.Module):
         # Each image may have different dimensions, requiring different position embeddings
         batch_size = grid_thw.shape[0]
         seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
+        patch_size = self.config.patch_size
         
         packed_embeddings = []
         for i in range(batch_size):
@@ -487,8 +437,8 @@ class AIMv2Packing(nn.Module):
             if self.config.is_native:
                 # Build sincos position embeddings for this specific image size
                 pos_embed = self.embeddings.build_2d_sincos_position_embedding(
-                    height // self.patch_size,
-                    width // self.patch_size,
+                    height // patch_size,
+                    width // patch_size,
                     embed_dim=self.config.hidden_size,
                     device=patch_embeds.device,
                     dtype=patch_embeds.dtype,

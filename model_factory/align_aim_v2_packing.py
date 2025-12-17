@@ -161,9 +161,10 @@ def main():
     standard_model = AIMv2(ckpt=args.ckpt, device=args.device)
 
     print("Loading packing model (AIMv2Packing)...")
-    packing_model = AIMv2Packing(ckpt=args.ckpt, device=args.device)
+    packing_model = AIMv2Packing.from_pretrained(args.ckpt, trust_remote_code=True)
+    packing_model = packing_model.to(args.device).eval()
 
-    patch_size = packing_model.patch_size
+    patch_size = packing_model.config.patch_size
     print(f"Patch size: {patch_size}")
 
     all_tests_passed = True
