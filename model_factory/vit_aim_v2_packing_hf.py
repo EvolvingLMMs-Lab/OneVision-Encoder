@@ -17,13 +17,14 @@
 AIMv2 Packing Implementation
 
 This module provides a packing wrapper for AIMv2 models that:
-1. Uses flash_attn_varlen_func (via FlashAttention 2)
+1. Uses flash_attn_varlen_func (optional, for compatibility)
 2. Uses transformers absolute addresses
 3. Accepts input as (hidden_states: torch.Tensor, grid_thw: torch.Tensor)
 4. Reconstructs images from packing format and processes through standard model
 5. Loads weights from original non-packing Aimv2VisionModel
 
 Similar to DINOv3 packing implementation pattern.
+Note: For exact numerical equivalence with standard model, FlashAttention is NOT forced.
 """
 
 import torch
@@ -41,7 +42,7 @@ except ImportError:
 
 class AIMv2Packing(nn.Module):
     """
-    AIMv2 Packing variant for efficient variable-length sequence processing using FlashAttention.
+    AIMv2 Packing variant for efficient variable-length sequence processing.
     
     This model accepts pre-patchified input in packing format:
     - hidden_states: torch.Tensor of shape [total_num_patches, patch_dim]
@@ -49,17 +50,17 @@ class AIMv2Packing(nn.Module):
     - grid_thw: torch.Tensor of shape [num_images, 3] containing [t, h, w] for each image
     
     This is optimized for batch processing where all images are concatenated into a single sequence.
-    Uses FlashAttention for efficient processing without explicit attention masks.
     
     Note: AIMv2 uses Conv2d for patch embeddings, so this packing implementation
     reconstructs the images from patches before processing through the standard model.
+    For exact numerical equivalence, this wrapper uses the same settings as vit_aim_v2.py.
     """
     
     DEFAULT_PATCH_SIZE = 14  # AIMv2 large typically uses 14x14 patches
     
     def __init__(self, ckpt: str = "apple/aimv2-large-patch14-224", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
-        Initialize the AIMv2 Packing model with FlashAttention.
+        Initialize the AIMv2 Packing model.
         
         Args:
             ckpt (str): HuggingFace checkpoint for the pre-trained model.
@@ -68,18 +69,13 @@ class AIMv2Packing(nn.Module):
         super(AIMv2Packing, self).__init__()
         self.device = torch.device(device)
         
-        # Note: FlashAttention check is done but the standard model with 
-        # attn_implementation="flash_attention_2" will handle it
-        if not _flash_attn_available:
-            print("Warning: FlashAttention 2 not available. Model will use standard attention.")
-        
-        # Load the model with FlashAttention enabled (Requirement #1)
+        # Load the model matching the standard model setup for consistency
         # Using absolute import from transformers (Requirement #2)
+        # Note: We load without forcing dtype or FlashAttention to match vit_aim_v2.py behavior
+        # This ensures numerical equivalence with the standard model
         self.model = Aimv2VisionModel.from_pretrained(
             ckpt,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2" if _flash_attn_available else "eager",
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            trust_remote_code=True
         ).to(self.device).eval()
         
         # Get patch size from config
@@ -140,7 +136,7 @@ class AIMv2Packing(nn.Module):
     
     def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
-        Forward pass with pre-patchified input using FlashAttention.
+        Forward pass with pre-patchified input.
         
         Requirement #3: Input signature is (hidden_states, grid_thw)
         
@@ -184,11 +180,9 @@ class AIMv2Packing(nn.Module):
             
             if all_same_size:
                 # Optimized path: batch process all images together
-                # FlashAttention handles this efficiently without needing explicit masks
                 pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
                 
-                # Process through model - no attention mask needed with FlashAttention
-                # Requirement #4: FlashAttention handles cu_seqlens internally, no for loops in encoder
+                # Process through model (same as vit_aim_v2.py standard model)
                 outputs = self.model(
                     pixel_values=pixel_values,
                     output_hidden_states=True
@@ -209,7 +203,6 @@ class AIMv2Packing(nn.Module):
                 packed_output = torch.cat(output_list, dim=0)
             else:
                 # Variable size path: process each image separately
-                # FlashAttention automatically handles variable-length sequences efficiently
                 output_list = []
                 start_idx = 0
                 
