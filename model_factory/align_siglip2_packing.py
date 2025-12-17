@@ -287,22 +287,12 @@ def main():
     # Initialize models
     print("\nInitializing models...")
     print("Loading standard model (Siglip2Naflex)...")
-    try:
-        standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
-    except Exception as e:
-        print(f"❌ ERROR loading standard model: {e}")
-        traceback.print_exc()
-        return 1
 
-    print("Loading packing model (Siglip2NaflexPacking)...")
-    try:
-        packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt, trust_remote_code=True).to(args.device).eval()
-    except Exception as e:
-        print(f"❌ ERROR loading packing model: {e}")
-        traceback.print_exc()
-        return 1
+    standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
+    packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt, trust_remote_code=True).to(args.device).eval()
 
-    patch_size = packing_model.config.patch_size
+
+    patch_size = packing_model.config.vision_config.patch_size
     print(f"Patch size: {patch_size}")
 
     all_tests_passed = True
@@ -597,7 +587,8 @@ def main():
             # Process through packing model
             print("Processing through packing model...")
             with torch.no_grad():
-                packing_output = packing_model(packed_input, grid_thw)
+                with torch.autocast(device_type=args.device, dtype=torch.bfloat16):
+                    packing_output = packing_model(packed_input, grid_thw)
 
             print(f"Packing model output shape: {packing_output.shape}")
 
@@ -774,7 +765,8 @@ def main():
             # Process through packing model
             print("\nRunning packing model...")
             with torch.no_grad():
-                packing_output = packing_model(packed_input, grid_thw)
+                with torch.autocast(device_type=args.device, dtype=torch.bfloat16):
+                    packing_output = packing_model(packed_input, grid_thw)
 
             print(f"Packing model output shape: {packing_output.shape}")
 
