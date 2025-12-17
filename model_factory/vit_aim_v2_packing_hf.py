@@ -255,10 +255,13 @@ class AIMv2Packing(nn.Module):
             # If it's a Conv2d, convert to Linear
             if isinstance(patch_emb, nn.Conv2d):
                 # Conv2d: [out_channels, in_channels, kernel_h, kernel_w]
-                # Linear: [out_features, in_features]
-                # Reshape Conv2d weights to Linear: [out_channels, in_channels * kernel_h * kernel_w]
-                conv_weight = patch_emb.weight.data
-                linear_weight = conv_weight.reshape(conv_weight.shape[0], -1).t()  # Transpose for Linear
+                # Our patches are flattened as [patch_h, patch_w, channels], so we need to permute
+                # Conv2d weight to match: [out_channels, kernel_h, kernel_w, in_channels] then flatten
+                conv_weight = patch_emb.weight.data  # [out_ch, in_ch, kh, kw]
+                # Permute to [out_ch, kh, kw, in_ch]
+                weight_permuted = conv_weight.permute(0, 2, 3, 1)
+                # Flatten to [out_ch, kh*kw*in_ch]
+                linear_weight = weight_permuted.reshape(conv_weight.shape[0], -1)
                 self.embeddings.proj.weight.data = linear_weight
                 if patch_emb.bias is not None:
                     self.embeddings.proj.bias.data = patch_emb.bias.data
