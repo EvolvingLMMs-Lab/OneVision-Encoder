@@ -338,56 +338,6 @@ class AIMv2Packing(Aimv2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    def _reconstruct_images_from_patches(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
-        """
-        Reconstruct images from packed patches for Conv2d patch embedding.
-        
-        Args:
-            hidden_states (torch.Tensor): Packed patches of shape [total_num_patches, patch_dim]
-            grid_thw (torch.Tensor): Grid dimensions of shape [num_images, 3]
-        
-        Returns:
-            torch.Tensor: Reconstructed images of shape [num_images, channels, height, width]
-        """
-        num_images = grid_thw.shape[0]
-        patch_dim = hidden_states.shape[1]
-        patch_size = self.config.patch_size
-        
-        # Infer number of channels from patch_dim
-        # patch_dim = patch_size * patch_size * num_channels
-        num_channels = patch_dim // (patch_size * patch_size)
-        
-        images = []
-        start_idx = 0
-        
-        for i in range(num_images):
-            t, h, w = grid_thw[i][0].item(), grid_thw[i][1].item(), grid_thw[i][2].item()
-            num_patches = int(t * h * w)
-            
-            # Extract patches for this image
-            image_patches = hidden_states[start_idx:start_idx + num_patches]
-            start_idx += num_patches
-            
-            # Reshape patches to [num_patches_h, num_patches_w, patch_size, patch_size, channels]
-            image_patches = image_patches.reshape(
-                int(h), int(w), patch_size, patch_size, num_channels
-            )
-            
-            # Rearrange to [channels, num_patches_h, patch_size, num_patches_w, patch_size]
-            image_patches = image_patches.permute(4, 0, 2, 1, 3)
-            
-            # Reshape to [channels, height, width]
-            image = image_patches.reshape(
-                num_channels,
-                int(h) * patch_size,
-                int(w) * patch_size
-            )
-            
-            images.append(image)
-        
-        # Stack images: [num_images, channels, height, width]
-        return torch.stack(images, dim=0)
-
     def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
         Forward pass with pre-patchified input using FlashAttention varlen approach.
@@ -413,20 +363,42 @@ class AIMv2Packing(Aimv2PreTrainedModel):
         hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
         grid_thw = grid_thw.to(device=self.device)
 
-        # Reconstruct images from patches for Conv2d embedding
-        # This is necessary because AIMv2 uses Conv2d for patch projection
-        pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
-
         # Process embeddings for each image separately to handle variable position embeddings
         # Each image may have different dimensions, requiring different position embeddings
         batch_size = grid_thw.shape[0]
         seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
         patch_size = self.config.patch_size
+        patch_dim = hidden_states.shape[1]
+        num_channels = patch_dim // (patch_size * patch_size)
         
         packed_embeddings = []
+        start_idx = 0
+        
         for i in range(batch_size):
-            # Get single image
-            single_pixel_values = pixel_values[i:i+1]
+            t, h, w = grid_thw[i][0].item(), grid_thw[i][1].item(), grid_thw[i][2].item()
+            num_patches = int(t * h * w)
+            
+            # Extract patches for this image
+            image_patches = hidden_states[start_idx:start_idx + num_patches]
+            start_idx += num_patches
+            
+            # Reshape patches to [num_patches_h, num_patches_w, patch_size, patch_size, channels]
+            image_patches = image_patches.reshape(
+                int(h), int(w), patch_size, patch_size, num_channels
+            )
+            
+            # Rearrange to [channels, num_patches_h, patch_size, num_patches_w, patch_size]
+            image_patches = image_patches.permute(4, 0, 2, 1, 3)
+            
+            # Reshape to [channels, height, width]
+            image = image_patches.reshape(
+                num_channels,
+                int(h) * patch_size,
+                int(w) * patch_size
+            )
+            
+            # Add batch dimension: [1, channels, height, width]
+            single_pixel_values = image.unsqueeze(0)
             _, _, height, width = single_pixel_values.size()
             
             # Apply patch embedding and RMS norm
@@ -450,8 +422,7 @@ class AIMv2Packing(Aimv2PreTrainedModel):
             # Add position embeddings
             embeddings_with_pos = patch_embeds + pos_embed
             
-            # Extract only the actual patches (seq_lengths[i])
-            num_patches = seq_lengths[i].item()
+            # Extract only the actual patches (num_patches)
             packed_embeddings.append(embeddings_with_pos[0, :num_patches])
         
         # Concatenate all embeddings into packed format
