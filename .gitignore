@@ -496,4 +496,4 @@ cache/
 
 list_*
 tmp
-*.json
+*.jsonmodel_factory/vit_aim_v2_packing_hf_old.py
