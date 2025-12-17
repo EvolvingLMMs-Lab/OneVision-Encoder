@@ -211,7 +211,7 @@ class AIMv2Packing(nn.Module):
         # Note: AIMv2 requires trust_remote_code=True
         from_kwargs = {
             "trust_remote_code": True,
-            "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            "dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32
         }
         if revision is not None:
             from_kwargs["revision"] = revision
@@ -250,13 +250,24 @@ class AIMv2Packing(nn.Module):
         # Load patch embedding weights
         # The pretrained model might use Conv2d, but we use Linear for packing
         # We need to convert Conv2d weights to Linear weights
-        if not hasattr(pretrained_model.embeddings, 'patch_embedding'):
-            raise AttributeError(
-                "Pretrained model does not have 'embeddings.patch_embedding'. "
-                "Expected Aimv2VisionModel structure."
-            )
         
-        patch_emb = pretrained_model.embeddings.patch_embedding
+        # Try to find the patch embedding layer - different models use different attribute names
+        patch_emb = None
+        possible_names = ['patch_embedding', 'patch_embed', 'projection', 'proj', 'conv']
+        
+        for name in possible_names:
+            if hasattr(pretrained_model.embeddings, name):
+                patch_emb = getattr(pretrained_model.embeddings, name)
+                break
+        
+        if patch_emb is None:
+            # List available attributes for debugging
+            available_attrs = [attr for attr in dir(pretrained_model.embeddings) if not attr.startswith('_')]
+            raise AttributeError(
+                f"Could not find patch embedding layer in pretrained model embeddings. "
+                f"Tried: {possible_names}. "
+                f"Available attributes: {available_attrs}"
+            )
         
         # If it's a Conv2d, convert to Linear
         if isinstance(patch_emb, nn.Conv2d):
