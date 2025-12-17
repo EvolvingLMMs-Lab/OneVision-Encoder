@@ -290,7 +290,7 @@ def main():
     standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
 
     print("Loading packing model (Siglip2NaflexPacking)...")
-    packing_model = Siglip2NaflexPacking(ckpt=args.ckpt, device=args.device)
+    packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt).to(args.device)
 
     patch_size = packing_model.patch_size
     print(f"Patch size: {patch_size}")
