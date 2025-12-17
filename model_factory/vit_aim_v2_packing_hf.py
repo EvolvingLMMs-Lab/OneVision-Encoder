@@ -253,7 +253,7 @@ class AIMv2Packing(nn.Module):
         
         # Try to find the patch embedding layer - different models use different attribute names
         patch_emb = None
-        possible_names = ['patch_embedding', 'patch_embed', 'projection', 'proj', 'conv']
+        possible_names = ['patch_embeddings', 'patch_embedding', 'patch_embed', 'projection', 'proj', 'conv']
         
         for name in possible_names:
             if hasattr(pretrained_model.embeddings, name):
