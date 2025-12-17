@@ -56,20 +56,20 @@ outputs = self.model(
 **Features:**
 - Accepts pre-patchified input: `[total_num_patches, patch_dim]`
 - Accepts grid_thw: `[num_images, 3]` containing [t, h, w]
-- Uses FlashAttention without explicit masks
+- Uses custom packing layers with FlashAttention varlen
+- Controls attention through cu_seqlens (no explicit masks)
 - Returns packed output: `[total_num_patches, hidden_size]`
-- Handles both same-size and variable-size batches
-- Extracts patch tokens (excluding CLS token)
+- Directly processes packed patches (no image reconstruction)
 
 **Architecture:**
 ```
 Input: [total_num_patches, patch_dim] + grid_thw: [num_images, 3]
   ↓
-Reconstruct images from patches
+Patch embedding (Linear projection)
   ↓
-Process with AIMv2 model (FlashAttention enabled)
+Compute cu_seqlens from grid_thw
   ↓
-Extract patch tokens (skip CLS)
+Process with custom packing encoder (FlashAttention varlen)
   ↓
 Output: [total_num_patches, hidden_size]
 ```
@@ -407,9 +407,9 @@ outputs = model(
 
 ### AIMv2
 - **Patch size:** 14×14 (large model)
-- **Special tokens:** CLS token only
-- **Prefix length:** `1`
-- **Patch embedding:** Conv2d
+- **Special tokens:** CLS token (in standard model, not used in packing)
+- **Patch embedding:** Linear in packing version (converted from Conv2d)
+- **Packing approach:** Custom layers with FlashAttention varlen + cu_seqlens
 - **Requires:** `trust_remote_code=True`
 - **Checkpoint example:** `apple/aimv2-large-patch14-224`
 
