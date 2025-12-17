@@ -287,10 +287,20 @@ def main():
     # Initialize models
     print("\nInitializing models...")
     print("Loading standard model (Siglip2Naflex)...")
-    standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
+    try:
+        standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
+    except Exception as e:
+        print(f"❌ ERROR loading standard model: {e}")
+        traceback.print_exc()
+        return 1
 
     print("Loading packing model (Siglip2NaflexPacking)...")
-    packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt, trust_remote_code=True).to(args.device).eval()
+    try:
+        packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt, trust_remote_code=True).to(args.device).eval()
+    except Exception as e:
+        print(f"❌ ERROR loading packing model: {e}")
+        traceback.print_exc()
+        return 1
 
     patch_size = packing_model.config.patch_size
     print(f"Patch size: {patch_size}")
