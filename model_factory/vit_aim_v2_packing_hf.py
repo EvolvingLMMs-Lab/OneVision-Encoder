@@ -80,6 +80,24 @@ class Aimv2VisionEmbeddings(nn.Module):
         return patch_embeds
 
 
+class Aimv2RMSNorm(nn.Module):
+    """
+    RMSNorm normalization layer used in AIMv2.
+    """
+
+    def __init__(self, hidden_size: int, eps: float = 1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.to(input_dtype)
+
+
 class Aimv2MLP(nn.Module):
     """
     MLP layer used in AIMv2 transformer blocks.
@@ -172,34 +190,32 @@ class Aimv2PackingAttention(nn.Module):
 class Aimv2PackingEncoderLayer(nn.Module):
     """
     Single transformer encoder layer with packing support.
+    Matches the structure of Aimv2EncoderLayer with RMSNorm.
     """
 
     def __init__(self, config: Aimv2VisionConfig):
         super().__init__()
-        self.embed_dim = config.hidden_size
-        self.layer_norm1 = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_eps)
-        self.self_attn = Aimv2PackingAttention(config)
-        self.layer_norm2 = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_eps)
-        self.mlp = Aimv2MLP(config)
+        self.attention = Aimv2PackingAttention(config)
+        self.ffn = Aimv2MLP(config)
+        self.rms_norm1 = Aimv2RMSNorm(config.hidden_size, config.rms_norm_eps)
+        self.rms_norm2 = Aimv2RMSNorm(config.hidden_size, config.rms_norm_eps)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
         cu_seqlens: torch.Tensor,
     ) -> torch.FloatTensor:
-        residual = hidden_states
-
-        hidden_states = self.layer_norm1(hidden_states)
-        hidden_states = self.self_attn(
-            hidden_states=hidden_states,
+        # Pre-norm architecture with residual connections
+        norm_hidden_states = self.rms_norm1(hidden_states)
+        attn_output = self.attention(
+            hidden_states=norm_hidden_states,
             cu_seqlens=cu_seqlens,
         )
-        hidden_states = residual + hidden_states
+        hidden_states = hidden_states + attn_output
 
-        residual = hidden_states
-        hidden_states = self.layer_norm2(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        norm_hidden_states = self.rms_norm2(hidden_states)
+        mlp_output = self.ffn(norm_hidden_states)
+        hidden_states = hidden_states + mlp_output
 
         return hidden_states
 
@@ -281,7 +297,8 @@ class AIMv2Packing(nn.Module):
         # Build the model components with packing support
         self.embeddings = Aimv2VisionEmbeddings(self.config)
         self.encoder = Aimv2PackingEncoder(self.config)
-        self.layernorm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layer_norm_eps)
+        # AIMv2 uses RMSNorm for the final normalization
+        self.layernorm = Aimv2RMSNorm(self.config.hidden_size, self.config.rms_norm_eps)
 
         # Load the weights from the pretrained model
         # Aimv2VisionModel structure: the model itself has embeddings, encoder, layernorm
@@ -300,18 +317,18 @@ class AIMv2Packing(nn.Module):
         # Copy encoder weights (need to map standard attention to packing attention)
         try:
             for packing_layer, standard_layer in zip(self.encoder.layers, base_model.encoder.layers):
-                # Copy layer norms
-                packing_layer.layer_norm1.load_state_dict(standard_layer.layer_norm1.state_dict())
-                packing_layer.layer_norm2.load_state_dict(standard_layer.layer_norm2.state_dict())
+                # Copy RMS norms (rms_norm1, rms_norm2)
+                packing_layer.rms_norm1.load_state_dict(standard_layer.rms_norm1.state_dict())
+                packing_layer.rms_norm2.load_state_dict(standard_layer.rms_norm2.state_dict())
 
-                # Copy attention projections
-                packing_layer.self_attn.q_proj.load_state_dict(standard_layer.self_attn.q_proj.state_dict())
-                packing_layer.self_attn.k_proj.load_state_dict(standard_layer.self_attn.k_proj.state_dict())
-                packing_layer.self_attn.v_proj.load_state_dict(standard_layer.self_attn.v_proj.state_dict())
-                packing_layer.self_attn.out_proj.load_state_dict(standard_layer.self_attn.out_proj.state_dict())
+                # Copy attention projections (standard uses 'attention', we use 'attention' too now)
+                packing_layer.attention.q_proj.load_state_dict(standard_layer.attention.q_proj.state_dict())
+                packing_layer.attention.k_proj.load_state_dict(standard_layer.attention.k_proj.state_dict())
+                packing_layer.attention.v_proj.load_state_dict(standard_layer.attention.v_proj.state_dict())
+                packing_layer.attention.out_proj.load_state_dict(standard_layer.attention.out_proj.state_dict())
 
-                # Copy MLP
-                packing_layer.mlp.load_state_dict(standard_layer.mlp.state_dict())
+                # Copy MLP (standard uses 'ffn', we use 'ffn' too now)
+                packing_layer.ffn.load_state_dict(standard_layer.ffn.state_dict())
         except AttributeError as e:
             raise RuntimeError(
                 f"Failed to copy encoder weights. "
@@ -443,6 +460,7 @@ class AIMv2Packing(nn.Module):
 
 
 __all__ = [
+    "Aimv2RMSNorm",
     "Aimv2VisionEmbeddings",
     "Aimv2MLP",
     "Aimv2PackingAttention",
