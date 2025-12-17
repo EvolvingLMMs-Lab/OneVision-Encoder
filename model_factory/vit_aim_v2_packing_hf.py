@@ -93,12 +93,12 @@ class Aimv2VisionEmbeddings(nn.Module):
         self.config = config
         self.patch_size = config.patch_size
         
-        # Patch embedding using Conv2d (for compatibility with pretrained weights)
-        self.patch_embed = nn.Conv2d(
-            config.num_channels,
-            config.hidden_size,
-            kernel_size=config.patch_size,
-            stride=config.patch_size
+        # Patch embedding using Linear (for packing format where input is already patchified)
+        # Input shape: [batch_size, max_num_patches, patch_size * patch_size * num_channels]
+        self.patch_embedding = nn.Linear(
+            in_features=config.num_channels * config.patch_size * config.patch_size,
+            out_features=config.hidden_size,
+            bias=False
         )
         self.rms_norm = Aimv2RMSNorm(config.hidden_size, config.rms_norm_eps)
         
@@ -140,22 +140,10 @@ class Aimv2VisionEmbeddings(nn.Module):
         """
         batch_size, max_num_patches, patch_dim = hidden_states.shape
         
-        # Reshape to apply Conv2d: (batch_size * max_num_patches, in_channels, patch_size, patch_size)
-        hidden_states = hidden_states.view(
-            batch_size * max_num_patches,
-            self.config.num_channels,
-            self.patch_size,
-            self.patch_size
-        )
-        
-        # Apply patch embedding
-        target_dtype = self.patch_embed.weight.dtype
-        hidden_states = self.patch_embed(hidden_states.to(dtype=target_dtype))
-        # Shape: (batch_size * max_num_patches, hidden_size, 1, 1)
-        
-        # Flatten and reshape back
-        hidden_states = hidden_states.flatten(2).transpose(1, 2)  # (batch_size * max_num_patches, 1, hidden_size)
-        hidden_states = hidden_states.view(batch_size, max_num_patches, -1)  # (batch_size, max_num_patches, hidden_size)
+        # Apply patch embedding to already patchified pixel values
+        target_dtype = self.patch_embedding.weight.dtype
+        hidden_states = self.patch_embedding(hidden_states.to(dtype=target_dtype))
+        # Shape: (batch_size, max_num_patches, hidden_size)
         
         # Apply RMS norm
         hidden_states = self.rms_norm(hidden_states)
@@ -378,9 +366,18 @@ class AIMv2Packing(nn.Module):
         self.rms_norm = Aimv2RMSNorm(self.config.hidden_size, self.config.rms_norm_eps)
 
         # Requirement #5: Load the weights from the pretrained model
-        # Copy embeddings weights (patch_embed and position_embedding)
-        self.embeddings.patch_embed.load_state_dict(vision_model.embeddings.patch_embed.state_dict())
+        # Convert Conv2d weights to Linear weights for patch embedding
+        # Original: Conv2d with shape [out_channels, in_channels, kernel_h, kernel_w]
+        # Target: Linear with shape [out_features, in_features]
+        # Need to reshape: [hidden_size, num_channels, patch_size, patch_size] -> [hidden_size, num_channels*patch_size*patch_size]
+        conv_weight = vision_model.embeddings.patch_embed.weight  # [hidden_size, num_channels, patch_size, patch_size]
+        linear_weight = conv_weight.reshape(self.config.hidden_size, -1)  # [hidden_size, num_channels*patch_size*patch_size]
+        self.embeddings.patch_embedding.weight.data.copy_(linear_weight)
+        
+        # Copy RMS norm weights
         self.embeddings.rms_norm.load_state_dict(vision_model.embeddings.rms_norm.state_dict())
+        
+        # Copy position embeddings
         if not self.config.is_native:
             self.embeddings.position_embedding.load_state_dict(vision_model.embeddings.position_embedding.state_dict())
 
@@ -426,7 +423,7 @@ class AIMv2Packing(nn.Module):
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
         # Get target dtype from patch embedding
-        target_dtype = self.embeddings.patch_embed.weight.dtype
+        target_dtype = self.embeddings.patch_embedding.weight.dtype
 
         # Move inputs to device
         hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
