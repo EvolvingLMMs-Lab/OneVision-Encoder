@@ -16,20 +16,23 @@
 """
 AIMv2 Packing Implementation
 
-This module provides a packing wrapper for AIMv2 models that:
-1. Uses flash_attn_varlen_func (optional, for compatibility)
+This module provides a packing implementation for AIMv2 models that:
+1. Uses flash_attn_varlen_func for efficient variable-length processing
 2. Uses transformers absolute addresses
 3. Accepts input as (hidden_states: torch.Tensor, grid_thw: torch.Tensor)
-4. Reconstructs images from packing format and processes through standard model
+4. Processes all images in ONE forward pass (no single-image processing)
 5. Loads weights from original non-packing Aimv2VisionModel
 
-Similar to DINOv3 packing implementation pattern.
-Note: For exact numerical equivalence with standard model, FlashAttention is NOT forced.
+Following the Siglip2 packing implementation pattern with FlashAttention varlen.
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
+from transformers.activations import ACT2FN
+from transformers.modeling_outputs import BaseModelOutput
+from transformers.models.aimv2.configuration_aimv2 import Aimv2VisionConfig
 from transformers.models.aimv2.modeling_aimv2 import Aimv2VisionModel
 
 # Check if FlashAttention 2 is available
@@ -40,53 +43,273 @@ except ImportError:
     _flash_attn_available = False
 
 
+class Aimv2VisionEmbeddings(nn.Module):
+    """
+    Vision embeddings for AIMv2 with support for variable image sizes.
+    Handles patch embedding using Conv2d projection.
+    """
+
+    def __init__(self, config: Aimv2VisionConfig):
+        super().__init__()
+        self.config = config
+        self.embed_dim = config.hidden_size
+        self.patch_size = config.patch_size
+
+        # AIMv2 uses Conv2d for patch embedding
+        self.patch_embedding = nn.Conv2d(
+            in_channels=config.num_channels,
+            out_channels=self.embed_dim,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        )
+
+    def forward(self, pixel_values: torch.FloatTensor) -> torch.Tensor:
+        """
+        Args:
+            pixel_values (`torch.FloatTensor`):
+                Pixel values of shape (batch_size, num_channels, height, width)
+        """
+        # Apply patch embeddings via Conv2d
+        target_dtype = self.patch_embedding.weight.dtype
+        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))
+        
+        # Flatten and transpose: (batch_size, embed_dim, h, w) -> (batch_size, h*w, embed_dim)
+        batch_size, embed_dim, h, w = patch_embeds.shape
+        patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
+        
+        return patch_embeds
+
+
+class Aimv2MLP(nn.Module):
+    """
+    MLP layer used in AIMv2 transformer blocks.
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.activation_fn = ACT2FN[config.hidden_act]
+        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+        return hidden_states
+
+
+class Aimv2PackingAttention(nn.Module):
+    """
+    Multi-headed attention with FlashAttention varlen support for packing.
+    """
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.embed_dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = self.embed_dim // self.num_heads
+        if self.head_dim * self.num_heads != self.embed_dim:
+            raise ValueError(
+                f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`:"
+                f" {self.num_heads})."
+            )
+        self.scale = self.head_dim**-0.5
+        self.dropout = config.attention_dropout
+
+        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.v_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Forward pass with variable-length attention using FlashAttention.
+
+        Args:
+            hidden_states: Input of shape (total_seq_len, hidden_size)
+            cu_seqlens: Cumulative sequence lengths for flash attention
+
+        Returns:
+            Output of shape (total_seq_len, hidden_size)
+        """
+        seq_length = hidden_states.shape[0]
+
+        queries = self.q_proj(hidden_states)
+        keys = self.k_proj(hidden_states)
+        values = self.v_proj(hidden_states)
+
+        queries = queries.view(seq_length, self.num_heads, self.head_dim)
+        keys = keys.view(seq_length, self.num_heads, self.head_dim)
+        values = values.view(seq_length, self.num_heads, self.head_dim)
+
+        # Use FlashAttention with variable lengths
+        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
+        attn_output = flash_attn_varlen_func(
+            queries,
+            keys,
+            values,
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_k=cu_seqlens,
+            max_seqlen_q=max_seqlen,
+            max_seqlen_k=max_seqlen,
+            dropout_p=self.dropout if self.training else 0.0,
+            softmax_scale=self.scale,
+            causal=False,
+        )
+
+        attn_output = attn_output.reshape(seq_length, self.embed_dim)
+        attn_output = self.out_proj(attn_output)
+
+        return attn_output
+
+
+class Aimv2PackingEncoderLayer(nn.Module):
+    """
+    Single transformer encoder layer with packing support.
+    """
+
+    def __init__(self, config: Aimv2VisionConfig):
+        super().__init__()
+        self.embed_dim = config.hidden_size
+        self.layer_norm1 = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_eps)
+        self.self_attn = Aimv2PackingAttention(config)
+        self.layer_norm2 = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_eps)
+        self.mlp = Aimv2MLP(config)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+    ) -> torch.FloatTensor:
+        residual = hidden_states
+
+        hidden_states = self.layer_norm1(hidden_states)
+        hidden_states = self.self_attn(
+            hidden_states=hidden_states,
+            cu_seqlens=cu_seqlens,
+        )
+        hidden_states = residual + hidden_states
+
+        residual = hidden_states
+        hidden_states = self.layer_norm2(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
+        return hidden_states
+
+
+class Aimv2PackingEncoder(nn.Module):
+    """
+    Transformer encoder with packing support using FlashAttention varlen.
+    """
+
+    def __init__(self, config: Aimv2VisionConfig):
+        super().__init__()
+        self.config = config
+        self.layers = nn.ModuleList([Aimv2PackingEncoderLayer(config) for _ in range(config.num_hidden_layers)])
+
+    def forward(
+        self,
+        inputs_embeds,
+        cu_seqlens: torch.Tensor,
+    ) -> BaseModelOutput:
+        hidden_states = inputs_embeds
+        for encoder_layer in self.layers:
+            hidden_states = encoder_layer(
+                hidden_states,
+                cu_seqlens,
+            )
+
+        return BaseModelOutput(last_hidden_state=hidden_states)
+
+
 class AIMv2Packing(nn.Module):
     """
     AIMv2 Packing variant for efficient variable-length sequence processing.
-    
-    This model accepts pre-patchified input in packing format:
+
+    This model accepts pre-patchified input in packing format and uses FlashAttention
+    varlen for efficient variable-length processing without attention masks.
+
     - hidden_states: torch.Tensor of shape [total_num_patches, patch_dim]
       where patch_dim = patch_size * patch_size * num_channels
     - grid_thw: torch.Tensor of shape [num_images, 3] containing [t, h, w] for each image
-    
+
     This is optimized for batch processing where all images are concatenated into a single sequence.
-    
-    Note: AIMv2 uses Conv2d for patch embeddings, so this packing implementation
-    reconstructs the images from patches before processing through the standard model.
-    For exact numerical equivalence, this wrapper uses the same settings as vit_aim_v2.py.
+    Processes ALL images in ONE forward pass (no single-image processing).
     """
-    
-    DEFAULT_PATCH_SIZE = 14  # AIMv2 large typically uses 14x14 patches
-    
+
+    DEFAULT_PATCH_SIZE = 14
+
     def __init__(self, ckpt: str = "apple/aimv2-large-patch14-224", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
         Initialize the AIMv2 Packing model.
-        
+
         Args:
             ckpt (str): HuggingFace checkpoint for the pre-trained model.
             device (str): Device to map the model for inference.
         """
         super(AIMv2Packing, self).__init__()
+
+        if not _flash_attn_available:
+            raise ImportError(
+                "FlashAttention 2 is required for AIMv2Packing. "
+                "Please install flash-attn: pip install flash-attn --no-build-isolation"
+            )
+
         self.device = torch.device(device)
-        
-        # Load the model matching the standard model setup for consistency
-        # Using absolute import from transformers (Requirement #2)
-        # Note: We load without forcing dtype or FlashAttention to match vit_aim_v2.py behavior
-        # This ensures numerical equivalence with the standard model
-        self.model = Aimv2VisionModel.from_pretrained(
-            ckpt,
-            trust_remote_code=True
-        ).to(self.device).eval()
-        
+
+        # Load the vision model from pretrained checkpoint to get config and weights
+        vision_model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
+        self.config = vision_model.config
+
         # Get patch size from config
-        if hasattr(self.model.config, 'patch_size'):
-            self.patch_size = self.model.config.patch_size
+        if hasattr(self.config, 'patch_size'):
+            self.patch_size = self.config.patch_size
         else:
             self.patch_size = self.DEFAULT_PATCH_SIZE
-    
+
+        # Build the model components with packing support
+        self.embeddings = Aimv2VisionEmbeddings(self.config)
+        self.encoder = Aimv2PackingEncoder(self.config)
+        self.layernorm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layer_norm_eps)
+
+        # Load the weights from the pretrained model
+        # Copy embeddings weights (Conv2d patch embedding)
+        self.embeddings.patch_embedding.load_state_dict(
+            vision_model.embeddings.patch_embedding.state_dict()
+        )
+
+        # Copy encoder weights (need to map standard attention to packing attention)
+        for packing_layer, standard_layer in zip(self.encoder.layers, vision_model.encoder.layers):
+            # Copy layer norms
+            packing_layer.layer_norm1.load_state_dict(standard_layer.layer_norm1.state_dict())
+            packing_layer.layer_norm2.load_state_dict(standard_layer.layer_norm2.state_dict())
+
+            # Copy attention projections
+            packing_layer.self_attn.q_proj.load_state_dict(standard_layer.self_attn.q_proj.state_dict())
+            packing_layer.self_attn.k_proj.load_state_dict(standard_layer.self_attn.k_proj.state_dict())
+            packing_layer.self_attn.v_proj.load_state_dict(standard_layer.self_attn.v_proj.state_dict())
+            packing_layer.self_attn.out_proj.load_state_dict(standard_layer.self_attn.out_proj.state_dict())
+
+            # Copy MLP
+            packing_layer.mlp.load_state_dict(standard_layer.mlp.state_dict())
+
+        # Copy final layernorm
+        self.layernorm.load_state_dict(vision_model.layernorm.state_dict())
+
+        # Move to device and set to eval mode
+        self.to(self.device)
+        self.eval()
+
     def _reconstruct_images_from_patches(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
-        Reconstruct images from packed patches.
+        Reconstruct images from packed patches for Conv2d patch embedding.
         
         Args:
             hidden_states (torch.Tensor): Packed patches of shape [total_num_patches, patch_dim]
@@ -114,7 +337,6 @@ class AIMv2Packing(nn.Module):
             start_idx += num_patches
             
             # Reshape patches to [num_patches_h, num_patches_w, patch_size, patch_size, channels]
-            # Input format from convert_to_patches: [patch_h, patch_w, channels] flattened
             image_patches = image_patches.reshape(
                 int(h), int(w), self.patch_size, self.patch_size, num_channels
             )
@@ -133,105 +355,72 @@ class AIMv2Packing(nn.Module):
         
         # Stack images: [num_images, channels, height, width]
         return torch.stack(images, dim=0)
-    
+
     def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
-        Forward pass with pre-patchified input.
-        
-        Requirement #3: Input signature is (hidden_states, grid_thw)
-        
+        Forward pass with pre-patchified input using FlashAttention varlen approach.
+        Processes ALL images in ONE forward pass.
+
         Args:
-            hidden_states (torch.Tensor): Pre-patchified input of shape 
-                [total_num_patches, patch_dim] where 
+            hidden_states (torch.Tensor): Pre-patchified input of shape
+                [total_num_patches, patch_dim] where
                 patch_dim = patch_size * patch_size * num_channels
             grid_thw (torch.Tensor): Grid dimensions of shape [num_images, 3]
                 containing [t, h, w] for each image, where:
                 - t: temporal dimension (usually 1 for single images)
                 - h: height in patches
                 - w: width in patches
-        
+
         Returns:
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
-        with torch.no_grad():
-            # Get target dtype from model parameters
-            try:
-                target_dtype = next(self.model.parameters()).dtype
-            except (StopIteration, AttributeError):
-                # Fallback to bfloat16 or float32 if parameters not accessible
-                target_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-            
-            # Move inputs to device
-            hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
-            grid_thw = grid_thw.to(device=self.device)
-            
-            # Calculate number of patches per image from grid_thw
-            num_images = grid_thw.shape[0]
-            patches_per_image = []
-            image_sizes = []
-            for i in range(num_images):
-                t, h, w = grid_thw[i][0].item(), grid_thw[i][1].item(), grid_thw[i][2].item()
-                num_patches = int(t * h * w)
-                patches_per_image.append(num_patches)
-                image_sizes.append((int(h) * self.patch_size, int(w) * self.patch_size))
-            
-            # Check if all images have the same size
-            all_same_size = len(set(image_sizes)) == 1
-            
-            if all_same_size:
-                # Optimized path: batch process all images together
-                pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
-                
-                # Process through model (same as vit_aim_v2.py standard model)
-                outputs = self.model(
-                    pixel_values=pixel_values,
-                    output_hidden_states=True
-                )
-                
-                # Get the last layer's hidden state: [batch_size, seq_len, hidden_size]
-                # AIMv2 already excludes special tokens from last_hidden_state
-                last_hidden_state = outputs.last_hidden_state
-                
-                # Convert back to packing format: [total_num_patches, hidden_size]
-                output_list = []
-                for i in range(num_images):
-                    num_patches = patches_per_image[i]
-                    # AIMv2VisionModel.last_hidden_state contains only patch tokens (no CLS)
-                    patch_tokens = last_hidden_state[i, :num_patches]
-                    output_list.append(patch_tokens)
-                
-                packed_output = torch.cat(output_list, dim=0)
-            else:
-                # Variable size path: process each image separately
-                output_list = []
-                start_idx = 0
-                
-                for i in range(num_images):
-                    num_patches = patches_per_image[i]
-                    
-                    # Extract patches for this image
-                    image_patches = hidden_states[start_idx:start_idx + num_patches]
-                    start_idx += num_patches
-                    
-                    # Reconstruct single image
-                    # image_patches shape: [num_patches, patch_dim]
-                    # grid_single shape: [1, 3]
-                    grid_single = grid_thw[i:i+1]
-                    pixel_values = self._reconstruct_images_from_patches(image_patches, grid_single)
-                    
-                    # Process through model
-                    outputs = self.model(
-                        pixel_values=pixel_values,
-                        output_hidden_states=True
-                    )
-                    
-                    # Extract patch tokens
-                    patch_tokens = outputs.last_hidden_state[0, :num_patches]
-                    output_list.append(patch_tokens)
-                
-                packed_output = torch.cat(output_list, dim=0)
-            
-            return packed_output
+        # Get target dtype from patch embedding
+        target_dtype = self.embeddings.patch_embedding.weight.dtype
+
+        # Move inputs to device
+        hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
+        grid_thw = grid_thw.to(device=self.device)
+
+        # Reconstruct images from patches for Conv2d embedding
+        # This is necessary because AIMv2 uses Conv2d for patch projection
+        pixel_values = self._reconstruct_images_from_patches(hidden_states, grid_thw)
+
+        # Apply patch embeddings via Conv2d
+        embeddings = self.embeddings(pixel_values)
+
+        # Convert embeddings back to packed format
+        # embeddings shape: [batch_size, num_patches, hidden_size]
+        batch_size = grid_thw.shape[0]
+        seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
+
+        # Pack embeddings by removing batch dimension
+        packed_embeddings = []
+        for i in range(batch_size):
+            num_patches = seq_lengths[i].item()
+            packed_embeddings.append(embeddings[i, :num_patches])
+        embeddings = torch.cat(packed_embeddings, dim=0)
+
+        # Compute cumulative sequence lengths for FlashAttention
+        cu_seqlens = F.pad(seq_lengths.cumsum(dim=0), (1, 0), value=0).to(torch.int32)
+
+        # Encoder with FlashAttention varlen (no attention mask needed)
+        encoder_outputs = self.encoder(
+            inputs_embeds=embeddings,
+            cu_seqlens=cu_seqlens,
+        )
+
+        # Final layernorm
+        last_hidden_state = encoder_outputs.last_hidden_state
+        last_hidden_state = self.layernorm(last_hidden_state)
+
+        return last_hidden_state
 
 
-__all__ = ["AIMv2Packing"]
+__all__ = [
+    "Aimv2VisionEmbeddings",
+    "Aimv2MLP",
+    "Aimv2PackingAttention",
+    "Aimv2PackingEncoderLayer",
+    "Aimv2PackingEncoder",
+    "AIMv2Packing",
+]
