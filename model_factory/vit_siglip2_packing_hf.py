@@ -37,6 +37,11 @@ except ImportError:
     _flash_attn_available = False
 
 
+def _get_vision_config(config):
+    """Return vision config whether the input is a full Siglip2Config or already a vision config."""
+    return getattr(config, "vision_config", config)
+
+
 class Siglip2VisionEmbeddings(nn.Module):
     """
     Vision embeddings for Siglip2 with support for variable image sizes.
@@ -45,6 +50,7 @@ class Siglip2VisionEmbeddings(nn.Module):
 
     def __init__(self, config: Siglip2VisionConfig):
         super().__init__()
+        config = _get_vision_config(config)
         self.config = config
         self.embed_dim = config.hidden_size
         self.patch_size = config.patch_size
@@ -274,6 +280,7 @@ class Siglip2PackingEncoder(nn.Module):
 
     def __init__(self, config: Siglip2VisionConfig):
         super().__init__()
+        config = _get_vision_config(config)
         self.config = config
         self.layers = nn.ModuleList([Siglip2PackingEncoderLayer(config) for _ in range(config.num_hidden_layers)])
 
@@ -301,10 +308,11 @@ class Siglip2PackingVisionModel(nn.Module):
 
     def __init__(self, config: Siglip2VisionConfig):
         super().__init__()
-        self.config = config
-        self.embeddings = Siglip2VisionEmbeddings(config)
-        self.encoder = Siglip2PackingEncoder(config)
-        self.post_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        vision_config = _get_vision_config(config)
+        self.config = vision_config
+        self.embeddings = Siglip2VisionEmbeddings(vision_config)
+        self.encoder = Siglip2PackingEncoder(vision_config)
+        self.post_layernorm = nn.LayerNorm(vision_config.hidden_size, eps=vision_config.layer_norm_eps)
 
     def forward(self, inputs_embeds: torch.Tensor, cu_seqlens: torch.Tensor) -> BaseModelOutput:
         encoder_outputs = self.encoder(inputs_embeds=inputs_embeds, cu_seqlens=cu_seqlens)
@@ -343,6 +351,7 @@ class Siglip2NaflexPacking(Siglip2PreTrainedModel):
             config: Siglip2VisionConfig configuration object.
         """
         super().__init__(config)
+        vision_config = _get_vision_config(config)
 
         if not _flash_attn_available:
             raise ImportError(
@@ -350,7 +359,7 @@ class Siglip2NaflexPacking(Siglip2PreTrainedModel):
                 "Please install flash-attn: pip install flash-attn --no-build-isolation"
             )
 
-        self.vision_model = Siglip2PackingVisionModel(config)
+        self.vision_model = Siglip2PackingVisionModel(vision_config)
 
         # Initialize weights and apply final processing
         self.post_init()
