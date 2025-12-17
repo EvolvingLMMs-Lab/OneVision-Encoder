@@ -42,6 +42,31 @@ def _get_vision_config(config):
     return getattr(config, "vision_config", config)
 
 
+def _normalize_vision_config(config: Siglip2VisionConfig) -> Siglip2VisionConfig:
+    """
+    Ensure the vision config carries required attributes. Some Siglip2 checkpoints may
+    use `embed_dim` instead of `hidden_size`, so we map it for compatibility.
+    """
+    if not hasattr(config, "hidden_size") and hasattr(config, "embed_dim"):
+        config.hidden_size = config.embed_dim
+    if not hasattr(config, "layer_norm_eps") and hasattr(config, "layer_norm_epsilon"):
+        config.layer_norm_eps = config.layer_norm_epsilon
+
+    required = [
+        "hidden_size",
+        "num_hidden_layers",
+        "num_attention_heads",
+        "intermediate_size",
+        "patch_size",
+        "layer_norm_eps",
+        "num_channels",
+    ]
+    missing = [key for key in required if not hasattr(config, key)]
+    if missing:
+        raise ValueError(f"Siglip2 vision config missing fields: {missing}. Got keys: {list(config.__dict__.keys())}")
+    return config
+
+
 class Siglip2VisionEmbeddings(nn.Module):
     """
     Vision embeddings for Siglip2 with support for variable image sizes.
@@ -50,7 +75,7 @@ class Siglip2VisionEmbeddings(nn.Module):
 
     def __init__(self, config: Siglip2VisionConfig):
         super().__init__()
-        config = _get_vision_config(config)
+        config = _normalize_vision_config(_get_vision_config(config))
         self.config = config
         self.embed_dim = config.hidden_size
         self.patch_size = config.patch_size
@@ -280,7 +305,7 @@ class Siglip2PackingEncoder(nn.Module):
 
     def __init__(self, config: Siglip2VisionConfig):
         super().__init__()
-        config = _get_vision_config(config)
+        config = _normalize_vision_config(_get_vision_config(config))
         self.config = config
         self.layers = nn.ModuleList([Siglip2PackingEncoderLayer(config) for _ in range(config.num_hidden_layers)])
 
@@ -308,7 +333,7 @@ class Siglip2PackingVisionModel(nn.Module):
 
     def __init__(self, config: Siglip2VisionConfig):
         super().__init__()
-        vision_config = _get_vision_config(config)
+        vision_config = _normalize_vision_config(_get_vision_config(config))
         self.config = vision_config
         self.embeddings = Siglip2VisionEmbeddings(vision_config)
         self.encoder = Siglip2PackingEncoder(vision_config)
@@ -351,7 +376,7 @@ class Siglip2NaflexPacking(Siglip2PreTrainedModel):
             config: Siglip2VisionConfig configuration object.
         """
         super().__init__(config)
-        vision_config = _get_vision_config(config)
+        vision_config = _normalize_vision_config(_get_vision_config(config))
 
         if not _flash_attn_available:
             raise ImportError(
