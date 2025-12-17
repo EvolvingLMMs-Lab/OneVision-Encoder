@@ -168,7 +168,7 @@ class AIMv2Packing(nn.Module):
 
     def __init__(
         self,
-        ckpt: str = "apple/aimv2-large-patch14-224",
+        ckpt: str = "/video_vit/pretrain_models/apple/aimv2-large-patch14-native",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         revision: Optional[str] = None,
     ):
