@@ -250,24 +250,37 @@ class AIMv2Packing(nn.Module):
         # Load patch embedding weights
         # The pretrained model might use Conv2d, but we use Linear for packing
         # We need to convert Conv2d weights to Linear weights
-        if hasattr(pretrained_model.embeddings, 'patch_embedding'):
-            patch_emb = pretrained_model.embeddings.patch_embedding
-            # If it's a Conv2d, convert to Linear
-            if isinstance(patch_emb, nn.Conv2d):
-                # Conv2d: [out_channels, in_channels, kernel_h, kernel_w]
-                # Our patches are flattened as [patch_h, patch_w, channels], so we need to permute
-                # Conv2d weight to match: [out_channels, kernel_h, kernel_w, in_channels] then flatten
-                conv_weight = patch_emb.weight.data  # [out_ch, in_ch, kh, kw]
-                # Permute to [out_ch, kh, kw, in_ch]
-                weight_permuted = conv_weight.permute(0, 2, 3, 1)
-                # Flatten to [out_ch, kh*kw*in_ch]
-                linear_weight = weight_permuted.reshape(conv_weight.shape[0], -1)
-                self.embeddings.proj.weight.data = linear_weight
-                if patch_emb.bias is not None:
-                    self.embeddings.proj.bias.data = patch_emb.bias.data
-            else:
-                # If it's already Linear, load directly
-                self.embeddings.proj.load_state_dict(patch_emb.state_dict())
+        if not hasattr(pretrained_model.embeddings, 'patch_embedding'):
+            raise AttributeError(
+                "Pretrained model does not have 'embeddings.patch_embedding'. "
+                "Expected Aimv2VisionModel structure."
+            )
+        
+        patch_emb = pretrained_model.embeddings.patch_embedding
+        
+        # If it's a Conv2d, convert to Linear
+        if isinstance(patch_emb, nn.Conv2d):
+            # Conv2d: [out_channels, in_channels, kernel_h, kernel_w]
+            # Our patches are flattened as [patch_h, patch_w, channels] (channels last),
+            # so we need to permute Conv2d weights to match this order.
+            # Permute [out_ch, in_ch, kh, kw] -> [out_ch, kh, kw, in_ch]
+            # Then flatten to [out_ch, kh*kw*in_ch] for Linear layer
+            conv_weight = patch_emb.weight.data  # [out_ch, in_ch, kh, kw]
+            # Permute to [out_ch, kh, kw, in_ch] to match channel-last flattening
+            weight_permuted = conv_weight.permute(0, 2, 3, 1)
+            # Flatten to [out_ch, kh*kw*in_ch]
+            linear_weight = weight_permuted.reshape(conv_weight.shape[0], -1)
+            self.embeddings.proj.weight.data = linear_weight
+            if patch_emb.bias is not None:
+                self.embeddings.proj.bias.data = patch_emb.bias.data
+        elif isinstance(patch_emb, nn.Linear):
+            # If it's already Linear, load directly
+            self.embeddings.proj.load_state_dict(patch_emb.state_dict())
+        else:
+            raise TypeError(
+                f"Unexpected patch_embedding type: {type(patch_emb)}. "
+                f"Expected nn.Conv2d or nn.Linear."
+            )
         
         # Load norm weights if present
         if hasattr(pretrained_model.embeddings, 'norm'):
@@ -317,9 +330,11 @@ class AIMv2Packing(nn.Module):
         
         # Calculate sequence lengths from grid_thw
         # For each image: num_patches = t * h * w
-        seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
+        seq_lengths = grid_thw.prod(dim=1)
         
         # Apply patch embeddings directly to packed patches
+        # Note: Unlike Siglip2, we process the packed patches directly without intermediate batching
+        # since our Linear layer can handle the [total_patches, patch_dim] input format
         embeddings = self.embeddings(hidden_states)
         
         # Compute cumulative sequence lengths for FlashAttention
