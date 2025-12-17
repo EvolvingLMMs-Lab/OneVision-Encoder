@@ -193,14 +193,13 @@ class AIMv2Packing(nn.Module):
         self.post_norm = RMSNorm(self.config.hidden_size, eps=self.config.rms_norm_eps)
 
         # Load weights from the pretrained model
-        if not hasattr(base_model, "vision_model"):
-            raise AttributeError("Unexpected AIMv2 model structure; missing vision_model on base_model.")
-        if not hasattr(base_model.vision_model, "trunk"):
+        # Aimv2VisionModel IS the vision model itself, not a wrapper
+        if not hasattr(base_model, "trunk"):
             raise AttributeError(
-                f"Unexpected AIMv2 model structure; missing trunk on vision_model (type={type(base_model.vision_model).__name__})."
+                f"Unexpected AIMv2 model structure; missing trunk on base_model (type={type(base_model).__name__})."
             )
 
-        patchifier = base_model.vision_model.preprocessor.patchifier
+        patchifier = base_model.preprocessor.patchifier
         if (
             patchifier.proj.weight.dim() != 4
             or patchifier.proj.weight.shape[2] != self.patch_size
@@ -218,7 +217,7 @@ class AIMv2Packing(nn.Module):
             self.patch_embed.proj.bias.data.zero_()
         self.patch_embed.norm.weight.data.copy_(patchifier.norm.weight)
 
-        standard_layers = base_model.vision_model.trunk.blocks
+        standard_layers = base_model.trunk.blocks
         if len(self.encoder.layers) != len(standard_layers):
             raise ValueError("Layer count mismatch between packing encoder and base AIMv2 model.")
 
@@ -230,7 +229,7 @@ class AIMv2Packing(nn.Module):
             packing_layer.attn.proj.load_state_dict(standard_layer.attn.proj.state_dict())
             packing_layer.mlp.load_state_dict(standard_layer.mlp.state_dict())
 
-        self.post_norm.load_state_dict(base_model.vision_model.trunk.post_trunk_norm.state_dict())
+        self.post_norm.load_state_dict(base_model.trunk.post_trunk_norm.state_dict())
         self.to(self.device).eval()
 
     def _build_position_embeddings(self, grid_thw: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
