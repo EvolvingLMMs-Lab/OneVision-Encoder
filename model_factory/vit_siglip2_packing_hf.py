@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.models.siglip2.configuration_siglip2 import Siglip2VisionConfig
-from transformers.models.siglip2.modeling_siglip2 import Siglip2VisionModel
+from transformers.models.siglip2.modeling_siglip2 import Siglip2PreTrainedModel
 
 # Check if FlashAttention 2 is available for packing model
 try:
@@ -292,7 +292,34 @@ class Siglip2PackingEncoder(nn.Module):
         return BaseModelOutput(last_hidden_state=hidden_states)
 
 
-class Siglip2NaflexPacking(nn.Module):
+class Siglip2PackingVisionModel(nn.Module):
+    """
+    Vision transformer with packing support. Structured to mirror Siglip2VisionModel
+    so that pretrained weights can be loaded directly via matching state_dict keys.
+    Expects packed embeddings together with cumulative sequence lengths for FlashAttention varlen.
+    """
+
+    def __init__(self, config: Siglip2VisionConfig):
+        super().__init__()
+        self.config = config
+        self.embeddings = Siglip2VisionEmbeddings(config)
+        self.encoder = Siglip2PackingEncoder(config)
+        self.post_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+
+    def forward(self, inputs_embeds: torch.Tensor, cu_seqlens: torch.Tensor) -> BaseModelOutput:
+        encoder_outputs = self.encoder(inputs_embeds=inputs_embeds, cu_seqlens=cu_seqlens)
+        hidden_states = self.post_layernorm(encoder_outputs.last_hidden_state)
+        return BaseModelOutput(last_hidden_state=hidden_states)
+
+    @property
+    def patch_embed_weight(self) -> torch.nn.Parameter:
+        return self.embeddings.patch_embedding.weight
+
+    def embed(self, hidden_states: torch.Tensor, spatial_shapes: torch.Tensor) -> torch.Tensor:
+        return self.embeddings(hidden_states, spatial_shapes)
+
+
+class Siglip2NaflexPacking(Siglip2PreTrainedModel):
     """
     Siglip2 Naflex Packing variant for efficient variable-length sequence processing.
 
@@ -305,19 +332,17 @@ class Siglip2NaflexPacking(nn.Module):
 
     This is optimized for batch processing where all images are concatenated into a single sequence.
     Only vision components are included (no text model).
+    Inherits from Siglip2PreTrainedModel and can be loaded directly from Siglip2 checkpoints via `from_pretrained`.
     """
 
-    DEFAULT_PATCH_SIZE = 16
-
-    def __init__(self, ckpt: str = "google/siglip2-so400m-patch16-naflex", device="cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, config: Siglip2VisionConfig):
         """
         Initialize the Siglip2 Naflex Packing model.
 
         Args:
-            ckpt (str): HuggingFace checkpoint for the pre-trained model.
-            device (str): Device to map the model for inference.
+            config: Siglip2VisionConfig configuration object.
         """
-        super(Siglip2NaflexPacking, self).__init__()
+        super().__init__(config)
 
         if not _flash_attn_available:
             raise ImportError(
@@ -325,48 +350,25 @@ class Siglip2NaflexPacking(nn.Module):
                 "Please install flash-attn: pip install flash-attn --no-build-isolation"
             )
 
-        self.device = torch.device(device)
+        self.vision_model = Siglip2PackingVisionModel(config)
 
-        # Load the vision model from pretrained checkpoint to get config and weights
-        vision_model = Siglip2VisionModel.from_pretrained(ckpt)
-        self.config = vision_model.config
+        # Initialize weights and apply final processing
+        self.post_init()
 
-        # Get patch size from config
-        if hasattr(self.config, 'patch_size'):
-            self.patch_size = self.config.patch_size
-        else:
-            self.patch_size = self.DEFAULT_PATCH_SIZE
+    @classmethod
+    def from_checkpoint(cls, ckpt: str, **kwargs):
+        """
+        Backward-compatible helper to load from an existing checkpoint string using
+        the standard ``from_pretrained`` mechanism.
 
-        # Build the model components with packing support
-        self.embeddings = Siglip2VisionEmbeddings(self.config)
-        self.encoder = Siglip2PackingEncoder(self.config)
-        self.post_layernorm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layer_norm_eps)
+        Args:
+            ckpt: Pretrained Siglip2 checkpoint identifier or path.
+            **kwargs: Additional keyword arguments forwarded to ``from_pretrained``.
 
-        # Load the weights from the pretrained model
-        # Copy embeddings weights
-        self.embeddings.load_state_dict(vision_model.vision_model.embeddings.state_dict())
-
-        # Copy encoder weights (need to map standard attention to packing attention)
-        for packing_layer, standard_layer in zip(self.encoder.layers, vision_model.vision_model.encoder.layers):
-            # Copy layer norms
-            packing_layer.layer_norm1.load_state_dict(standard_layer.layer_norm1.state_dict())
-            packing_layer.layer_norm2.load_state_dict(standard_layer.layer_norm2.state_dict())
-
-            # Copy attention projections
-            packing_layer.self_attn.q_proj.load_state_dict(standard_layer.self_attn.q_proj.state_dict())
-            packing_layer.self_attn.k_proj.load_state_dict(standard_layer.self_attn.k_proj.state_dict())
-            packing_layer.self_attn.v_proj.load_state_dict(standard_layer.self_attn.v_proj.state_dict())
-            packing_layer.self_attn.out_proj.load_state_dict(standard_layer.self_attn.out_proj.state_dict())
-
-            # Copy MLP
-            packing_layer.mlp.load_state_dict(standard_layer.mlp.state_dict())
-
-        # Copy post layernorm
-        self.post_layernorm.load_state_dict(vision_model.vision_model.post_layernorm.state_dict())
-
-        # Move to device and set to eval mode
-        self.to(self.device)
-        self.eval()
+        Returns:
+            Siglip2NaflexPacking: Model initialized with weights from the checkpoint.
+        """
+        return cls.from_pretrained(ckpt, **kwargs)
 
     def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor):
         """
@@ -386,11 +388,13 @@ class Siglip2NaflexPacking(nn.Module):
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
         # Get target dtype from patch embedding
-        target_dtype = self.embeddings.patch_embedding.weight.dtype
+        patch_weight = self.vision_model.patch_embed_weight
+        target_dtype = patch_weight.dtype
+        device = patch_weight.device
 
         # Move inputs to device
-        hidden_states = hidden_states.to(device=self.device, dtype=target_dtype)
-        grid_thw = grid_thw.to(device=self.device)
+        hidden_states = hidden_states.to(device=device, dtype=target_dtype)
+        grid_thw = grid_thw.to(device=device)
 
         # Calculate spatial_shapes from grid_thw
         # For Siglip2, spatial_shapes is [num_images, 2] containing [h, w]
@@ -418,7 +422,7 @@ class Siglip2NaflexPacking(nn.Module):
             start_idx += num_patches
 
         # Apply patch embeddings
-        embeddings = self.embeddings(batched_hidden_states, spatial_shapes)
+        embeddings = self.vision_model.embed(batched_hidden_states, spatial_shapes)
 
         # Convert back to packed format by removing padding
         # embeddings shape: [batch_size, max_num_patches, hidden_size]
@@ -432,16 +436,9 @@ class Siglip2NaflexPacking(nn.Module):
         cu_seqlens = F.pad(seq_lengths.cumsum(dim=0), (1, 0), value=0).to(torch.int32)
 
         # Encoder with FlashAttention varlen (no attention mask needed)
-        encoder_outputs = self.encoder(
-            inputs_embeds=embeddings,
-            cu_seqlens=cu_seqlens,
-        )
+        encoder_outputs = self.vision_model(embeddings, cu_seqlens)
 
-        # Post layernorm
-        last_hidden_state = encoder_outputs.last_hidden_state
-        last_hidden_state = self.post_layernorm(last_hidden_state)
-
-        return last_hidden_state
+        return encoder_outputs.last_hidden_state
 
 
 __all__ = [
@@ -450,5 +447,6 @@ __all__ = [
     "Siglip2PackingAttention",
     "Siglip2PackingEncoderLayer",
     "Siglip2PackingEncoder",
+    "Siglip2PackingVisionModel",
     "Siglip2NaflexPacking",
 ]
