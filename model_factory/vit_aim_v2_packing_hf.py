@@ -116,7 +116,7 @@ class Aimv2PackingAttention(nn.Module):
                 f" {self.num_heads})."
             )
         self.scale = self.head_dim**-0.5
-        self.dropout = config.attention_dropout
+        self.dropout = getattr(config, 'attention_dropout', 0.0)
 
         self.k_proj = nn.Linear(self.embed_dim, self.embed_dim)
         self.v_proj = nn.Linear(self.embed_dim, self.embed_dim)
@@ -265,8 +265,12 @@ class AIMv2Packing(nn.Module):
         self.device = torch.device(device)
 
         # Load the vision model from pretrained checkpoint to get config and weights
-        vision_model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
-        self.config = vision_model.config
+        try:
+            base_model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Aimv2VisionModel from {ckpt}: {e}")
+        
+        self.config = base_model.config
 
         # Get patch size from config
         if hasattr(self.config, 'patch_size'):
@@ -280,28 +284,50 @@ class AIMv2Packing(nn.Module):
         self.layernorm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layer_norm_eps)
 
         # Load the weights from the pretrained model
-        # Copy embeddings weights (Conv2d patch embedding)
-        self.embeddings.patch_embedding.load_state_dict(
-            vision_model.embeddings.patch_embedding.state_dict()
-        )
+        # Aimv2VisionModel structure: the model itself has embeddings, encoder, layernorm
+        try:
+            # Copy embeddings weights (Conv2d patch embedding)
+            self.embeddings.patch_embedding.load_state_dict(
+                base_model.embeddings.patch_embedding.state_dict()
+            )
+        except AttributeError as e:
+            raise RuntimeError(
+                f"Failed to copy embeddings weights. "
+                f"base_model attributes: {dir(base_model)}. "
+                f"Error: {e}"
+            )
 
         # Copy encoder weights (need to map standard attention to packing attention)
-        for packing_layer, standard_layer in zip(self.encoder.layers, vision_model.encoder.layers):
-            # Copy layer norms
-            packing_layer.layer_norm1.load_state_dict(standard_layer.layer_norm1.state_dict())
-            packing_layer.layer_norm2.load_state_dict(standard_layer.layer_norm2.state_dict())
+        try:
+            for packing_layer, standard_layer in zip(self.encoder.layers, base_model.encoder.layers):
+                # Copy layer norms
+                packing_layer.layer_norm1.load_state_dict(standard_layer.layer_norm1.state_dict())
+                packing_layer.layer_norm2.load_state_dict(standard_layer.layer_norm2.state_dict())
 
-            # Copy attention projections
-            packing_layer.self_attn.q_proj.load_state_dict(standard_layer.self_attn.q_proj.state_dict())
-            packing_layer.self_attn.k_proj.load_state_dict(standard_layer.self_attn.k_proj.state_dict())
-            packing_layer.self_attn.v_proj.load_state_dict(standard_layer.self_attn.v_proj.state_dict())
-            packing_layer.self_attn.out_proj.load_state_dict(standard_layer.self_attn.out_proj.state_dict())
+                # Copy attention projections
+                packing_layer.self_attn.q_proj.load_state_dict(standard_layer.self_attn.q_proj.state_dict())
+                packing_layer.self_attn.k_proj.load_state_dict(standard_layer.self_attn.k_proj.state_dict())
+                packing_layer.self_attn.v_proj.load_state_dict(standard_layer.self_attn.v_proj.state_dict())
+                packing_layer.self_attn.out_proj.load_state_dict(standard_layer.self_attn.out_proj.state_dict())
 
-            # Copy MLP
-            packing_layer.mlp.load_state_dict(standard_layer.mlp.state_dict())
+                # Copy MLP
+                packing_layer.mlp.load_state_dict(standard_layer.mlp.state_dict())
+        except AttributeError as e:
+            raise RuntimeError(
+                f"Failed to copy encoder weights. "
+                f"base_model.encoder layer attributes: {dir(base_model.encoder.layers[0]) if hasattr(base_model, 'encoder') else 'NO ENCODER'}. "
+                f"Error: {e}"
+            )
 
         # Copy final layernorm
-        self.layernorm.load_state_dict(vision_model.layernorm.state_dict())
+        try:
+            self.layernorm.load_state_dict(base_model.layernorm.state_dict())
+        except AttributeError as e:
+            raise RuntimeError(
+                f"Failed to copy layernorm weights. "
+                f"base_model attributes: {dir(base_model)}. "
+                f"Error: {e}"
+            )
 
         # Move to device and set to eval mode
         self.to(self.device)
