@@ -1,17 +1,3 @@
-# coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 """
 Siglip2 Naflex Packing Implementation
@@ -29,7 +15,6 @@ from transformers.modeling_outputs import BaseModelOutput
 from transformers.models.siglip2.configuration_siglip2 import Siglip2VisionConfig
 from transformers.models.siglip2.modeling_siglip2 import Siglip2PreTrainedModel
 
-# Check if FlashAttention 2 is available for packing model
 try:
     from flash_attn import flash_attn_varlen_func
     _flash_attn_available = True
@@ -119,15 +104,12 @@ class Siglip2VisionEmbeddings(nn.Module):
             dtype=source_dtype,
         )
 
-        # (height, width, embed_dim) -> (1, embed_dim, height, width) for interpolation
         positional_embeddings = positional_embeddings.permute(2, 0, 1).unsqueeze(0)
 
-        # Upcast to float32 on CPU because antialias is not supported for bfloat16/float16 on CPU
         if positional_embeddings.device.type == "cpu":
             positional_embeddings = positional_embeddings.to(torch.float32)
 
         for i in range(batch_size):
-            # (1, dim, height, width) -> (1, dim, target_height, target_width)
             height, width = spatial_shapes[i]
             resized_embeddings = F.interpolate(
                 positional_embeddings,
@@ -137,10 +119,8 @@ class Siglip2VisionEmbeddings(nn.Module):
                 antialias=True,
             )
 
-            # (1, dim, target_height, target_width) -> (target_height * target_width, dim)
             resized_embeddings = resized_embeddings.reshape(embed_dim, height * width).transpose(0, 1)
 
-            # Cast to original dtype
             resized_embeddings = resized_embeddings.to(source_dtype)
 
             resulted_positional_embeddings[i, : height * width] = resized_embeddings
@@ -157,11 +137,9 @@ class Siglip2VisionEmbeddings(nn.Module):
                 Spatial shapes of shape (batch_size, 2) to resize the positional embeddings to
         """
 
-        # Apply patch embeddings to already patchified pixel values
         target_dtype = self.patch_embedding.weight.dtype
         patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))
 
-        # Get positional resized and padded positional embeddings
         positional_embeddings = self.position_embedding.weight.reshape(
             self.position_embedding_size, self.position_embedding_size, -1
         )
@@ -169,7 +147,6 @@ class Siglip2VisionEmbeddings(nn.Module):
             positional_embeddings, spatial_shapes, max_length=pixel_values.shape[1]
         )
 
-        # Add positional embeddings to patch embeddings
         embeddings = patch_embeds + resized_positional_embeddings
         return embeddings
 
@@ -242,7 +219,6 @@ class Siglip2PackingAttention(nn.Module):
         keys = keys.view(seq_length, self.num_heads, self.head_dim)
         values = values.view(seq_length, self.num_heads, self.head_dim)
 
-        # Use FlashAttention with variable lengths
         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         attn_output = flash_attn_varlen_func(
             queries,
@@ -386,7 +362,6 @@ class Siglip2NaflexPacking(Siglip2PreTrainedModel):
 
         self.vision_model = Siglip2PackingVisionModel(vision_config)
 
-        # Initialize weights and apply final processing
         self.post_init()
 
     @classmethod
@@ -421,55 +396,42 @@ class Siglip2NaflexPacking(Siglip2PreTrainedModel):
         Returns:
             torch.Tensor: Last hidden state of shape [total_num_patches, hidden_size]
         """
-        # Get target dtype from patch embedding
         patch_weight = self.vision_model.patch_embed_weight
         target_dtype = patch_weight.dtype
         device = patch_weight.device
 
-        # Move inputs to device
         hidden_states = hidden_states.to(device=device, dtype=target_dtype)
         grid_thw = grid_thw.to(device=device)
 
-        # Calculate spatial_shapes from grid_thw
-        # For Siglip2, spatial_shapes is [num_images, 2] containing [h, w]
         spatial_shapes = grid_thw[:, 1:].long()  # Extract [h, w] from [t, h, w]
 
-        # Reshape hidden_states from [total_patches, patch_dim] to [batch_size, max_patches, patch_dim]
-        # This is needed because embeddings.forward expects 3D input
         batch_size = grid_thw.shape[0]
         seq_lengths = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
         max_num_patches = seq_lengths.max().item()
         patch_dim = hidden_states.shape[1]
 
-        # Create padded batch tensor
         batched_hidden_states = torch.zeros(
             (batch_size, max_num_patches, patch_dim),
             device=hidden_states.device,
             dtype=hidden_states.dtype
         )
 
-        # Fill in the actual patches for each image
         start_idx = 0
         for i in range(batch_size):
             num_patches = seq_lengths[i].item()
             batched_hidden_states[i, :num_patches] = hidden_states[start_idx:start_idx + num_patches]
             start_idx += num_patches
 
-        # Apply patch embeddings
         embeddings = self.vision_model.embed(batched_hidden_states, spatial_shapes)
 
-        # Convert back to packed format by removing padding
-        # embeddings shape: [batch_size, max_num_patches, hidden_size]
         packed_embeddings = []
         for i in range(batch_size):
             num_patches = seq_lengths[i].item()
             packed_embeddings.append(embeddings[i, :num_patches])
         embeddings = torch.cat(packed_embeddings, dim=0)
 
-        # Compute cumulative sequence lengths for FlashAttention
         cu_seqlens = F.pad(seq_lengths.cumsum(dim=0), (1, 0), value=0).to(torch.int32)
 
-        # Encoder with FlashAttention varlen (no attention mask needed)
         encoder_outputs = self.vision_model(embeddings, cu_seqlens)
 
         return encoder_outputs.last_hidden_state
