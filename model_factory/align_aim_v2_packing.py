@@ -385,7 +385,8 @@ def main():
             # Process through packing model
             print("Processing through packing model...")
             with torch.no_grad():
-                packing_output = packing_model(packed_input, grid_thw)
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    packing_output = packing_model(packed_input, grid_thw)
             
             print(f"Packing model output shape: {packing_output.shape}")
             

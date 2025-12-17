@@ -333,7 +333,7 @@ class AIMv2Packing(Aimv2PreTrainedModel):
         # Use the same attribute names as Aimv2VisionModel
         self.embeddings = Aimv2VisionEmbeddings(config)
         self.encoder = Aimv2PackingEncoder(config)
-        self.layernorm = Aimv2RMSNorm(config.hidden_size, config.rms_norm_eps)
+        self.rms_norm = Aimv2RMSNorm(config.hidden_size, config.rms_norm_eps)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -439,7 +439,7 @@ class AIMv2Packing(Aimv2PreTrainedModel):
 
         # Final layernorm
         last_hidden_state = encoder_outputs.last_hidden_state
-        last_hidden_state = self.layernorm(last_hidden_state)
+        last_hidden_state = self.rms_norm(last_hidden_state)
 
         return last_hidden_state
 
