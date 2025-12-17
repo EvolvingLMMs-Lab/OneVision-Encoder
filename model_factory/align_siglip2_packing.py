@@ -287,12 +287,12 @@ def main():
     # Initialize models
     print("\nInitializing models...")
     print("Loading standard model (Siglip2Naflex)...")
+
     standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
+    packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt, trust_remote_code=True).to(args.device).eval()
 
-    print("Loading packing model (Siglip2NaflexPacking)...")
-    packing_model = Siglip2NaflexPacking(ckpt=args.ckpt, device=args.device)
 
-    patch_size = packing_model.patch_size
+    patch_size = packing_model.config.vision_config.patch_size
     print(f"Patch size: {patch_size}")
 
     all_tests_passed = True
@@ -531,6 +531,132 @@ def main():
             import traceback
             traceback.print_exc()
 
+        # Test with 10 random-sized images in a batch (packing format advantage)
+        print(f"\n{'=' * 80}")
+        print(f"Testing with 10 random-sized images (packing format)")
+        print(f"{'=' * 80}")
+
+        try:
+            # Generate 10 random images with different sizes (up to 1000x1000)
+            np.random.seed(42)  # For reproducibility
+            batch_images = []
+            image_sizes = []
+
+            for i in range(10):
+                # Random size up to 1000x1000, rounded to nearest multiple of patch_size
+                h = np.random.randint(224, 1001)
+                w = np.random.randint(224, 1001)
+
+                # Round to multiple of patch_size
+                h = round_up_to_multiple(h, patch_size)
+                w = round_up_to_multiple(w, patch_size)
+
+                image_sizes.append((h, w))
+
+                # Generate random image
+                img = torch.randn(1, 3, h, w, device=args.device)
+                batch_images.append(img)
+
+            print(f"Generated 10 images with sizes: {image_sizes}")
+
+            # Process each image individually through standard model
+            print("Processing images through standard model...")
+            standard_outputs = []
+            for img in batch_images:
+                with torch.no_grad():
+                    output = standard_model(img)
+                standard_outputs.append(output.squeeze(0))  # Remove batch dim
+
+            # Convert all images to packing format
+            print("Converting images to packing format...")
+            all_patches = []
+            grid_thw_list = []
+
+            for img in batch_images:
+                patches, grid = convert_to_patches(img, patch_size)
+                all_patches.append(patches)
+                grid_thw_list.append(grid)
+
+            # Concatenate into single packed format
+            packed_input = torch.cat(all_patches, dim=0)
+            grid_thw = torch.cat(grid_thw_list, dim=0)
+
+            print(f"Packed input shape: {packed_input.shape}")
+            print(f"grid_thw shape: {grid_thw.shape}")
+
+            # Process through packing model
+            print("Processing through packing model...")
+            with torch.no_grad():
+                with torch.autocast(device_type=args.device, dtype=torch.bfloat16):
+                    packing_output = packing_model(packed_input, grid_thw)
+
+            print(f"Packing model output shape: {packing_output.shape}")
+
+            # Split packing output back to individual images
+            packing_outputs = []
+            start_idx = 0
+            for i in range(10):
+                t, h, w = grid_thw[i]
+                num_patches = int(t * h * w)
+                packing_outputs.append(packing_output[start_idx:start_idx + num_patches])
+                start_idx += num_patches
+
+            # Compute similarity metrics for each image
+            print("\nComputing similarity metrics for each image...")
+            all_min_cosine = []
+            all_mean_cosine = []
+            all_max_diff = []
+            all_mean_diff = []
+
+            for i in range(10):
+                std_out = standard_outputs[i].unsqueeze(0)
+                pack_out = packing_outputs[i].unsqueeze(0)
+
+                metrics = compute_similarity_metrics(std_out, pack_out)
+                all_min_cosine.append(metrics['min_cosine'])
+                all_mean_cosine.append(metrics['mean_cosine'])
+                all_max_diff.append(metrics['max_diff'])
+                all_mean_diff.append(metrics['mean_diff'])
+
+                print(f"  Image {i+1} ({image_sizes[i][1]}x{image_sizes[i][0]}): "
+                      f"min_cos={metrics['min_cosine']:.4f}, mean_cos={metrics['mean_cosine']:.4f}, "
+                      f"max_diff={metrics['max_diff']:.4f}")
+
+            # Aggregate metrics
+            overall_min_cosine = min(all_min_cosine)
+            overall_mean_cosine = np.mean(all_mean_cosine)
+            overall_max_diff = max(all_max_diff)
+            overall_mean_diff = np.mean(all_mean_diff)
+
+            print(f"\nOverall results for 10 random-sized images:")
+            print("-" * 80)
+            print(f"Max Diff:        {overall_max_diff:.6f}")
+            print(f"Mean Diff:       {overall_mean_diff:.6f}")
+            print(f"Min Cosine Sim:  {overall_min_cosine:.8f}")
+            print(f"Mean Cosine Sim: {overall_mean_cosine:.8f}")
+
+            # Check if test passed
+            test_passed = overall_min_cosine > args.threshold
+            metrics = {
+                'max_diff': overall_max_diff,
+                'mean_diff': overall_mean_diff,
+                'min_cosine': overall_min_cosine,
+                'mean_cosine': overall_mean_cosine,
+                'max_cosine': max(all_min_cosine)  # Using min_cosine per image as representative
+            }
+            test_results.append(("10_random_sizes", test_passed, metrics))
+
+            if test_passed:
+                print(f"✅ PASS: 10 random-sized images (min cosine similarity {overall_min_cosine:.8f} > {args.threshold})")
+            else:
+                print(f"❌ FAIL: 10 random-sized images (min cosine similarity {overall_min_cosine:.8f} <= {args.threshold})")
+                all_tests_passed = False
+
+        except Exception as e:
+            print(f"❌ ERROR processing random-sized batch: {e}")
+            all_tests_passed = False
+            traceback.print_exc()
+
     else:
         # Multi-resolution random tensor tests
         # Test resolutions: 224, 384, 512
@@ -639,7 +765,8 @@ def main():
             # Process through packing model
             print("\nRunning packing model...")
             with torch.no_grad():
-                packing_output = packing_model(packed_input, grid_thw)
+                with torch.autocast(device_type=args.device, dtype=torch.bfloat16):
+                    packing_output = packing_model(packed_input, grid_thw)
 
             print(f"Packing model output shape: {packing_output.shape}")
 
@@ -697,7 +824,11 @@ def main():
         print(f"\nTest Results:")
         for name, passed, metrics in test_results:
             status = "✅ PASS" if passed else "❌ FAIL"
-            print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f})")
+            mean_cos = metrics.get("mean_cosine", None)
+            if mean_cos is not None:
+                print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f}, mean cosine: {mean_cos:.8f})")
+            else:
+                print(f"  {status}: {name} (min cosine: {metrics['min_cosine']:.8f})")
 
     if all_tests_passed:
         print(f"\n✅ ALL TESTS PASSED: Models are aligned")
