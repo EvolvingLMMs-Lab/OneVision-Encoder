@@ -188,7 +188,7 @@ class Aimv2VisionEmbeddings(nn.Module):
             hidden_states[i, :num_patches] = hidden_states[i, :num_patches] + pos_embed
             # Padding positions get the same embedding as the last valid position
             if num_patches < max_num_patches:
-                hidden_states[i, num_patches:] = hidden_states[i, num_patches:] + pos_embed[0]
+                hidden_states[i, num_patches:] = hidden_states[i, num_patches:] + pos_embed[-1]
         
         return hidden_states
 
@@ -451,6 +451,9 @@ class AIMv2Packing(nn.Module):
         )
 
         # Fill in the actual patches for each image
+        # Note: This for loop is necessary because images have variable number of patches
+        # and we need to unpack from [total_patches, patch_dim] to [batch_size, max_patches, patch_dim]
+        # Cannot be easily vectorized due to variable sequence lengths
         start_idx = 0
         for i in range(batch_size):
             num_patches = seq_lengths[i].item()
@@ -463,6 +466,8 @@ class AIMv2Packing(nn.Module):
 
         # Convert back to packed format by removing padding
         # embeddings shape: [batch_size, max_num_patches, hidden_size]
+        # Note: This for loop is necessary to pack back from batched to packed format,
+        # removing padding tokens. This matches the reference implementations.
         packed_embeddings = []
         for i in range(batch_size):
             num_patches = seq_lengths[i].item()
