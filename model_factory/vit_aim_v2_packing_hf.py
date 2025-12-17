@@ -214,8 +214,10 @@ class AIMv2Packing(nn.Module):
                     start_idx += num_patches
                     
                     # Reconstruct single image
+                    # image_patches shape: [num_patches, patch_dim]
+                    # grid_single shape: [1, 3]
                     grid_single = grid_thw[i:i+1]
-                    pixel_values = self._reconstruct_images_from_patches(image_patches.unsqueeze(0), grid_single)
+                    pixel_values = self._reconstruct_images_from_patches(image_patches, grid_single)
                     
                     # Process through model
                     outputs = self.model(
