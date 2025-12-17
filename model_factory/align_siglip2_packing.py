@@ -290,9 +290,9 @@ def main():
     standard_model = Siglip2Naflex(ckpt=args.ckpt, device=args.device)
 
     print("Loading packing model (Siglip2NaflexPacking)...")
-    packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt).to(args.device)
+    packing_model = Siglip2NaflexPacking.from_pretrained(args.ckpt, trust_remote_code=True).to(args.device).eval()
 
-    patch_size = packing_model.patch_size
+    patch_size = packing_model.config.patch_size
     print(f"Patch size: {patch_size}")
 
     all_tests_passed = True
