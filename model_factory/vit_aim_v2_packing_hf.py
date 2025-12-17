@@ -367,11 +367,18 @@ class AIMv2Packing(nn.Module):
 
         # Requirement #5: Load the weights from the pretrained model
         # Convert Conv2d weights to Linear weights for patch embedding
-        # Original: Conv2d with shape [out_channels, in_channels, kernel_h, kernel_w]
-        # Target: Linear with shape [out_features, in_features]
-        # Need to reshape: [hidden_size, num_channels, patch_size, patch_size] -> [hidden_size, num_channels*patch_size*patch_size]
-        conv_weight = vision_model.embeddings.patch_embed.weight  # [hidden_size, num_channels, patch_size, patch_size]
-        linear_weight = conv_weight.reshape(self.config.hidden_size, -1)  # [hidden_size, num_channels*patch_size*patch_size]
+        # Original Conv2d: [out_channels, in_channels, kernel_h, kernel_w] = [H, C, P, P]
+        # Processes input in [channels, height, width] order
+        # 
+        # Packing input format (from convert_to_patches): [patch_h, patch_w, channels] 
+        # Target Linear: [out_features, in_features] = [H, P*P*C]
+        # 
+        # Need to permute Conv2d weights from [C, P, P] to [P, P, C] order before flattening
+        conv_weight = vision_model.embeddings.patch_embed.weight  # [H, C, P, P]
+        # Permute to match packing input order: [H, C, P, P] -> [H, P, P, C]
+        conv_weight_permuted = conv_weight.permute(0, 2, 3, 1)  # [H, P, P, C]
+        # Flatten spatial and channel dims: [H, P, P, C] -> [H, P*P*C]
+        linear_weight = conv_weight_permuted.reshape(self.config.hidden_size, -1)
         self.embeddings.patch_embedding.weight.data.copy_(linear_weight)
         
         # Copy RMS norm weights
