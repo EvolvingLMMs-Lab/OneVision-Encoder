@@ -46,9 +46,10 @@ def test_aimv2_packing_init():
     
     try:
         print("\n  Creating AIMv2Packing model...")
-        model = AIMv2Packing(ckpt=ckpt, device=device)
+        model = AIMv2Packing.from_pretrained(ckpt, trust_remote_code=True)
+        model = model.to(device).eval()
         print("  ✓ Model created successfully!")
-        print(f"  Patch size: {model.patch_size}")
+        print(f"  Patch size: {model.config.patch_size}")
         print(f"  Hidden size: {model.config.hidden_size}")
         print(f"  Number of layers: {model.config.num_hidden_layers}")
         return 0
