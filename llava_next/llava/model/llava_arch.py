@@ -189,7 +189,7 @@ class LlavaMetaForCausalLM(ABC):
         image_feature = image_feature.view(num_frames, -1, num_dim)
         return image_feature
 
-    def encode_images(self, images, grid_thw=None):
+    def encode_images(self, images):
         # Check if we need spatial dimensions for spatial_merge projector
         projector_type = getattr(self.config, "mm_projector_type", "linear")
         vision_tower = self.get_model().get_vision_tower()
@@ -201,7 +201,7 @@ class LlavaMetaForCausalLM(ABC):
             image_features = self.get_model().mm_projector(image_features, height=h, width=w)
         else:
             # Standard flow for other projector types
-            image_features = vision_tower(images, grid_thw=grid_thw)
+            image_features = vision_tower(images)
             # image_features = self.get_model().vision_resampler(image_features, images=images)
             image_features = self.get_model().mm_projector(image_features)
         return image_features
@@ -272,9 +272,8 @@ class LlavaMetaForCausalLM(ABC):
         image_feature = image_feature.permute(1, 2, 0).contiguous()
         return image_feature
 
-    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities=["image"], image_sizes=None, grid_thw=None):
+    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities=["image"], image_sizes=None):
         vision_tower = self.get_vision_tower()
-        # assert 1==3, f'grid_thw: {grid_thw}, images type: {type(images)}, images ndim: {[x.shape for x in images]}, modalities: {modalities}, images[0].shape:{[img.shape for img in images]}'
         # rank_print(modalities)
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
@@ -285,7 +284,7 @@ class LlavaMetaForCausalLM(ABC):
         # import pdb; pdb.set_trace()
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
-                images = [x.unsqueeze(0) if x.ndim == 2 else x for x in images]
+                images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
 
             video_idx_in_batch = []
             for _ in range(len(modalities)):
@@ -294,14 +293,14 @@ class LlavaMetaForCausalLM(ABC):
 
             images_list = []
             for image in images:
-                if image.ndim == 3:
+                if image.ndim == 4:
                     images_list.append(image)
                 else:
                     images_list.append(image.unsqueeze(0))
 
             concat_images = torch.cat([image for image in images_list], dim=0)
             split_sizes = [image.shape[0] for image in images_list]
-            encoded_image_features = self.encode_images(concat_images, grid_thw=grid_thw)
+            encoded_image_features = self.encode_images(concat_images)
             # image_features,all_faster_video_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
 
             # This is a list, each element is [num_images, patch * patch, dim]
@@ -443,7 +442,7 @@ class LlavaMetaForCausalLM(ABC):
                 raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
             image_features = self.encode_images(images)
-        # assert 4==5, f'image_features: {[x.shape for x in image_features]}'
+
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, "tune_mm_mlp_adapter", False) and getattr(self.config, "mm_use_im_start_end", False):
             raise NotImplementedError
