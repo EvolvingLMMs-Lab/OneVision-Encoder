@@ -274,10 +274,6 @@ def process_anyres_image(image, processor, grid_pinpoints):
         possible_resolutions = ast.literal_eval(grid_pinpoints)
     best_resolution = select_best_resolution(image.size, possible_resolutions)
     image_padded = resize_and_pad_image(image, best_resolution)
-    if 'siglip' in processor.__class__.__name__.lower():
-        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
-        grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
-        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
 
     patches = divide_to_patches(image_padded, processor.crop_size["height"])
 

@@ -1073,16 +1073,12 @@ class LazySupervisedDataset(Dataset):
 
         image_size = image.size
         image_aspect_ratio = self.data_args.image_aspect_ratio
-        grid_thw = None
         if overwrite_image_aspect_ratio is not None:
             image_aspect_ratio = overwrite_image_aspect_ratio
         if image_aspect_ratio == "highres":
             image = process_highres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
         elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
             image = process_anyres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
-            if type(image) is dict:
-                grid_thw = image['grid_thw']
-                image = image['pixel_values']
         elif image_aspect_ratio == "crop_split":
             image = process_highres_image_crop_split(image, self.data_args)
         elif image_aspect_ratio == "pad":
@@ -1103,10 +1099,8 @@ class LazySupervisedDataset(Dataset):
             image = expand2square(image, tuple(int(x * 255) for x in processor.image_mean))
             image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
         else:
-            image = image.resize((512, 512))
-            image = processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
-            # assert 1==3, f'image.size = {image.shape}, processor = {processor}'
-        return image, image_size, "image", grid_thw
+            image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
+        return image, image_size, "image"
 
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         # TODO: define number of retries somewhere else
@@ -1249,14 +1243,14 @@ class LazySupervisedDataset(Dataset):
 
         # image exist in the data
         if "images" in self.list_data_dict[i] or 'image' in self.list_data_dict[i]:
-                data_dict["image"] = image
+            data_dict["image"] = image
         elif "video" in self.list_data_dict[i]:
             data_dict["image"] = image
         elif self.data_args.is_multimodal:
             # image does not exist in the data, but the model is multimodal
-            crop_size = 224
+            crop_size = self.data_args.image_processor.crop_size
             data_dict["image"] = [
-                (torch.zeros(196, 768), (22,224), "text", [[1,14,14]]),
+                (torch.zeros(1, 3, crop_size["height"], crop_size["width"]), (crop_size["width"], crop_size["height"]), "text"),
             ]
         # prompt exist in the data
         if prompt is not None:
@@ -1409,8 +1403,6 @@ class DataCollatorForSupervisedDataset(object):
 
             batch["image_sizes"] = [im[1] for im_list in images for im in im_list]
             batch["modalities"] = [im[2] for im_list in images for im in im_list]
-            if all(len(im) == 4 for im_list in images for im in im_list):
-                batch["grid_thw"] = torch.tensor([im[3] for im_list in images for im in im_list])
             images = [im[0] for im_list in images for im in im_list]
 
             # if all(x is not None and x.shape == images[0].shape for x in images):
@@ -1831,7 +1823,7 @@ def train(attn_implementation=None):
                         module = module.to(torch.bfloat16)
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
-    trainer = LLaVATrainer(model=model, processing_class=tokenizer, args=training_args, **data_module)
+    trainer = LLaVATrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)

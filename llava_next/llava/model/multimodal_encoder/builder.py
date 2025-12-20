@@ -4,7 +4,6 @@ from .imagebind import ImageBindWrapper
 from .open_clip_encoder import OpenCLIPVisionTower
 from .hf_vision import HFVisionTower
 from .siglip_encoder import SigLipVisionTower
-from .siglip2_naflex import SigLip2NaflexVisionTower as SigLipVisionTower
 from .mlcd_encoder import MLCDVisionTower, MLCDVisionTowerS2
 from .internViT_300M_448px_encoder import InternViT_300M_448px_VisionTower, InternViT_300M_448px_VisionTowerS2
 from .eva_8b_448px_encoder import EVA_8B_448px_VisionTower, EVA_8B_448px_VisionTowerS2

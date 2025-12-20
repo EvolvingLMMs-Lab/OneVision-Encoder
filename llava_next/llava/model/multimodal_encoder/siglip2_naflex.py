@@ -285,8 +285,7 @@ class SigLip2VisionConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        if hasattr(cls, '_set_token_in_kwargs'):
-            cls._set_token_in_kwargs(kwargs)
+        cls._set_token_in_kwargs(kwargs)
 
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
 
@@ -851,7 +850,7 @@ class SigLip2NaflexVisionTower(nn.Module):
 
         self.is_loaded = True
 
-    def forward(self, images, grid_thw=None):
+    def forward(self, images):
         if type(images) is list:
             image_features = []
             for image in images:
@@ -890,20 +889,9 @@ class SigLip2NaflexVisionTower(nn.Module):
             else:  # 假设已经是特征或标记化的张量
                 # 直接使用传入的张量作为像素值
                 pixel_values = images.to(device=self.device, dtype=self.dtype)
-                if grid_thw is not None:
-                    spatial_shapes = []
-                    # assert 1==3, f'grid_thw:{grid_thw}, pixel_values.shape:{pixel_values.shape}'
-                    for b in range(batch_size):
-                        thw = grid_thw[b]
-                        feat_h = thw[1]
-                        feat_w = thw[2]
-                        spatial_shapes.append([feat_w, feat_h])
-                    spatial_shapes = torch.tensor(spatial_shapes, device=self.device)
-                    # assert 12==3, f'spatial_shapes:{spatial_shapes}, grid_thw:{grid_thw}'
-                else:
-                    feat_w, feat_h = int(pixel_values.shape[1]**0.5), int(pixel_values.shape[1]**0.5)
-                    # 为每个批次项目估计标准形状 (32, 32)
-                    spatial_shapes = torch.tensor([[feat_w, feat_h]] * batch_size, device=self.device)
+                feat_w, feat_h = int(pixel_values.shape[1]**0.5), int(pixel_values.shape[1]**0.5)
+                # 为每个批次项目估计标准形状 (35, 35)
+                spatial_shapes = torch.tensor([[feat_w, feat_h]] * batch_size, device=self.device)
                 pixel_attention_mask = None
             
             image_forward_outs = self.vision_tower(
@@ -912,7 +900,7 @@ class SigLip2NaflexVisionTower(nn.Module):
                 spatial_shapes, 
                 output_hidden_states=True
             )
-            image_features = image_forward_outs.hidden_states[-2]
+            image_features = image_forward_outs.hidden_states[-1]
         
 
         return image_features
