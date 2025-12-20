@@ -28,7 +28,10 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.models.siglip.modeling_siglip import SiglipMLP
 from transformers.utils import (add_start_docstrings,
                                 add_start_docstrings_to_model_forward, logging,
-                                replace_return_docstrings)
+                                replace_return_docstrings, is_flash_attn_2_available)
+
+
+from flash_attn import flash_attn_func
 
 logger = logging.get_logger(__name__)
 
@@ -100,7 +103,7 @@ class LlavaViTConfig(PretrainedConfig):
         num_hidden_layers=12,
         num_attention_heads=12,
         num_channels=3,
-        image_size=224,
+        image_size=448,
         patch_size=16,
         hidden_act="gelu",
         layer_norm_eps=1e-6,
@@ -197,8 +200,12 @@ def apply_rotary_pos_emb(q, k, freqs):
 
     # We need to broadcast freqs to match heads
     # (B, L, D) -> (B, 1, L, D)
-    cos = freqs.cos().unsqueeze(1)
-    sin = freqs.sin().unsqueeze(1)
+
+    # !!! CRITICAL FIX: Cast cos/sin to q.dtype (bf16/fp16) immediately
+    # freqs are typically float32, so cos() returns float32.
+    # Without this cast, (q * cos) upcasts q to float32, causing FlashAttention to fail.
+    cos = freqs.cos().unsqueeze(1).to(q.dtype)
+    sin = freqs.sin().unsqueeze(1).to(q.dtype)
 
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
@@ -337,6 +344,8 @@ class LlavaViTAttention(nn.Module):
         self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
 
+
+    
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -351,11 +360,6 @@ class LlavaViTAttention(nn.Module):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        # 确保所有状态张量类型一致
-        target_dtype = query_states.dtype
-        key_states = key_states.to(target_dtype)
-        value_states = value_states.to(target_dtype)
-
         # (B, L, H, D) -> Transpose to (B, H, L, D)
         query_states = query_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(batch_size, q_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -363,40 +367,22 @@ class LlavaViTAttention(nn.Module):
 
         if rotary_pos_emb is not None:
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
-            # 确保rotary embedding后类型仍然一致
-            key_states = key_states.to(target_dtype)
 
-        # 在计算前再次确保类型完全一致
-        query_states = query_states.to(target_dtype)
-        key_states = key_states.to(target_dtype)
-
-        # 计算注意力权重，确保类型一致性
-        attn_weights = (query_states @ key_states.transpose(-2, -1))
-
-        # 将scale转换为正确的张量类型并应用
-        scale_tensor = torch.tensor(self.scale, dtype=target_dtype, device=query_states.device)
-        attn_weights = attn_weights * scale_tensor
+        # Calculate attention scores
+        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scale
+        # print("attention_mask", attention_mask.shape)
 
         if attention_mask is not None:
             if attention_mask.size() != (batch_size, 1, q_len, q_len):
                 if attention_mask.dim() == 3:
                      attention_mask = attention_mask.unsqueeze(1)
-
-            # 确保attention_mask类型与attn_weights兼容
-            if attention_mask.dtype == torch.bool:
-                attn_weights = attn_weights.masked_fill(attention_mask, torch.finfo(attn_weights.dtype).min)
-            else:
-                # 确保attention_mask与attn_weights类型一致
-                attention_mask = attention_mask.to(attn_weights.dtype)
-                attn_weights = attn_weights + attention_mask
-
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        # dropout保持与attn_weights相同的数据类型
+            attn_weights = attn_weights + attention_mask
+            
+        # FIX: Remove dtype=torch.float32 to stay in original dtype (bf16/fp16)
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
         attn_weights = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
 
-        # 确保value_states与attn_weights类型一致
-        value_states = value_states.to(attn_weights.dtype)
-        attn_output = (attn_weights @ value_states)
+        attn_output = torch.matmul(attn_weights, value_states)
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(batch_size, q_len, self.embed_dim)
@@ -406,11 +392,103 @@ class LlavaViTAttention(nn.Module):
         return attn_output, attn_weights if output_attentions else None
 
 
+class LlavaViTFlashAttention2(nn.Module):
+    """
+    Multi-headed attention with RoPE support using Flash Attention 2.
+    This module implements the same attention mechanism as LlavaViTAttention but uses
+    Flash Attention for improved performance and memory efficiency.
+    """
+    def __init__(self, config: LlavaViTConfig):
+        super().__init__()
+        self.config = config
+        self.embed_dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = self.embed_dim // self.num_heads
+        if self.head_dim * self.num_heads != self.embed_dim:
+            raise ValueError(
+                f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
+            )
+
+        self.scale = self.head_dim**-0.5
+        self.dropout = config.attention_dropout
+
+        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.v_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim)
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        rotary_pos_emb: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Forward pass using Flash Attention 2.
+        """
+        batch_size, q_len, _ = hidden_states.size()
+
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
+
+        # Flash Attention requires (B, L, H, D) format
+        query_states = query_states.view(batch_size, q_len, self.num_heads, self.head_dim)
+        key_states = key_states.view(batch_size, q_len, self.num_heads, self.head_dim)
+        value_states = value_states.view(batch_size, q_len, self.num_heads, self.head_dim)
+
+        # Apply RoPE if provided
+        if rotary_pos_emb is not None:
+            # Transpose for RoPE application: (B, L, H, D) -> (B, H, L, D)
+            query_states = query_states.transpose(1, 2)
+            key_states = key_states.transpose(1, 2)
+            # NOTE: apply_rotary_pos_emb now ensures NO float32 cast happens
+            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, rotary_pos_emb)
+            # Transpose back: (B, H, L, D) -> (B, L, H, D)
+            query_states = query_states.transpose(1, 2)
+            key_states = key_states.transpose(1, 2)
+
+        # FIX: Removed the explicit float32 check and downcast.
+        # We assume input is already correct (bf16/fp16) thanks to RoPE fix.
+
+        # Flash Attention forward pass
+        attn_output = flash_attn_func(
+            query_states,
+            key_states,
+            value_states,
+            dropout_p=self.dropout if self.training else 0.0,
+            softmax_scale=self.scale,
+            causal=False,
+        )
+
+        # Reshape to (B, L, embed_dim)
+        attn_output = attn_output.reshape(batch_size, q_len, self.embed_dim)
+
+        # No extra casting here.
+        attn_output = self.out_proj(attn_output)
+
+        return attn_output, None
+
+
+LLAVA_VIT_ATTENTION_CLASSES = {
+    # "eager": LlavaViTAttention,
+    "flash_attention_2": LlavaViTFlashAttention2,
+}
+
+
 class LlavaViTEncoderLayer(nn.Module):
     def __init__(self, config: LlavaViTConfig):
         super().__init__()
         self.embed_dim = config.hidden_size
-        self.self_attn = LlavaViTAttention(config)
+        # Get attention implementation from config, default to "flash_attention_2"
+        # attn_implementation = getattr(config, "_attn_implementation", "flash_attention_2")
+        # if attn_implementation not in LLAVA_VIT_ATTENTION_CLASSES:
+        #     raise ValueError(
+        #         f"Unknown attention implementation: {attn_implementation}. "
+        #         f"Available implementations: {list(LLAVA_VIT_ATTENTION_CLASSES.keys())}"
+        #     )
+        self.self_attn = LLAVA_VIT_ATTENTION_CLASSES["flash_attention_2"](config)
         self.layer_norm1 = get_norm_layer(config)
         self.mlp = SiglipMLP(config)
         self.layer_norm2 = get_norm_layer(config)
@@ -504,6 +582,7 @@ class LlavaViTPreTrainedModel(PreTrainedModel):
     base_model_prefix = "llava_vit"
     supports_gradient_checkpointing = True
     _no_split_modules = ["LlavaViTEncoderLayer"]
+    _supports_flash_attn_2 = True
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -546,6 +625,66 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
 
         self.post_init()
 
+
+    def mask_by_residual_topk(self, res: torch.Tensor, k_keep: int):
+        """
+        基于残差 res 的 Top-K 掩码。
+        选择 |res| 在 patch 内求和后的得分最高的 K 个 patch 作为可见，其余为 mask。
+
+        Args:
+            res:  (B, 1, T, H, W)  —— I 帧建议事先置 0，这样自然会优先选到 P 帧。
+            k_keep: int            —— 每个样本保留的可见块数量（Top-K 超参）
+
+        Returns:
+            visible_indices: LongTensor (B, K)   —— 选中的线性 patch 索引（按升序）
+            visible_mask:    BoolTensor (B, L)   —— L = T * (H/Ph) * (W/Pw)
+            ids_restore:     LongTensor (B, L)   —— MAE 风格的还原下标
+        """
+        assert res.dim() == 5 and res.size(1) == 1, "res 需为 (B,1,T,H,W)"
+        B, _, T, H, W = res.shape
+
+        patch_size = self.config.patch_size
+        if isinstance(patch_size, int):
+            ph = pw = patch_size
+        else:
+            ph, pw = patch_size
+            
+        assert H % ph == 0 and W % pw == 0, "H/W 必须能被 patch 大小整除"
+
+        hb, wb = H // ph, W // pw        # 每帧的 patch 网格
+        L = T * hb * wb                  # 总 patch 数
+
+        # K 边界
+        K = int(max(0, min(k_keep, L)))
+
+        # 计算每个 patch 的残差得分（|.| 在 patch 内求和） -> (B, T, hb, wb)
+        # 参考：res_c = res[:hb*ph, :wb*pw].reshape(hb, ph, wb, pw); s = |res_c|.sum(axis=(1,3))
+        res_abs = res.abs().squeeze(1)                                 # (B,T,H,W)
+        scores = res_abs.reshape(B, T, hb, ph, wb, pw).sum(dim=(3, 5)) # (B,T,hb,wb)
+        scores = scores.reshape(B, L)                                  # (B, L)
+
+        # 选 Top-K（按 batch 独立进行）
+        if K > 0:
+            topk_idx = torch.topk(scores, k=K, dim=1, largest=True, sorted=False).indices  # (B, K)
+            visible_indices = torch.sort(topk_idx, dim=1).values                           # (B, K) 升序，便于后续索引
+        else:
+            visible_indices = torch.empty(B, 0, dtype=torch.long, device=res.device)
+
+        # 构造可见 mask
+        visible_mask = torch.zeros(B, L, dtype=torch.bool, device=res.device)
+        if K > 0:
+            visible_mask.scatter_(1, visible_indices, True)
+
+        # MAE 风格 ids_restore：把可见块排在前面、遮挡块排在后面
+        vis_int   = visible_mask.long()
+        mask_int  = 1 - vis_int
+        vis_rank  = torch.cumsum(vis_int, dim=1) - 1
+        mask_rank = torch.cumsum(mask_int, dim=1) - 1
+        n_visible_col = vis_int.sum(dim=1, keepdim=True)
+        ids_restore = torch.where(visible_mask, vis_rank, n_visible_col + mask_rank).long()
+
+        return visible_indices, visible_mask, ids_restore
+    
     @add_start_docstrings_to_model_forward(LLAVA_VIT_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=LlavaViTConfig)
     def forward(
@@ -592,9 +731,16 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
         hidden_states = self.embeddings(pixel_values)
         batch_size, total_patches, _ = hidden_states.shape
 
+        if visible_indices is not None and visible_indices.ndim == 5:
+            visible_indices, _, _ = self.mask_by_residual_topk(
+                res=visible_indices,
+                k_keep=2048
+            )
+
         # 2. Visible Indices Handling
         if visible_indices is None:
              visible_indices = torch.arange(total_patches, device=pixel_values.device).unsqueeze(0).expand(batch_size, -1)
+
 
         gather_index = visible_indices.unsqueeze(-1).expand(-1, -1, self.config.hidden_size)
         hidden_states = torch.gather(hidden_states, 1, gather_index)
@@ -627,7 +773,7 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
 
         # === 修改开始 ===
         # Source Logic: out = self.ln_post(out); head_output = self.head(out)
-        # 为了对齐，我们在 encoder 输出后立即应用 Post-Norm
+        # 为了对齐，我们在 encoder 输出后立即应用 Post-  Norm
         if self.layernorm_post is not None:
             sequence_output = self.layernorm_post(sequence_output)
 
@@ -664,6 +810,7 @@ def hf_llava_vit_small_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
@@ -679,6 +826,7 @@ def hf_llava_vit_base_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
@@ -694,6 +842,7 @@ def hf_llava_vit_large_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
@@ -701,14 +850,15 @@ def hf_llava_vit_large_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
 def hf_llava_vit_huge_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
     config = LlavaViTConfig(
         patch_size=14,
-        hidden_size=1280,
-        num_attention_heads=1280 // 64,
-        num_hidden_layers=32,
-        intermediate_size=5120,
+        hidden_size=1536,
+        num_attention_heads=16,
+        num_hidden_layers=27,
+        intermediate_size=4608,
         hidden_act="gelu",
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
 
@@ -724,20 +874,20 @@ def hf_llava_vit_giant_ln(pretrained: bool = False, ckpt_path=None, **kwargs):
         layer_norm_type="layer_norm",
         use_head=True
     )
+    config._attn_implementation = "flash_attention_2"
     model = LlavaViTModel(config)
     return model
-
-
-
 
 if __name__ == "__main__":
     import timm
 
-    model = timm.create_model("hf_llava_vit_large_ln", pretrained=False)
+    model = timm.create_model("hf_llava_vit_huge_ln", pretrained=False).cuda()
 
     bs = 4
     test_input = torch.randn(bs, 3, 224, 224, device=model.device)
-    last_hidden_state = model(test_input).last_hidden_state
+    # model, test_input = model.bfloat16(), test_input.bfloat16()
+    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        last_hidden_state = model(test_input).last_hidden_state
 
     print(f"Input shape: {test_input.shape}")
     print(f"Last hidden state shape: {last_hidden_state.shape}")

@@ -3,13 +3,13 @@ from torch import nn
 from transformers import CLIPModel
 from timm.models.registry import register_model
 
-class MetaCLIPBase(nn.Module):
+class MetaClip(nn.Module):
     def __init__(
         self,
         ckpt: str = "meta-clip/MetaCLIP-ViT-B-16",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
-        super(MetaCLIPBase, self).__init__()
+        super(MetaClip, self).__init__()
         self.device = torch.device(device)
         base_model = CLIPModel.from_pretrained(ckpt)
         self.model = base_model.vision_model.to(self.device).eval()
@@ -24,7 +24,7 @@ class MetaCLIPBase(nn.Module):
 
 @register_model
 def metaclip_base16_fullcc(pretrained: bool = False, **kwargs):
-    model = MetaCLIPBase(
+    model = MetaClip(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-b16-fullcc2.5b/"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -32,7 +32,7 @@ def metaclip_base16_fullcc(pretrained: bool = False, **kwargs):
 
 @register_model
 def metaclip_large14_fullcc(pretrained: bool = False, **kwargs):
-    model = MetaCLIPBase(
+    model = MetaClip(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-l14-fullcc2.5b/"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -41,7 +41,7 @@ def metaclip_large14_fullcc(pretrained: bool = False, **kwargs):
 
 @register_model
 def metaclip2_large14(pretrained: bool = False, **kwargs):
-    model = MetaCLIPBase(
+    model = MetaClip(
         ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-2-worldwide-l14"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )

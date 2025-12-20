@@ -52,7 +52,7 @@ class ExternalInputCallable:
         self.file_list = source_params.get("file_list", None)
         self.label_path = source_params.get("label_path", None)
         self.visible_indices_path = source_params.get("visible_indices_path", None)
-        
+
         if self.file_list is None:
             raise ValueError("file_list is None")
 
@@ -122,11 +122,11 @@ class ExternalInputCallable:
             frame_id_list = list(range(0, min(duration, sequence_length)))
         else:
             frame_id_list = list(range(duration)) + [duration - 1] * (sequence_length - duration)
-        
+
         decord_vr.seek(0)
         video_data = decord_vr.get_batch(frame_id_list).asnumpy()
         return video_data
-        
+
 
 
     def __call__(self, sample_info):
@@ -161,7 +161,7 @@ class ExternalInputCallable:
             video_label = self.label[0]
             video_visible_indices = self.video_visible_indices[0]
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
-        
+
         if self.mode == "test":
             chunk_nb, split_nb, video_idx = test_info
             return (
@@ -242,23 +242,23 @@ def dali_dataloader(
         # Basic parameters
         "batch_size":           batch_size,
         "seed":                 seed + rank,
-        "num_shards":           num_shards, 
+        "num_shards":           num_shards,
         "shard_id":             shard_id,
         "file_list":            file_list,
         "label_path":                label[0],
         "visible_indices_path":      label[1],
-        
+
         # Size parameters
         "input_size":           input_size,
         "short_side_size":      short_side_size,
         "sequence_length":      sequence_length,
         "stride":               stride,
-        
+
         # Feature flags
         "use_sparse_sampling":  True,
         "use_rgb":              True,
         "use_flip":             True,
-        
+
         # Augmentation parameters
         "mean":                 mean,
         "std":                  std,
@@ -266,7 +266,7 @@ def dali_dataloader(
 
 
     }
-        
+
     pipe = dali_pipeline(
         batch_size           = batch_size,
         num_threads          = dali_num_threads,

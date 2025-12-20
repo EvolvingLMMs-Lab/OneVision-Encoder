@@ -1,26 +1,19 @@
 import torch
 from torch import nn
-from transformers import AutoModel
 from timm.models.registry import register_model
 
+from transformers import Aimv2VisionModel
 class AIMv2(nn.Module):
     def __init__(
         self,
-        ckpt: str = "apple/aimv2-large-patch14-224",
-        revision: str = None,
-        trust_remote_code: bool = True,
+        ckpt: str = "apple/aimv2-large-patch14-native",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         super(AIMv2, self).__init__()
         self.device = torch.device(device)
-
-        # 加载 Hugging Face 模型
-        # trust_remote_code=True 是必须的，因为 AIMv2 可能包含自定义代码
-        self.model = AutoModel.from_pretrained(
-            ckpt,
-            revision=revision,
-            trust_remote_code=trust_remote_code
-        ).to(self.device).eval()
+        # Note: trust_remote_code is required for AIMv2 models
+        model = Aimv2VisionModel.from_pretrained(ckpt, trust_remote_code=True)
+        self.model = model.to(self.device)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         pixel_values = pixel_values.to(self.device)
@@ -39,19 +32,16 @@ class AIMv2(nn.Module):
         return last_hidden_state
 
 @register_model
-def aimv2_large_patch14_224(pretrained: bool = False, **kwargs):
-    model = AIMv2(
-    "apple/aimv2-large-patch14-224",
-    revision="ac764a25c832c7dc5e11871daa588e98e3cdbfb7",
-    trust_remote_code=True,
-    )
+def aimv2_large_patch14_native_ap(pretrained: bool = False, **kwargs):
+    model = AIMv2("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
     return model
 
 if __name__ == "__main__":
     import timm
 
     # 创建模型
-    model = timm.create_model("aimv2_large_patch14_224", pretrained=False)
+    model = timm.create_model("aimv2_large_patch14_native_ap")
+    # model.model.save_pretrained("/video_vit/pretrain_models/apple/aimv2-large-patch14-native")
 
     bs = 4
     # AIMv2 Large Patch14 通常输入大小为 224x224

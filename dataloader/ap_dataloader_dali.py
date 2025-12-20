@@ -2,7 +2,7 @@
 # Created by anxiangsir
 # Date: 2025-11-13 12:26:36 (UTC)
 #
- 
+
 import os
 import warnings
 from typing import Any, Dict, List, Tuple
@@ -22,7 +22,7 @@ except Exception:
 
 
 # ----------------------------------------------------------------------------
-# 1. DALI Iterator Wrapper (已修改 - 返回 indices 和 total_frames)
+# 1. DALI Iterator Wrapper (已修改 - 返回 indices, total_frames 和 file_name)
 # ----------------------------------------------------------------------------
 class DALIWarper:
     def __init__(self, dali_iter: DALIGenericIterator, steps_per_epoch: int):
@@ -35,7 +35,7 @@ class DALIWarper:
             "videos": data_dict["videos"],
             "labels": data_dict["labels"],
             "indices": data_dict["indices"],
-            "total_frames": data_dict["total_frames"]
+            "total_frames": data_dict["total_frames"],
         }
 
     def __iter__(self):
@@ -48,7 +48,7 @@ class DALIWarper:
         self.iter.reset()
 
 # ----------------------------------------------------------------------------
-# 2. DALI External Source for Video Data (已修改 - 返回 indices 和 total_frames)
+# 2. DALI External Source for Video Data (已修改 - 返回 indices, total_frames 和 file_name)
 # ----------------------------------------------------------------------------
 class VideoExternalSource:
     def __init__(self, mode: str, source_params: Dict[str, Any]):
@@ -73,6 +73,7 @@ class VideoExternalSource:
         self.fallback_example = self.file_list[0] if self.file_list else ("", 0)
 
     def _get_frame_indices(self, num_frames: int) -> List[int]:
+            
         if num_frames < self.sequence_length:
             indices = list(range(num_frames))
             indices += [num_frames - 1] * (self.sequence_length - num_frames)
@@ -84,18 +85,18 @@ class VideoExternalSource:
             indices = [int(seg_size * i + seg_size / 2) for i in range(self.sequence_length)]
         return indices
 
-    def _load_video_data(self, video_path: str) -> Tuple[np.ndarray, np.ndarray, int]:
-        # ===> 在此处使用可配置的线程数，并返回 indices 和 total_frames <===
+    def _load_video_data(self, video_path: str) -> Tuple[np.ndarray, np.ndarray, int, str]:
+        # ===> 在此处使用可配置的线程数，并返回 indices, total_frames 和 file_name <===
         vr = decord.VideoReader(video_path, num_threads=self.decord_num_threads, ctx=decord.cpu(0))
         num_frames = len(vr)
         frame_indices = self._get_frame_indices(num_frames)
         video_data = vr.get_batch(frame_indices).asnumpy()
         if self.use_rgb:
             video_data = video_data[:, :, :, ::-1]
-        # 返回 video_data, indices, 和 total_frames
+        # 返回 video_data, indices, total_frames 和 file_name
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
-    def __call__(self, sample_info) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def __call__(self, sample_info) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if sample_info.iteration >= self.full_iterations:
             raise StopIteration
         if self.last_seen_epoch != sample_info.epoch_idx:
@@ -181,7 +182,7 @@ def preprocess_videos(videos, mode, input_size, mean, std):
 
 
 # ----------------------------------------------------------------------------
-# 3. DALI Pipeline Definition (已修改 - 处理 indices 和 total_frames)
+# 3. DALI Pipeline Definition (已修改 - 处理 indices, total_frames 和 file_name)
 # ----------------------------------------------------------------------------
 @pipeline_def(enable_conditionals=True)
 def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
@@ -190,14 +191,14 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     mean = source_params["mean"]
     std = source_params["std"]
 
-    # ===> 现在返回 4 个输出: videos, labels, indices, total_frames <===
+    # ===> 现在返回 5 个输出: videos, labels, indices, total_frames, file_name <===
     videos, labels, indices, total_frames = fn.external_source(
         source=VideoExternalSource(mode, source_params),
         num_outputs=4,
         batch=False,
         parallel=True,
         dtype=[types.UINT8, types.INT64, types.INT64, types.INT64],
-        layout=["FHWC", "C", "C", "C"]
+        layout=["FHWC", "C", "C", "C"]  # Empty layout for file_name byte array (variable length)
     )
 
     videos = videos.gpu()
@@ -208,9 +209,8 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     videos = preprocess_videos(videos, mode, input_size, mean, std)
     return videos, labels, indices, total_frames
 
-
 # ----------------------------------------------------------------------------
-# 4. Main Dataloader Function (已修改 - output_map 增加 indices 和 total_frames)
+# 4. Main Dataloader Function (已修改 - output_map 增加 indices, total_frames 和 file_name)
 # ----------------------------------------------------------------------------
 def get_dali_dataloader(
     data_root_path: str,
@@ -227,6 +227,7 @@ def get_dali_dataloader(
     dali_py_num_workers: int = 8,
     decord_num_threads: int = 2,
     seed: int = 0,
+    feature_extract: bool = True,
 ) -> DALIWarper:
     """
     """
@@ -252,7 +253,7 @@ def get_dali_dataloader(
         "batch_size": batch_size, "sequence_length": sequence_length, "seed": seed + rank,
         "use_rgb": use_rgb, "input_size": input_size, "short_side_size": short_side_size,
         "mean": mean, "std": std,
-        "decord_num_threads": decord_num_threads,
+        "decord_num_threads": decord_num_threads, "feature_extract": feature_extract
     }
 
     pipe = dali_video_pipeline(
@@ -262,7 +263,7 @@ def get_dali_dataloader(
     )
     pipe.build()
 
-    # ===> output_map 增加 "indices" 和 "total_frames" <===
+    # ===> output_map 增加 "indices", "total_frames" 和 "file_name" <===
     dali_iter = DALIGenericIterator(
         pipelines=[pipe],
         output_map=["videos", "labels", "indices", "total_frames"],

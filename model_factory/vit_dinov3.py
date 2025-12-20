@@ -4,16 +4,16 @@ from transformers import AutoModel
 from timm.models.registry import register_model
 
 
-class Dinov3Base(nn.Module):
+class Dinov3(nn.Module):
     def __init__(self, ckpt: str = "facebook/dinov3-base", device="cuda" if torch.cuda.is_available() else "cpu"):
         """
-        Initialize the DINOv3 Base model to retrieve hidden states.
+        Initialize the DINOv3 model to retrieve hidden states.
 
         Args:
             ckpt (str): HuggingFace checkpoint for the pre-trained model.
             device (str): Device to map the model for inference.
         """
-        super(Dinov3Base, self).__init__()
+        super(Dinov3, self).__init__()
         self.device = torch.device(device)
         # Load the model
         self.model = AutoModel.from_pretrained(ckpt).to(self.device).eval()
@@ -40,16 +40,16 @@ class Dinov3Base(nn.Module):
 @register_model
 def dinov3_base(pretrained=False, **kwargs):
     """
-    Register the DINOv3 Base model for timm.
+    Register the DINOv3 model for timm.
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
-        **kwargs: Additional arguments passed to Dinov3Base.
+        **kwargs: Additional arguments passed to Dinov3.
 
     Returns:
-        Dinov3Base: An instance of Dinov3Base.
+        Dinov3: An instance of Dinov3.
     """
-    model = Dinov3Base(
+    model = Dinov3(
         ckpt="/video_vit/pretrain_models/dinov3-vitb16-pretrain-lvd1689m",
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -58,7 +58,7 @@ def dinov3_base(pretrained=False, **kwargs):
 
 @register_model
 def dinov3_large(pretrained=False, **kwargs):
-    model = Dinov3Base(
+    model = Dinov3(
         ckpt="/video_vit/pretrain_models/dinov3-vitl16-pretrain-lvd1689m",
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -72,12 +72,12 @@ def dinov3_giant(pretrained=False, **kwargs):
 
     Args:
         pretrained (bool): If True, load pretrained weights (default: False).
-        **kwargs: Additional arguments passed to Dinov3Base.
+        **kwargs: Additional arguments passed to Dinov3.
 
     Returns:
-        Dinov3Base: An instance of Dinov3Base with giant variant.
+        Dinov3: An instance of Dinov3 with giant variant.
     """
-    model = Dinov3Base(
+    model = Dinov3(
         ckpt="/video_vit/pretrain_models/dinov3-giant",
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )

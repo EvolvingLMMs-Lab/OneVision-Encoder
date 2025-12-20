@@ -87,11 +87,12 @@ class Property(EasyDict):
         # 验证 dali_type 以确保它是受支持的类型
         valid_dali_types = [
             "origin",
-            # "ocr",
+            "ocr",
             # "multi_res",
             # "video",
             # "parallel_rec",
             "decord",
+            "decord_residual",
             # "decord_torch",
         ]
         if self.dali_type not in valid_dali_types:

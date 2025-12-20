@@ -288,7 +288,7 @@ class PartialFC_V2(torch.nn.Module):
                 logits_5 = linear(norm_embeddings, norm_weight_activated_5)
                 logits_6 = linear(norm_embeddings, norm_weight_activated_6)
                 logits_7 = linear(norm_embeddings, norm_weight_activated_7)
-                
+
             else:
                 raise NotImplementedError
 
@@ -406,7 +406,7 @@ class FusedDistCrossEntropyFunc(torch.autograd.Function):
         chunk_sum_logits_exp = torch.cat(
             [sum_logits_exp_0, sum_logits_exp_1, sum_logits_exp_2, sum_logits_exp_3, sum_logits_exp_4, sum_logits_exp_5, sum_logits_exp_6, sum_logits_exp_7], dim=0
         )
-    
+
         distributed.all_reduce(chunk_sum_logits_exp, distributed.ReduceOp.SUM)
         sum_logits_exp_0, sum_logits_exp_1, sum_logits_exp_2, sum_logits_exp_3, sum_logits_exp_4, sum_logits_exp_5, sum_logits_exp_6, sum_logits_exp_7 = torch.split(
             chunk_sum_logits_exp, sum_logits_exp_0.size(0), dim=0
@@ -475,7 +475,7 @@ class FusedDistCrossEntropyFunc(torch.autograd.Function):
         loss_5 = loss_5.clamp_min_(1e-30).log_().mean() * (-1)
         loss_6 = loss_6.clamp_min_(1e-30).log_().mean() * (-1)
         loss_7 = loss_7.clamp_min_(1e-30).log_().mean() * (-1)
-        
+
         loss = (loss_0 + loss_1 + loss_2 + loss_3 + loss_4 + loss_5 + loss_6 + loss_7) / 8.0
 
         # loss[index] = logits[index].gather(1, label[index])
