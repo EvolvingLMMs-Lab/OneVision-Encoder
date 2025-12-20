@@ -731,7 +731,7 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
         hidden_states = self.embeddings(pixel_values)
         batch_size, total_patches, _ = hidden_states.shape
 
-        if visible_indices.ndim == 5:
+        if visible_indices is not None and visible_indices.ndim == 5:
             visible_indices, _, _ = self.mask_by_residual_topk(
                 res=visible_indices,
                 k_keep=2048
