@@ -15,6 +15,7 @@ from timm.models.layers import trunc_normal_
 from torch import distributed, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
+from transformers import AutoModel
 
 # Ensure custom models and layers are registered
 import model_factory
@@ -411,6 +412,20 @@ def evaluate(
 
 
 def get_model(args: argparse.Namespace) -> nn.Module:
+
+    if args.model_name == "hf_llava_vit_large_ln_auto":
+        model = AutoModel.from_pretrained(
+            "/video_vit/xiangan/LLaVA-ViT/ov-encoder-large",
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+            )
+        model = torch.compile(model)
+        return model
+
+    if args.model_name == "hf_llava_vit_large_ln_remote":
+        model = AutoModel.from_pretrained("lmms-lab/llava-vit-large-patch14", trust_remote_code=True)
+        model = torch.compile(model)
+        return model
 
     if args.model_name == "hf_llava_vit_large_ln":
         from model_factory.vit_preview_v0_hf import LlavaViTModel
