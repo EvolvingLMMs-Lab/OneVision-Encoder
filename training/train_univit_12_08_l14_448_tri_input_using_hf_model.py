@@ -18,7 +18,7 @@ from dataset import DATASET_REGISTRY, Property
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
 from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
-from model_factory.vit_preview_v0_hf import LlavaViTModel
+from model_factory.vit_ov_encoder import LlavaViTModel
 
 torch._dynamo.config.optimize_ddp = True
 torch._dynamo.config.optimize_ddp = False

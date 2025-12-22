@@ -3,8 +3,8 @@ import torch.nn as nn
 from llava.utils import rank0_print
 from transformers import CLIPImageProcessor
 
-from model_factory.vit_preview_v0_hf import LlavaViTConfig as HEVCViTConfig
-from model_factory.vit_preview_v0_hf import LlavaViTModel as HEVCViTModel
+from model_factory.vit_ov_encoder import LlavaViTConfig as HEVCViTConfig
+from model_factory.vit_ov_encoder import LlavaViTModel as HEVCViTModel
 
 
 class HEVCViTVisionTower(nn.Module):
