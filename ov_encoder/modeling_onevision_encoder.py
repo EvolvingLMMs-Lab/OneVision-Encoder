@@ -11,7 +11,7 @@ from transformers.utils import (add_start_docstrings,
                                 add_start_docstrings_to_model_forward, logging,
                                 replace_return_docstrings)
 
-from .configuration_llava_vit import LlavaViTConfig
+from .configuration_onevision_encoder import OneVisionEncoderConfig
 
 try:
     from flash_attn import flash_attn_func
@@ -26,7 +26,7 @@ logger = logging.get_logger(__name__)
 # Model Docstrings
 # ---------------------------------------------------------------------------
 
-LLAVA_VIT_START_DOCSTRING = r"""
+ONEVISION_ENCODER_START_DOCSTRING = r"""
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
@@ -36,12 +36,12 @@ LLAVA_VIT_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`LlavaViTConfig`]): Model configuration class with all the parameters of the model.
+        config ([`OneVisionEncoderConfig`]): Model configuration class with all the parameters of the model.
             Initializing with a config file does not load the weights associated with the model, only the
             configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
 """
 
-LLAVA_VIT_INPUTS_DOCSTRING = r"""
+ONEVISION_ENCODER_INPUTS_DOCSTRING = r"""
     Args:
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)` or `(batch_size, num_channels, num_frames, height, width)`):
             Pixel values. Pixel values can be obtained using [`AutoImageProcessor`].
@@ -101,7 +101,7 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
     """
     3D (T,H,W) Rotary frequency constructor with 4:6:6 split.
     """
-    def __init__(self, config: LlavaViTConfig):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__()
         head_dim = config.hidden_size // config.num_attention_heads
         base = config.rope_theta
@@ -146,7 +146,7 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
     """
     Multi-Head Attention Pooling with a learned probe (PMA-style).
     """
-    def __init__(self, config: LlavaViTConfig):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__()
         self.embed_dim = config.hidden_size
         self.probe = nn.Parameter(torch.randn(1, 1, config.hidden_size))
@@ -171,8 +171,8 @@ class Siglip2MultiheadAttentionPoolingHead(nn.Module):
 # Modeling Components
 # ---------------------------------------------------------------------------
 
-class LlavaViTEmbeddings(nn.Module):
-    def __init__(self, config: LlavaViTConfig):
+class OneVisionEncoderEmbeddings(nn.Module):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__()
         self.config = config
         self.embed_dim = config.hidden_size
@@ -208,9 +208,9 @@ class LlavaViTEmbeddings(nn.Module):
         return embeddings
 
 
-class LlavaViTAttention(nn.Module):
+class OneVisionEncoderAttention(nn.Module):
     """Multi-headed attention with RoPE support"""
-    def __init__(self, config: LlavaViTConfig):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__()
         self.config = config
         self.embed_dim = config.hidden_size
@@ -275,13 +275,13 @@ class LlavaViTAttention(nn.Module):
         return attn_output, attn_weights if output_attentions else None
 
 
-class LlavaViTFlashAttention2(nn.Module):
+class OneVisionEncoderFlashAttention2(nn.Module):
     """
     Multi-headed attention with RoPE support using Flash Attention 2.
-    This module implements the same attention mechanism as LlavaViTAttention but uses
+    This module implements the same attention mechanism as OneVisionEncoderAttention but uses
     Flash Attention for improved performance and memory efficiency.
     """
-    def __init__(self, config: LlavaViTConfig):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__()
         self.config = config
         self.embed_dim = config.hidden_size
@@ -334,7 +334,7 @@ class LlavaViTFlashAttention2(nn.Module):
 
         # Flash Attention forward pass
         if not _flash_attn_available:
-            raise ImportError("flash_attn is not installed. Please install it to use LlavaViTFlashAttention2.")
+            raise ImportError("flash_attn is not installed. Please install it to use OneVisionEncoderFlashAttention2.")
 
         attn_output = flash_attn_func(
             query_states,
@@ -354,28 +354,28 @@ class LlavaViTFlashAttention2(nn.Module):
         return attn_output, None
 
 
-LLAVA_VIT_ATTENTION_CLASSES = {
-    "eager": LlavaViTAttention,
-    "flash_attention_2": LlavaViTFlashAttention2,
+ONEVISION_ENCODER_ATTENTION_CLASSES = {
+    "eager": OneVisionEncoderAttention,
+    "flash_attention_2": OneVisionEncoderFlashAttention2,
 }
 
 
-class LlavaViTEncoderLayer(nn.Module):
-    def __init__(self, config: LlavaViTConfig):
+class OneVisionEncoderEncoderLayer(nn.Module):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__()
         self.embed_dim = config.hidden_size
         # Get attention implementation from config, default to "flash_attention_2"
         attn_implementation = getattr(config, "_attn_implementation", "flash_attention_2")
-        if attn_implementation not in LLAVA_VIT_ATTENTION_CLASSES:
+        if attn_implementation not in ONEVISION_ENCODER_ATTENTION_CLASSES:
             # Fallback to eager if flash_attention_2 is not available
             if not _flash_attn_available and attn_implementation == "flash_attention_2":
                 attn_implementation = "eager"
             else:
                 raise ValueError(
                     f"Unknown attention implementation: {attn_implementation}. "
-                    f"Available implementations: {list(LLAVA_VIT_ATTENTION_CLASSES.keys())}"
+                    f"Available implementations: {list(ONEVISION_ENCODER_ATTENTION_CLASSES.keys())}"
                 )
-        self.self_attn = LLAVA_VIT_ATTENTION_CLASSES[attn_implementation](config)
+        self.self_attn = ONEVISION_ENCODER_ATTENTION_CLASSES[attn_implementation](config)
         self.layer_norm1 = get_norm_layer(config)
         self.mlp = SiglipMLP(config)
         self.layer_norm2 = get_norm_layer(config)
@@ -408,11 +408,11 @@ class LlavaViTEncoderLayer(nn.Module):
         return outputs
 
 
-class LlavaViTEncoder(nn.Module):
-    def __init__(self, config: LlavaViTConfig):
+class OneVisionEncoderEncoder(nn.Module):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__()
         self.config = config
-        self.layers = nn.ModuleList([LlavaViTEncoderLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layers = nn.ModuleList([OneVisionEncoderEncoderLayer(config) for _ in range(config.num_hidden_layers)])
 
     def forward(
         self,
@@ -461,14 +461,14 @@ class LlavaViTEncoder(nn.Module):
 # ---------------------------------------------------------------------------
 
 @add_start_docstrings(
-    "The bare Llava ViT Model outputting raw hidden-states without any specific head on top.",
-    LLAVA_VIT_START_DOCSTRING,
+    "The bare OneVision Encoder Model outputting raw hidden-states without any specific head on top.",
+    ONEVISION_ENCODER_START_DOCSTRING,
 )
-class LlavaViTPreTrainedModel(PreTrainedModel):
-    config_class = LlavaViTConfig
-    base_model_prefix = "llava_vit"
+class OneVisionEncoderPreTrainedModel(PreTrainedModel):
+    config_class = OneVisionEncoderConfig
+    base_model_prefix = "onevision_encoder"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["LlavaViTEncoderLayer"]
+    _no_split_modules = ["OneVisionEncoderEncoderLayer"]
     _supports_flash_attn_2 = True
 
     def _init_weights(self, module):
@@ -490,17 +490,17 @@ class LlavaViTPreTrainedModel(PreTrainedModel):
 
 
 @add_start_docstrings(
-    "Llava ViT Model with a vision transformer encoder.",
-    LLAVA_VIT_START_DOCSTRING,
+    "OneVision Encoder Model with a vision transformer encoder.",
+    ONEVISION_ENCODER_START_DOCSTRING,
 )
-class LlavaViTModel(LlavaViTPreTrainedModel):
-    def __init__(self, config: LlavaViTConfig):
+class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
+    def __init__(self, config: OneVisionEncoderConfig):
         super().__init__(config)
         self.config = config
 
-        self.embeddings = LlavaViTEmbeddings(config)
+        self.embeddings = OneVisionEncoderEmbeddings(config)
         self.layernorm_pre = get_norm_layer(config)
-        self.encoder = LlavaViTEncoder(config)
+        self.encoder = OneVisionEncoderEncoder(config)
         self.video_rope = VideoRotaryEmbeddingSplit466(config)
 
         if config.use_head:
@@ -513,8 +513,8 @@ class LlavaViTModel(LlavaViTPreTrainedModel):
         self.post_init()
 
 
-    @add_start_docstrings_to_model_forward(LLAVA_VIT_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=LlavaViTConfig)
+    @add_start_docstrings_to_model_forward(ONEVISION_ENCODER_INPUTS_DOCSTRING)
+    @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=OneVisionEncoderConfig)
     def forward(
         self,
         pixel_values: torch.Tensor,

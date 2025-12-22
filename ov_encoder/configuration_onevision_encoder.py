@@ -4,11 +4,11 @@ from transformers.utils import logging
 logger = logging.get_logger(__name__)
 
 
-class LlavaViTConfig(PretrainedConfig):
+class OneVisionEncoderConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`LlavaViTModel`]. It is used to instantiate a
-    Llava ViT model according to the specified arguments, defining the model architecture. Instantiating a configuration
-    with the defaults will yield a similar configuration to that of the Llava ViT architecture.
+    This is the configuration class to store the configuration of a [`OneVisionEncoderModel`]. It is used to instantiate a
+    OneVision Encoder model according to the specified arguments, defining the model architecture. Instantiating a configuration
+    with the defaults will yield a similar configuration to that of the OneVision Encoder architecture.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
@@ -46,21 +46,21 @@ class LlavaViTConfig(PretrainedConfig):
     Example:
 
     ```python
-    >>> from configuration_llava_vit import LlavaViTConfig
-    >>> from modeling_llava_vit import LlavaViTModel
+    >>> from configuration_onevision_encoder import OneVisionEncoderConfig
+    >>> from modeling_onevision_encoder import OneVisionEncoderModel
 
-    >>> # Initializing a LlavaViT configuration
-    >>> configuration = LlavaViTConfig()
+    >>> # Initializing a OneVisionEncoder configuration
+    >>> configuration = OneVisionEncoderConfig()
 
     >>> # Initializing a model (with random weights) from the configuration
-    >>> model = LlavaViTModel(configuration)
+    >>> model = OneVisionEncoderModel(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```
     """
 
-    model_type = "llava_vit"
+    model_type = "onevision_encoder"
 
     def __init__(
         self,
