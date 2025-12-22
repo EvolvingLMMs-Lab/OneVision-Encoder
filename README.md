@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="asset/logo.png">
     <source media="(prefers-color-scheme: light)" srcset="asset/logo.png">
-    <img alt="OneVision-Encoder" width="400" style="max-width: 100%;">
+    <img alt="OneVision-Encoder" width="500" style="max-width: 100%;">
   </picture>
 </p>
 
