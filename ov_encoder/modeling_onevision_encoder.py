@@ -2,7 +2,6 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 from transformers.modeling_outputs import (BaseModelOutput,
                                            BaseModelOutputWithPooling)
 from transformers.modeling_utils import PreTrainedModel
