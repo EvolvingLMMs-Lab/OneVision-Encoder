@@ -532,7 +532,7 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         >>> from transformers import AutoModel
         >>> import torch
 
-        >>> model = AutoModel.from_pretrained("your-username/llava-vit", trust_remote_code=True)
+        >>> model = AutoModel.from_pretrained("lmms-lab/onevision-encoder-large", trust_remote_code=True)
         >>> pixel_values = torch.randn(1, 3, 448, 448)
         >>> outputs = model(pixel_values)
         >>> last_hidden_states = outputs.last_hidden_state
