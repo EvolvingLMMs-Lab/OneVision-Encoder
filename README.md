@@ -1,14 +1,7 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="asset/logo_dark.jpg">
-    <source media="(prefers-color-scheme: light)" srcset="asset/logo_light.jpg">
-    <img alt="OneVision-Encoder" width="600" style="max-width: 100%;">
-  </picture>
-</p>
-
 <h1 align="center">
-  HEVC-Style Vision Transformer
+  OneVision-Encoder
 </h1>
+
 
 ## 📖 Table of Contents
 
