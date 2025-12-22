@@ -221,8 +221,8 @@ def load_models_and_verify(verbose=False):
 
     # Import model_factory version
     try:
-        from model_factory.vit_preview_v0_hf import LlavaViTConfig as Config1
-        from model_factory.vit_preview_v0_hf import LlavaViTModel as Model1
+        from model_factory.vit_ov_encoder import LlavaViTConfig as Config1
+        from model_factory.vit_ov_encoder import LlavaViTModel as Model1
         print("✅ 成功导入 model_factory 模型 / Successfully imported model_factory model")
     except Exception as e:
         print(f"❌ 无法导入 model_factory 模型 / Failed to import model_factory model: {e}")
