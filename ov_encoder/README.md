@@ -1,11 +1,11 @@
-# LlavaViT - HuggingFace 兼容模型包
+# OneVision Encoder - HuggingFace 兼容模型包
 
-这个目录包含用于 HuggingFace Hub 上传的 LlavaViT 模型实现。
+这个目录包含用于 HuggingFace Hub 上传的 OneVision Encoder 模型实现。
 
 ## 文件说明
 
-- `configuration_llava_vit.py` - 模型配置类
-- `modeling_llava_vit.py` - 模型实现
+- `configuration_onevision_encoder.py` - 模型配置类
+- `modeling_onevision_encoder.py` - 模型实现
 - `__init__.py` - 包初始化文件
 
 ## 与 model_factory 的关系
@@ -36,10 +36,10 @@ python verify_architecture_alignment.py --verbose
 ### 作为 Python 包导入
 
 ```python
-from llavavit import LlavaViTConfig, LlavaViTModel
+from ov_encoder import OneVisionEncoderConfig, OneVisionEncoderModel
 
 # 创建配置
-config = LlavaViTConfig(
+config = OneVisionEncoderConfig(
     hidden_size=1024,
     num_hidden_layers=24,
     num_attention_heads=16,
@@ -47,7 +47,7 @@ config = LlavaViTConfig(
 )
 
 # 创建模型
-model = LlavaViTModel(config)
+model = OneVisionEncoderModel(config)
 ```
 
 ### 上传到 HuggingFace
@@ -59,16 +59,16 @@ model.save_pretrained("output_dir")
 
 2. 将此目录的文件复制到输出目录：
 ```bash
-cp llavavit/configuration_llava_vit.py output_dir/
-cp llavavit/modeling_llava_vit.py output_dir/
+cp ov_encoder/configuration_onevision_encoder.py output_dir/
+cp ov_encoder/modeling_onevision_encoder.py output_dir/
 ```
 
 3. 修改 `output_dir/config.json` 添加 `auto_map`：
 ```json
 {
   "auto_map": {
-    "AutoConfig": "configuration_llava_vit.LlavaViTConfig",
-    "AutoModel": "modeling_llava_vit.LlavaViTModel"
+    "AutoConfig": "configuration_onevision_encoder.OneVisionEncoderConfig",
+    "AutoModel": "modeling_onevision_encoder.OneVisionEncoderModel"
   }
 }
 ```

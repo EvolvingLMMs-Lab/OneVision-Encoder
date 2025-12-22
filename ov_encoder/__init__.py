@@ -12,26 +12,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""LlavaViT - HuggingFace compatible model package"""
+"""OneVision Encoder - HuggingFace compatible model package"""
 
-from .configuration_llava_vit import LlavaViTConfig
-from .modeling_llava_vit import (
-    LlavaViTModel,
-    LlavaViTPreTrainedModel,
-    LlavaViTEmbeddings,
-    LlavaViTAttention,
-    LlavaViTFlashAttention2,
-    LlavaViTEncoder,
-    LlavaViTEncoderLayer,
+from .configuration_onevision_encoder import OneVisionEncoderConfig
+from .modeling_onevision_encoder import (
+    OneVisionEncoderModel,
+    OneVisionEncoderPreTrainedModel,
+    OneVisionEncoderEmbeddings,
+    OneVisionEncoderAttention,
+    OneVisionEncoderFlashAttention2,
+    OneVisionEncoderEncoder,
+    OneVisionEncoderEncoderLayer,
 )
 
 __all__ = [
-    "LlavaViTConfig",
-    "LlavaViTModel",
-    "LlavaViTPreTrainedModel",
-    "LlavaViTEmbeddings",
-    "LlavaViTAttention",
-    "LlavaViTFlashAttention2",
-    "LlavaViTEncoder",
-    "LlavaViTEncoderLayer",
+    "OneVisionEncoderConfig",
+    "OneVisionEncoderModel",
+    "OneVisionEncoderPreTrainedModel",
+    "OneVisionEncoderEmbeddings",
+    "OneVisionEncoderAttention",
+    "OneVisionEncoderFlashAttention2",
+    "OneVisionEncoderEncoder",
+    "OneVisionEncoderEncoderLayer",
 ]
