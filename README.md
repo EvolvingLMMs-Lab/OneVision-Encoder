@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="asset/llava_vit_white.png">
-    <source media="(prefers-color-scheme: light)" srcset="asset/llava_vit_white.png">
-    <img alt="LLaVA-ViT" src="asset/llava_vit_white.png" width="600" style="max-width: 100%;">
+    <source media="(prefers-color-scheme: dark)" srcset="asset/logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="asset/logo.png">
+    <img alt="LLaVA-OneVision-1.5" width="600" style="max-width: 100%;">
   </picture>
 </p>
 
