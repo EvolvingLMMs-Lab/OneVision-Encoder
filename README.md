@@ -1,13 +1,13 @@
-<!-- <p align="center">
+<p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="asset/logo.png">
-    <source media="(prefers-color-scheme: light)" srcset="asset/logo.png">
-    <img alt="OneVision-Encoder" width="500" style="max-width: 100%;">
+    <source media="(prefers-color-scheme: dark)" srcset="asset/logo_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="asset/logo_light.png">
+    <img alt="OneVision-Encoder" width="600" style="max-width: 100%;">
   </picture>
-</p> -->
+</p>
 
 <h1 align="center">
-  OneVision-Encoder: HEVC-Style Vision Transformer
+  HEVC-Style Vision Transformer
 </h1>
 
 ## 📖 Table of Contents
