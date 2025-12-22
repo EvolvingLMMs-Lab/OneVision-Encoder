@@ -2,12 +2,12 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="asset/logo.png">
     <source media="(prefers-color-scheme: light)" srcset="asset/logo.png">
-    <img alt="LLaVA-OneVision-1.5" width="600" style="max-width: 100%;">
+    <img alt="OneVision-Encoder" width="600" style="max-width: 100%;">
   </picture>
 </p>
 
 <p align="center">
-  <b>LLaVA-ViT: A Vision Transformer for Large Language-and-Vision Assistant</b>
+  <b>OneVision-Encoder: HEVC-Style Vision Transformer</b>
 </p>
 
 ---
