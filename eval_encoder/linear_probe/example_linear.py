@@ -18,6 +18,30 @@ from torch.utils.data import DataLoader
 from linear_probe import search
 import model_factory
 from timm.models import create_model
+from transformers import AutoModel
+
+from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
+from tqdm import tqdm
+
+def _convert_image_to_rgb(image):
+    return image.convert("RGB")
+
+try:
+    from torchvision.transforms import InterpolationMode
+    BICUBIC = InterpolationMode.BICUBIC
+except ImportError:
+    BICUBIC = Image.BICUBIC
+
+def _transform(n_px, mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)):
+    return Compose([
+        Resize(n_px, interpolation=BICUBIC),
+        CenterCrop(n_px),
+        _convert_image_to_rgb,
+        ToTensor(),
+        Normalize(mean, std),
+    ])
+
+
 
 # 基于图片中显示的文件列表，定义支持的数据集
 SUPPORTED_DATASETS = [
@@ -92,7 +116,7 @@ def get_feat(dataset, model, workers=4):
     for images, labels in dataloader:
         images = images.cuda()
 
-        with torch.cuda.amp.autocast():
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             if hasattr(model, "forward_wo_proj"):
                 feat = model.forward_wo_proj(images)
             elif hasattr(model, "encode_image"):
@@ -102,8 +126,10 @@ def get_feat(dataset, model, workers=4):
 
         if hasattr(feat, "pooler_output"):
             feat = feat.pooler_output
-        if "head_output" in feat:
-            feat = feat["head_output"]
+
+        if isinstance(feat, dict):
+            if "head_output" in feat:
+                feat = feat["head_output"]
 
         feat = feat.float()
 
@@ -126,17 +152,22 @@ if __name__ == "__main__":
     setup_seed(2048)
 
     name, weight = args.model.split(",")
-    model = create_model(
-        name,
-        pretrained=False,)
-    state_dict = torch.load(weight, map_location='cpu')
-    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(state_dict, strict=True)
+    if name == "onevision_encoder":
+        model = AutoModel.from_pretrained(
+            weight, trust_remote_code=True, attn_implementation="flash_attention_2")
+    elif name == "llava_vit":
+        from model_factory.vit_hf import LlavaViTModel
+        model = LlavaViTModel.from_pretrained(weight)
+    else:
+        model = create_model(
+            name,
+            pretrained=False,)
+        state_dict = torch.load(weight, map_location='cpu')
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=True)
 
 
-    # 从CLIP加载 transform
-    from clip.clip import _transform
     transform = _transform(args.input_size)
 
     model = model.cuda().eval()
