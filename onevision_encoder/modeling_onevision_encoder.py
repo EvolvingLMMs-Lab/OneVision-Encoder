@@ -547,7 +547,7 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         # Determine video dimensions for RoPE
         # Note: pixel_values passed to embeddings can be 4D or 5D
         if pixel_values.dim() == 5:
-             t_frames = pixel_values.shape[2]
+             t_frames = 64
              height = pixel_values.shape[3]
              width = pixel_values.shape[4]
         else:
