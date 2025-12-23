@@ -1,6 +1,10 @@
-<h1 align="center">
-  OneVision-Encoder
-</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="asset/logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="asset/logo.png">
+    <img alt="OneVision Encoder" src="output/logo.png" width="600" style="max-width: 100%;">
+  </picture>
+</p>
 
 
 ## 📖 Table of Contents
