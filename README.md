@@ -6,6 +6,9 @@
   </picture>
 </p>
 
+<p align="center">
+  <strong>Fully HEVC-Style Vision Transformer </strong>
+</p>
 
 ## 📖 Table of Contents
 
