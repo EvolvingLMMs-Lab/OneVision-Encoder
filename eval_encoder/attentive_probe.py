@@ -197,25 +197,13 @@ def get_feature(
                         frame_indices,
                         total_frames.view(-1),
                         target_frames
-                    )  # [B, seq_len]
-                    # ===> 创建 target_frames 帧的空白视频 <===
-                    padded_videos = torch.zeros(bs, C, target_frames, H, W, device=device, dtype=videos.dtype)
-
-                    # ===> 将原始帧放入插值后的对应位置 <===
-                    seq_len = frame_indices.shape[1]
-
-                    # 准备 scatter 的索引
-                    frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
-
-                    # 将视频帧放入对应位置
-                    padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
-
+                    )
                     # ===> 计算 visible_index (基于 target_frames) <===
                     per = torch.arange(frame_tokens, device=device)
                     visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
-                    enc_out = model(padded_videos, visible_index)
+                    enc_out = model(videos, visible_index)
                     if hasattr(enc_out, "last_hidden_state"):
                         outputs = enc_out.last_hidden_state
                     else:
@@ -415,7 +403,7 @@ def get_model(args: argparse.Namespace) -> nn.Module:
 
     if args.model_name == "hf_llava_vit_large_ln_auto":
         model = AutoModel.from_pretrained(
-            "/video_vit/xiangan/LLaVA-ViT/ov-encoder-large",
+            "/video_vit/xiangan/LLaVA-ViT/onevision-encoder-large",
             trust_remote_code=True,
             attn_implementation="flash_attention_2"
             )

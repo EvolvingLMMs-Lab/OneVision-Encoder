@@ -563,10 +563,6 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         if visible_indices is None:
              visible_indices = torch.arange(total_patches, device=pixel_values.device).unsqueeze(0).expand(batch_size, -1)
 
-
-        gather_index = visible_indices.unsqueeze(-1).expand(-1, -1, self.config.hidden_size)
-        hidden_states = torch.gather(hidden_states, 1, gather_index)
-
         # 3. RoPE Construction
         freqs_full = self.video_rope(
             t=t_frames,
