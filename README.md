@@ -203,10 +203,20 @@ video = torch.randn(1, 3, num_frames, 224, 224).to("cuda")
 # Build visible_indices for temporal sampling
 frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
 visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_tokens).cuda()).reshape(1, -1)
+# visible_indices example (with 256 tokens per frame):
+#   Frame 0 (pos=0):  indices [0, 1, 2, ..., 255]
+#   Frame 1 (pos=4):  indices [1024, 1025, 1026, ..., 1279]
+#   Frame 2 (pos=8):  indices [2048, 2049, 2050, ..., 2303]
+#   ...
+#   Frame 15 (pos=63): indices [16128, 16129, ..., 16383]
 
 with torch.no_grad():
     outputs = model(video, visible_indices=visible_indices)
 ```
+
+### Codec Input
+
+> **TODO:** Add codec-style input documentation for temporal saliency-based patch selection.
 
 ---
 
