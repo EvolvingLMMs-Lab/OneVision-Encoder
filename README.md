@@ -48,7 +48,7 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
   </tr>
   <tr>
     <td align="center">
-      <img src="asset/case6.gif" alt="Case 6 Demonstration" width="800"><br>
+      <img src="asset/case5.gif" alt="Case 6 Demonstration" width="800"><br>
     </td>
   </tr>
 </table>
