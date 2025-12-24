@@ -533,7 +533,7 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
 
         >>> model = AutoModel.from_pretrained("lmms-lab/onevision-encoder-large", trust_remote_code=True)
         >>> preprocessor = AutoImageProcessor.from_pretrained("lmms-lab/onevision-encoder-large", trust_remote_code=True)
-        >>> image = Image.open("path/to/image.jpg")
+        >>> image = Image.open("path/to/your/image.jpg")  # Replace with your image path
         >>> pixel_values = preprocessor(images=image, return_tensors="pt")["pixel_values"]
         >>> outputs = model(pixel_values)
         >>> last_hidden_states = outputs.last_hidden_state
