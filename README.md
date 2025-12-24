@@ -29,7 +29,7 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
 ### Method Overview
 
 <p align="center">
-  <img src="asset/method.jpg" alt="OneVision Encoder Method Overview" width="800" style="max-width: 100%;">
+  <img src="https://github.com/anxiangsir/asset/blob/main/OneVision/method.jpg" alt="OneVision Encoder Method Overview" width="800" style="max-width: 100%;">
 </p>
 
 ### Cluster Discrimination Visualization
@@ -43,12 +43,12 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
 <table>
   <tr>
     <td align="center">
-      <img src="asset/case4.gif" alt="Case 4 Demonstration" width="800"><br>
+      <img src="https://github.com/anxiangsir/asset/blob/main/OneVision/case4.gif" alt="Case 4 Demonstration" width="800"><br>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="asset/case5.gif" alt="Case 6 Demonstration" width="800"><br>
+      <img src="https://github.com/anxiangsir/asset/blob/main/OneVision/case5.gif" alt="Case 4 Demonstration" width="800"><br>
     </td>
   </tr>
 </table>
