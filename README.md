@@ -26,6 +26,12 @@
 
 OneVision Encoder is a vision encoder designed for multimodal large language models, featuring efficient video representation with sparse video input. This project provides training code, data processing tools, and model evaluation utilities.
 
+### Method Overview
+
+<p align="center">
+  <img src="asset/method.jpg" alt="OneVision Encoder Method Overview" width="800" style="max-width: 100%;">
+</p>
+
 ### Input Method Comparison
 
 <table>
@@ -49,6 +55,21 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
 <p align="center">
   <img src="pages/images/global_contrastive_comparison.gif" alt="Global Contrastive Comparison" width="800" style="max-width: 100%;">
 </p>
+
+### Case Demonstrations
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="asset/case4.gif" alt="Case 4 Demonstration" width="400"><br>
+      <b>Case 4</b>
+    </td>
+    <td align="center">
+      <img src="asset/case6.gif" alt="Case 6 Demonstration" width="400"><br>
+      <b>Case 6</b>
+    </td>
+  </tr>
+</table>
 
 ### Pre-training Tips
 
