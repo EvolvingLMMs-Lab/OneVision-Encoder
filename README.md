@@ -209,7 +209,7 @@ num_frames, frame_tokens, target_frames = 16, 256, 64
 frames = [Image.open(f"path/to/frame_{i}.jpg") for i in range(num_frames)]
 video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_values"]
 # Reshape from [T, C, H, W] to [B, C, T, H, W]
-video = video_pixel_values.permute(1, 0, 2, 3).unsqueeze(0).to("cuda")
+video = video_pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4).to("cuda")
 
 # Build visible_indices for temporal sampling
 frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
