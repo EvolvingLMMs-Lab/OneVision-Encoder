@@ -528,11 +528,13 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import AutoModel
-        >>> import torch
+        >>> from transformers import AutoModel, AutoImageProcessor
+        >>> from PIL import Image
 
         >>> model = AutoModel.from_pretrained("lmms-lab/onevision-encoder-large", trust_remote_code=True)
-        >>> pixel_values = torch.randn(1, 3, 448, 448)
+        >>> preprocessor = AutoImageProcessor.from_pretrained("lmms-lab/onevision-encoder-large", trust_remote_code=True)
+        >>> image = Image.open("path/to/image.jpg")
+        >>> pixel_values = preprocessor(images=image, return_tensors="pt")["pixel_values"]
         >>> outputs = model(pixel_values)
         >>> last_hidden_states = outputs.last_hidden_state
         >>> pooled_output = outputs.pooler_output
