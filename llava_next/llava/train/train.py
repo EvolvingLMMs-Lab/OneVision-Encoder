@@ -958,6 +958,7 @@ class LazySupervisedDataset(Dataset):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
         self.list_data_dict = []
+        self.weights = torch.tensor([1296, 36, 1], dtype=torch.int64) # for codec input
 
         # Handle multiple JSON files specified in the data_path
         if "{" in data_path and "}" in data_path:
@@ -1025,10 +1026,17 @@ class LazySupervisedDataset(Dataset):
         else:
             data_args.dataset_paths = [data_path]
             rank0_print(f"Loading {data_path}")
-            with open(data_path, "r") as file:
-                cur_data_dict = json.load(file)
-                rank0_print(f"Loaded {len(cur_data_dict)} samples from {data_path}")
-                self.list_data_dict.extend(cur_data_dict)
+            if data_path.endswith(".jsonl"):
+                with open(data_path, "r") as file:
+                    cur_data_dict = []
+                    for line in file:
+                        if line.strip():
+                            cur_data_dict.append(json.loads(line.strip()))
+            else:
+                with open(data_path, "r") as file:
+                    cur_data_dict = json.load(file)
+            rank0_print(f"Loaded {len(cur_data_dict)} samples from {data_path}")
+            self.list_data_dict.extend(cur_data_dict)
 
         rank0_print(f"Loaded {len(self.list_data_dict)} samples from {data_path}")
         rank0_print("Formatting inputs...Skip in lazy mode")
@@ -1073,12 +1081,16 @@ class LazySupervisedDataset(Dataset):
 
         image_size = image.size
         image_aspect_ratio = self.data_args.image_aspect_ratio
+        grid_thw = None
         if overwrite_image_aspect_ratio is not None:
             image_aspect_ratio = overwrite_image_aspect_ratio
         if image_aspect_ratio == "highres":
             image = process_highres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
         elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
             image = process_anyres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
+            if type(image) is dict:
+                grid_thw = image['grid_thw']
+                image = image['pixel_values']
         elif image_aspect_ratio == "crop_split":
             image = process_highres_image_crop_split(image, self.data_args)
         elif image_aspect_ratio == "pad":
@@ -1095,12 +1107,30 @@ class LazySupervisedDataset(Dataset):
                     result = Image.new(pil_img.mode, (height, height), background_color)
                     result.paste(pil_img, ((height - width) // 2, 0))
                     return result
-
-            image = expand2square(image, tuple(int(x * 255) for x in processor.image_mean))
-            image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
+            image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
+            if 'siglip' in str(processor).lower():
+                image = image.resize((512, 512))
+                grid_thw = [1,32,32]
+            else:
+                image = image.resize((504, 504))
+                grid_thw = [1,36,36]
+            
+            image = processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
+            # assert 1==3, f'image.size = {image['pixel_values'].shape}, processor = {processor}'
+            
         else:
-            image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-        return image, image_size, "image"
+            # assert 1==3, f'processor:{processor}, image.size={image.size}, image_aspect_ratio={image_aspect_ratio} not supported yet'
+            if 'siglip' in str(processor).lower():
+                image = image.resize((512, 512))
+                image = processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
+            else:
+                image = image.resize((504, 504))
+                image = processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]
+            
+            # assert 1==3, f'image.size = {image.shape}, processor = {processor}'
+        if grid_thw is None:
+            return image, image_size, "image"
+        return image, image_size, "image", grid_thw
 
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         # TODO: define number of retries somewhere else
@@ -1140,6 +1170,11 @@ class LazySupervisedDataset(Dataset):
         if isinstance(i, int):
             sources = [sources]
         assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
+        if 'positions_thw' in sources[0]:
+            visible_indices = (torch.tensor(np.load(sources[0]['positions_thw'])) * self.weights).sum(dim=1)
+        else:
+            visible_indices = None
+
 
         if "images" in sources[0] and len(sources[0]['images']) < 9:
             image_file = self.list_data_dict[i]["images"]
@@ -1149,7 +1184,7 @@ class LazySupervisedDataset(Dataset):
                 # overwrite to process with simple pad
                 if len(image_file) > 1:
                     image = [self.process_image(f, "pad") for f in image_file]
-                    image = [[im[0], im[1], "image"] for im in image]
+                    image = [[im[0], im[1], "image", im[3]] for im in image]
             else:
                 image = [self.process_image(image_file)]
             sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]), self.data_args)
@@ -1223,7 +1258,7 @@ class LazySupervisedDataset(Dataset):
                 # overwrite to process with simple pad
                 if len(image_file) > 1:
                     image = [self.process_image(f, "pad") for f in image_file]
-                    image = [[im[0], im[1], "image"] for im in image]
+                    image = [[im[0], im[1], "image", im[3]] for im in image]
             else:
                 image = [self.process_image(image_file)]
             sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]), self.data_args)
@@ -1240,17 +1275,18 @@ class LazySupervisedDataset(Dataset):
 
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
+        data_dict['visible_indices'] = visible_indices
 
         # image exist in the data
         if "images" in self.list_data_dict[i] or 'image' in self.list_data_dict[i]:
-            data_dict["image"] = image
+                data_dict["image"] = image
         elif "video" in self.list_data_dict[i]:
             data_dict["image"] = image
         elif self.data_args.is_multimodal:
             # image does not exist in the data, but the model is multimodal
-            crop_size = self.data_args.image_processor.crop_size
+            crop_size = 224
             data_dict["image"] = [
-                (torch.zeros(1, 3, crop_size["height"], crop_size["width"]), (crop_size["width"], crop_size["height"]), "text"),
+                (torch.zeros(196, 768), (22,224), "text", [[1,14,14]]),
             ]
         # prompt exist in the data
         if prompt is not None:
@@ -1403,6 +1439,8 @@ class DataCollatorForSupervisedDataset(object):
 
             batch["image_sizes"] = [im[1] for im_list in images for im in im_list]
             batch["modalities"] = [im[2] for im_list in images for im in im_list]
+            if all(len(im) == 4 for im_list in images for im in im_list):
+                batch["grid_thw"] = torch.tensor([im[3] for im_list in images for im in im_list])
             images = [im[0] for im_list in images for im in im_list]
 
             # if all(x is not None and x.shape == images[0].shape for x in images):
@@ -1414,6 +1452,8 @@ class DataCollatorForSupervisedDataset(object):
 
         if "prompt" in instances[0]:
             batch["prompts"] = [instance["prompt"] for instance in instances]
+        if 'visible_indices' in instances[0]:
+            batch['visible_indices'] = [instance['visible_indices'] for instance in instances]
 
         return batch
 
@@ -1546,6 +1586,15 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                 from transformers.models.qwen2_moe.modeling_qwen2_moe import Qwen2MoeSparseMoeBlock
 
                 deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
+            elif "qwen3" in model_args.model_name_or_path.lower():
+                model = LlavaQwen3ForCausalLM.from_pretrained(
+                    model_args.model_name_or_path,
+                    cache_dir=training_args.cache_dir,
+                    attn_implementation=training_args.attn_implementation,
+                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                    low_cpu_mem_usage=False,
+                    **customized_kwargs,
+                )
             else:
                 model = LlavaQwenForCausalLM.from_pretrained(
                     model_args.model_name_or_path,
@@ -1823,7 +1872,7 @@ def train(attn_implementation=None):
                         module = module.to(torch.bfloat16)
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
-    trainer = LLaVATrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
+    trainer = LLaVATrainer(model=model, processing_class=tokenizer, args=training_args, **data_module)
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)

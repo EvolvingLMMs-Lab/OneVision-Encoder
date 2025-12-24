@@ -274,6 +274,14 @@ def process_anyres_image(image, processor, grid_pinpoints):
         possible_resolutions = ast.literal_eval(grid_pinpoints)
     best_resolution = select_best_resolution(image.size, possible_resolutions)
     image_padded = resize_and_pad_image(image, best_resolution)
+    if 'siglip' in processor.__class__.__name__.lower():
+        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
+        grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
+        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+    else: # FIXME: for onevision encoder
+        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
+        grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
+        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
 
     patches = divide_to_patches(image_padded, processor.crop_size["height"])
 
@@ -314,6 +322,9 @@ def expand2square(pil_img, background_color):
 def process_images(images, image_processor, model_cfg):
     image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", None)
     new_images = []
+    if len(images) == 8: #FIXME hardcoded for 8 images input as video sample
+        image_aspect_ratio = 'pad'
+
     if image_aspect_ratio == "highres":
         for image in images:
             image = process_highres_image(image, image_processor, model_cfg.image_grid_pinpoints)
@@ -322,15 +333,36 @@ def process_images(images, image_processor, model_cfg):
         for image in images:
             image = process_anyres_image(image, image_processor, model_cfg.image_grid_pinpoints)
             new_images.append(image)
+        return {'image_patchs': [img['pixel_values'] for img in new_images], 'grid_thw': [img['grid_thw'] for img in new_images]}
     elif image_aspect_ratio == "crop_split":
         for image in images:
             image = process_highres_image_crop_split(image, model_cfg, image_processor)
             new_images.append(image)
     elif image_aspect_ratio == "pad":
-        for image in images:
-            image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))
-            image = image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-            new_images.append(image)
+        if 'siglip' in image_processor.__class__.__name__.lower():
+            image_patchs = []
+            grid_thw = []
+            for image in images:
+                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
+                image = image.resize((512, 512))
+                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
+                grid_thw.append([1, 32, 32])
+            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
+
+        else: # FIXME: for onevision encoder video
+            image_patchs = []
+            grid_thw = []
+            for image in images:
+                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
+                image = image.resize((504, 504))
+                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
+                grid_thw.append([1, 36, 36])
+            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
+
+        image = image.resize((504, 504))
+        # image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))
+        image = image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
+        new_images.append(image)
     else:
         return image_processor.preprocess(images, return_tensors="pt")["pixel_values"]
     if all(x.shape == new_images[0].shape for x in new_images):
