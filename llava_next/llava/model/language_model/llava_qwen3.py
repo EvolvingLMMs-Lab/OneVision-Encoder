@@ -26,32 +26,31 @@ from transformers.generation.utils import GenerateOutput
 
 # from ...constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.model.llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
-from transformers import Qwen2Config, Qwen2Model, Qwen2ForCausalLM
-
-# from .qwen.modeling_qwen import QWenLMHeadModel, QWenModel
-# from .qwen.configuration_qwen import QWenConfig
+from transformers import Qwen3Config, Qwen3Model, Qwen3ForCausalLM
 
 
-class LlavaQwenConfig(Qwen2Config):
-    model_type = "llava_qwen"
+
+class LlavaQwen3Config(Qwen3Config):
+    model_type = "llava_qwen3"
 
 
-class LlavaQwenModel(LlavaMetaModel, Qwen2Model):
-    config_class = LlavaQwenConfig
+class LlavaQwen3Model(LlavaMetaModel, Qwen3Model):
+    config_class = LlavaQwen3Config
 
-    def __init__(self, config: Qwen2Config):
-        super(LlavaQwenModel, self).__init__(config)
+    def __init__(self, config: Qwen3Config):
+        super(LlavaQwen3Model, self).__init__(config)
 
 
-class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
-    config_class = LlavaQwenConfig
+class LlavaQwen3ForCausalLM(Qwen3ForCausalLM, LlavaMetaForCausalLM):
+    config_class = LlavaQwen3Config
 
     def __init__(self, config):
         # super(Qwen2ForCausalLM, self).__init__(config)
-        Qwen2ForCausalLM.__init__(self, config)
-        config.model_type = "llava_qwen"
+        Qwen3ForCausalLM.__init__(self, config)
+        config.model_type = "llava_qwen3"
+        # config.rope_scaling = None  # Commented out, newer transformers requires rope_parameters
 
-        self.model = LlavaQwenModel(config)
+        self.model = LlavaQwen3Model(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         # Initialize weights and apply final processing
         self.post_init()
@@ -82,7 +81,6 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
 
         if inputs_embeds is None:
             (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes, grid_thw=grid_thw, visible_indices=visible_indices)
-
         if dpo_forward:
             outputs = self.model(
                 input_ids=input_ids,
@@ -147,5 +145,5 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         return inputs
 
 
-AutoConfig.register("llava_qwen", LlavaQwenConfig)
-AutoModelForCausalLM.register(LlavaQwenConfig, LlavaQwenForCausalLM)
+AutoConfig.register("llava_qwen3", LlavaQwen3Config)
+AutoModelForCausalLM.register(LlavaQwen3Config, LlavaQwen3ForCausalLM)
