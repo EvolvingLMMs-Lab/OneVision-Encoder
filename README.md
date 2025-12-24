@@ -33,7 +33,7 @@ Combined with global contrastive learning using a 2M concept bank, OneVision Enc
 ### Method Overview
 
 <p align="center">
-  <img src="https://github.com/anxiangsir/asset/blob/main/OneVision/method.jpg" alt="OneVision Encoder Method Overview" width="800" style="max-width: 100%;">
+  <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method.jpg" alt="OneVision Encoder Method Overview" width="800" style="max-width: 100%;">
 </p>
 
 ### Cluster Discrimination Visualization
@@ -52,12 +52,12 @@ The visualization below demonstrates our complete video processing pipeline. The
 <table>
   <tr>
     <td align="center">
-      <img src="https://github.com/anxiangsir/asset/blob/main/OneVision/case4.gif" alt="Case 4 Demonstration" width="800"><br>
+      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case4.gif" alt="Case 4 Demonstration" width="800"><br>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="https://github.com/anxiangsir/asset/blob/main/OneVision/case5.gif" alt="Case 4 Demonstration" width="800"><br>
+      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case5.gif" alt="Case 5 Demonstration" width="800"><br>
     </td>
   </tr>
 </table>
@@ -91,15 +91,18 @@ Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K sample
 - Docker with NVIDIA GPU support
 - CUDA-compatible GPU(s)
 
-### Mount NFS
+### Mount Data Storage (Optional)
+
+If using shared storage for datasets, mount your NFS/CFS volumes:
 
 ```bash
-mkdir -p /video_vit
-mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-iyHiNUmePn.lb-0a25b0a7.cfs.bj.baidubce.com:/ /video_vit
-
-mkdir -p /vlm
-mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport cfs-xvbkSb1zPT.lb-563926be.cfs.bj.baidubce.com:/ /vlm
+mkdir -p /video_vit /vlm
+mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport <your-nfs-server>:/ /video_vit
+mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport <your-nfs-server>:/ /vlm
 ```
+
+> [!NOTE]
+> Replace `<your-nfs-server>` with your actual storage endpoint. Internal users should refer to the internal documentation for specific mount configurations.
 
 ### Docker Build
 
@@ -122,8 +125,8 @@ docker tag $(docker images -q | head -n 1) llava_vit:25.11.22
 
 ```bash
 docker run -it --gpus all --ipc host --net host --privileged \
-    -v "$(pwd)":/workspace/OneVision Encoder \
-    -w /workspace/OneVision Encoder \
+    -v "$(pwd)":/workspace/OneVision-Encoder \
+    -w /workspace/OneVision-Encoder \
     llava_vit:25.11.22 bash
 ```
 
@@ -135,12 +138,24 @@ docker run -it --gpus all --ipc host --net host --privileged \
 ```bash
 docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
-    -v "$(pwd)":/workspace/OneVision Encoder -v /train_tmp:/train_tmp \
+    -v "$(pwd)":/workspace/OneVision-Encoder \
+    -v /train_tmp:/train_tmp \
     -v /vlm:/vlm -v /video_vit:/video_vit -v /rice_ocr:/rice_ocr \
     -v /data_0:/data_0 -v /data_1:/data_1 -v /data_2:/data_2 -v /data_3:/data_3 \
-    -w /workspace/OneVision Encoder/ \
-    -e NCCL_TIMEOUT=1800 -e CUDA_DEVICE_MAX_CONNECTIONS=1 -e NCCL_SOCKET_IFNAME=eth0 -e NCCL_IB_GID_INDEX=3 -e NCCL_IB_DISABLE=0 -e NCCL_IB_HCA="mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1" -e NCCL_NET_GDR_LEVEL=2 -e NCCL_IB_QPS_PER_CONNECTION=4 -e NCCL_IB_TC=160 -e NCCL_IB_TIMEOUT=22 -e NCCL_CROSS_NIC=1 -e NCCL_MIN_NCHANNELS=8 -e NCCL_MAX_NCHANNELS=16 \
-    -e http_proxy=http://172.16.5.77:8889 -e https_proxy=http://172.16.5.77:8889 \
+    -w /workspace/OneVision-Encoder \
+    -e NCCL_TIMEOUT=1800 \
+    -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
+    -e NCCL_SOCKET_IFNAME=eth0 \
+    -e NCCL_IB_GID_INDEX=3 \
+    -e NCCL_IB_DISABLE=0 \
+    -e NCCL_IB_HCA="mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1" \
+    -e NCCL_NET_GDR_LEVEL=2 \
+    -e NCCL_IB_QPS_PER_CONNECTION=4 \
+    -e NCCL_IB_TC=160 \
+    -e NCCL_IB_TIMEOUT=22 \
+    -e NCCL_CROSS_NIC=1 \
+    -e NCCL_MIN_NCHANNELS=8 \
+    -e NCCL_MAX_NCHANNELS=16 \
     llava_vit:25.11.22 bash -c "service ssh restart; bash"
 ```
 
@@ -194,7 +209,32 @@ torchrun --nproc_per_node 8 --master_port 15555 \
 
 ---
 
+## 📦 Packing ViT Model
+
+To package a trained ViT model for distribution or deployment:
+
+```bash
+python -m tools.pack_model \
+    --checkpoint ./output/baseline/checkpoint.pt \
+    --output ./output/packed_model
+```
+
+The packed model can be loaded directly with HuggingFace Transformers:
+
+```python
+from onevision_encoder import OneVisionEncoderModel
+
+model = OneVisionEncoderModel.from_pretrained("./output/packed_model")
+```
+
+---
+
+## 👥 Contributors
+
+<!-- Add contributor list here -->
+
+---
 
 ## 📄 License
 
-This project is open source.
+This project is released under the Apache 2.0 License.
