@@ -33,7 +33,7 @@ def siglip_base(pretrained=False, **kwargs):
     Register Siglip without CLS token for timm.
     """
     model = Siglip(
-        ckpt="/video_vit/pretrain_models/siglip-base-patch16-224",
+        ckpt=kwargs.get("ckpt", "google/siglip-base-patch16-224"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -42,7 +42,7 @@ def siglip_base(pretrained=False, **kwargs):
 @register_model
 def siglip_large_patch16_256(pretrained=False, **kwargs):
     model = Siglip(
-        ckpt="/video_vit/pretrain_models/siglip-large-patch16-256",
+        ckpt=kwargs.get("ckpt", "google/siglip-large-patch16-256"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model

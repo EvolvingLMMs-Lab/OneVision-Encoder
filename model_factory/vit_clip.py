@@ -59,7 +59,7 @@ def clip_vit_base_patch16(pretrained: bool = False, **kwargs):
     """
     model = CLIP(
         # 如需使用本地 ckpt，设置为本地路径；否则传入默认/自定义的 HF 路径
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/openai/clip-vit-base-patch16"),
+        ckpt=kwargs.get("ckpt", "openai/clip-vit-base-patch16"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -80,7 +80,7 @@ def clip_vit_large_patch14(pretrained: bool = False, **kwargs):
     """
     model = CLIP(
         # 如需使用本地 ckpt，设置为本地路径；否则传入默认/自定义的 HF 路径
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/openai/clip-vit-large-patch14"),
+        ckpt=kwargs.get("ckpt", "openai/clip-vit-large-patch14"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
