@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
 
     # Model
     parser.add_argument("--model_family", default="llava_vit_sampling")
-    parser.add_argument("--model_name", default="llava_vit_base_ln")
+    parser.add_argument("--model_name", default="ov_encoder_large")
     parser.add_argument("--model_weight", default="NULL")
     parser.add_argument("--num_frames", type=int, default=8)
     parser.add_argument("--num_tokens", type=int, default=1568)
@@ -136,7 +136,7 @@ def get_feature(
         args: 参数配置
         videos: 视频数据 [B, C, T, H, W] 或图片数据 [B, C, H, W]
         model: 模型
-        frame_indices: 视频帧索引 [B, seq_len]，用于 llava_vit_sampling
+        frame_indices: 视频帧索引 [B, seq_len]，用于 ov_encoder_large sampling
         total_frames: 每个视频的总帧数 [B]
         is_training: 是否为训练模式
     """
@@ -401,23 +401,11 @@ def evaluate(
 
 def get_model(args: argparse.Namespace) -> nn.Module:
 
-    if args.model_name == "hf_llava_vit_large_ln_auto":
+    if args.model_name == "ov_encoder_large":
         model = AutoModel.from_pretrained(
-            "/video_vit/xiangan/LLaVA-ViT/onevision-encoder-large",
+            "lmms-lab/onevision-encoder-large",
             trust_remote_code=True,
-            attn_implementation="flash_attention_2"
-            )
-        model = torch.compile(model)
-        return model
-
-    if args.model_name == "hf_llava_vit_large_ln_remote":
-        model = AutoModel.from_pretrained("lmms-lab/llava-vit-large-patch14", trust_remote_code=True)
-        model = torch.compile(model)
-        return model
-
-    if args.model_name == "hf_llava_vit_large_ln":
-        from model_factory.vit_ov_encoder import LlavaViTModel
-        model = LlavaViTModel.from_pretrained(args.model_weight, dtype=torch.bfloat16)
+            attn_implementation="flash_attention_2")
         model = torch.compile(model)
         return model
 
