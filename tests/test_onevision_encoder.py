@@ -11,9 +11,9 @@ class TestOneVisionEncoderConfig:
 
     def test_default_config(self):
         config = OneVisionEncoderConfig()
-        assert config.hidden_size == 1024
-        assert config.num_hidden_layers == 24
-        assert config.num_attention_heads == 16
+        assert config.hidden_size == 768
+        assert config.num_hidden_layers == 12
+        assert config.num_attention_heads == 12
         assert config.patch_size == 16
         assert config.image_size == 448
 
