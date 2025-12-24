@@ -77,6 +77,7 @@ class OneVisionEncoderConfig(PretrainedConfig):
         attention_dropout=0.0,
         initializer_range=0.02,
         rope_theta=10000.0,
+        rope_temporal_size=None,
         use_head=True,
         **kwargs,
     ):
@@ -94,4 +95,5 @@ class OneVisionEncoderConfig(PretrainedConfig):
         self.attention_dropout = attention_dropout
         self.initializer_range = initializer_range
         self.rope_theta = rope_theta
+        self.rope_temporal_size = rope_temporal_size  # None=use actual frames, int=fixed size (legacy: 64)
         self.use_head = use_head

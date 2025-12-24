@@ -547,7 +547,10 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         # Determine video dimensions for RoPE
         # Note: pixel_values passed to embeddings can be 4D or 5D
         if pixel_values.dim() == 5:
-             t_frames = 64
+             # fix: use config.rope_temporal_size if set, otherwise use actual frames
+             # legacy behavior was hardcoded t_frames=64 (for padded 64-frame videos)
+             actual_frames = pixel_values.shape[2]
+             t_frames = self.config.rope_temporal_size if self.config.rope_temporal_size else actual_frames
              height = pixel_values.shape[3]
              width = pixel_values.shape[4]
         else:
@@ -577,6 +580,14 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
 
         # 4. Pre-Norm & Encoder
         hidden_states = self.layernorm_pre(hidden_states)
+
+        # fix: gather hidden_states to match freqs_visible when using sparse visible_indices
+        num_visible = visible_indices.shape[1]
+        if num_visible != total_patches:
+            # sparse mode: select only visible patches
+            hidden_states = hidden_states.gather(
+                1, visible_indices.unsqueeze(-1).expand(-1, -1, hidden_states.shape[-1])
+            )
 
         encoder_outputs = self.encoder(
             hidden_states,
