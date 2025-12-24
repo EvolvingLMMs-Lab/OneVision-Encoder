@@ -172,117 +172,41 @@ pip install -e .
 
 ## ⚡ Quick Start
 
-### Loading the Model
-
-Load the pre-trained OneVision Encoder model using HuggingFace Transformers:
+> **Note:** This model supports native resolution input. For optimal performance:
+> - **Image**: 448×448 resolution (pre-trained)
+> - **Video**: 224×224 resolution with 256 tokens per frame (pre-trained)
+>
+> Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab/onevision-encoder-large).
 
 ```python
 from transformers import AutoModel
 import torch
-
-model = AutoModel.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
-    trust_remote_code=True,
-    attn_implementation="flash_attention_2"  # Optional: use flash attention for efficiency
-)
-model = model.to("cuda").eval()
-```
-
-### Image Inference
-
-For single image inference:
-
-```python
-import torch
-from transformers import AutoModel
 
 # Load model
 model = AutoModel.from_pretrained(
     "lmms-lab/onevision-encoder-large",
     trust_remote_code=True,
     attn_implementation="flash_attention_2"
-)
-model = model.to("cuda").eval()
+).to("cuda").eval()
 
-# Prepare image input: [batch_size, channels, height, width]
-# The model expects 448x448 resolution by default
-pixel_values = torch.randn(1, 3, 448, 448).to("cuda")
-
-# Run inference
+# Image inference: [B, C, H, W]
+image = torch.randn(1, 3, 448, 448).to("cuda")
 with torch.no_grad():
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-        outputs = model(pixel_values)
+    outputs = model(image)
+    # outputs.last_hidden_state: [B, num_patches, hidden_size]
+    # outputs.pooler_output: [B, hidden_size]
 
-# Get outputs
-last_hidden_state = outputs.last_hidden_state  # [batch_size, num_patches, hidden_size]
-pooler_output = outputs.pooler_output  # [batch_size, hidden_size] - pooled representation
-```
+# Video inference: [B, C, T, H, W] with visible_indices
+num_frames, frame_tokens, target_frames = 16, 256, 64
+video = torch.randn(1, 3, num_frames, 224, 224).to("cuda")
 
-### Video Inference
+# Build visible_indices for temporal sampling
+frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
+visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_tokens).cuda()).reshape(1, -1)
 
-For video inference with temporal sampling:
-
-```python
-import torch
-from transformers import AutoModel
-
-# Load model
-model = AutoModel.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
-    trust_remote_code=True,
-    attn_implementation="flash_attention_2"
-)
-model = model.to("cuda").eval()
-
-# Configuration
-num_frames = 16  # Number of frames sampled from video
-# frame_tokens: number of spatial tokens per frame
-# For 448x448 resolution with patch_size=16: (448/16)^2 = 784 tokens per frame (full resolution)
-# Use fewer tokens (e.g., 256) when applying spatial sampling/compression
-frame_tokens = 256
-target_frames = 64  # Target temporal resolution for RoPE (default in model config)
-
-# Prepare video input: [batch_size, channels, num_frames, height, width]
-batch_size = 1
-pixel_values = torch.randn(batch_size, 3, num_frames, 448, 448).to("cuda")
-
-# Create visible indices for temporal sampling
-# visible_indices specifies which patches to process from the full spatio-temporal grid
-device = pixel_values.device
-
-# Assume uniform sampling: map sampled frame positions to target_frames grid
-# Example: if you sampled 16 frames uniformly from a video, map them to positions in [0, target_frames-1]
-sampled_frame_positions = torch.linspace(0, target_frames - 1, num_frames).long().to(device)
-per_frame_tokens = torch.arange(frame_tokens, device=device)
-
-# Calculate visible_indices: position in the full (target_frames * frame_tokens) grid
-visible_indices = (sampled_frame_positions.unsqueeze(-1) * frame_tokens + per_frame_tokens).reshape(1, -1)
-visible_indices = visible_indices.expand(batch_size, -1).clamp(max=target_frames * frame_tokens - 1)
-
-# Run inference
 with torch.no_grad():
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-        outputs = model(pixel_values, visible_indices=visible_indices)
-
-# Get outputs
-last_hidden_state = outputs.last_hidden_state  # [batch_size, num_visible_patches, hidden_size]
-pooler_output = outputs.pooler_output  # [batch_size, hidden_size]
+    outputs = model(video, visible_indices=visible_indices)
 ```
-
-### Key Parameters
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `pixel_values` | Image: `[B, C, H, W]` or Video: `[B, C, T, H, W]` | Required |
-| `visible_indices` | Indices of visible patches for sparse processing | Optional (processes all patches if not provided) |
-| `attn_implementation` | Attention implementation: `"eager"` or `"flash_attention_2"` | `"flash_attention_2"` |
-
-### Model Outputs
-
-- `last_hidden_state`: Hidden states from the last encoder layer `[batch_size, sequence_length, hidden_size]`
-- `pooler_output`: Pooled representation from the attention pooling head `[batch_size, hidden_size]`
-- `hidden_states`: (Optional) Hidden states from all layers
-- `attentions`: (Optional) Attention weights from all layers
 
 ---
 
