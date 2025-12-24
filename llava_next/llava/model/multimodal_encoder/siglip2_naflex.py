@@ -1,37 +1,24 @@
-"""
-# Adapted from https://huggingface.co/MILVLG/imp-v1-3b/blob/main/vision_encoder.py
-"""
-
-from typing import Optional, Tuple, Union, Dict, List, Callable
-from collections import defaultdict
-from transformers.utils import TensorType, logging
-
+from typing import Optional, Tuple, Union, List, Callable
 from dataclasses import dataclass
 from functools import lru_cache
-from functools import partial, reduce
-from PIL import Image
-import torch
-import torch.utils.checkpoint
-from torch import nn
-import numpy as np
+
 import math
 import os
-from transformers.image_processing_utils import BatchFeature, get_size_dict, BaseImageProcessor
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+import torch.utils.checkpoint
+from torch import nn
+
+from transformers import PretrainedConfig
+from transformers.activations import ACT2FN
+from transformers.image_processing_utils import BatchFeature, BaseImageProcessor
 from transformers.image_transforms import (
     convert_to_rgb,
-    normalize,
-    rescale,
     resize,
     to_channel_dimension_format,
 )
-import torch.nn.functional as F
-from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
-from transformers.activations import ACT2FN
-from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
-from transformers.modeling_utils import PreTrainedModel, ALL_ATTENTION_FUNCTIONS
-from transformers import PretrainedConfig
-from transformers.utils import ModelOutput
-from llava.utils import rank0_print
 from transformers.image_utils import (
     ChannelDimension,
     ImageInput,
@@ -43,6 +30,13 @@ from transformers.image_utils import (
     valid_images,
     validate_preprocess_arguments,
 )
+from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
+from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
+from transformers.modeling_utils import PreTrainedModel, ALL_ATTENTION_FUNCTIONS
+from transformers.utils import TensorType, logging, ModelOutput
+
+from llava.utils import rank0_print
+
 logger = logging.get_logger(__name__)
 
 @lru_cache(maxsize=256)
@@ -285,7 +279,8 @@ class SigLip2VisionConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
+        if hasattr(cls, '_set_token_in_kwargs'):
+            cls._set_token_in_kwargs(kwargs)
 
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
 
@@ -581,6 +576,8 @@ class SigLip2PreTrainedModel(PreTrainedModel):
     config_class = SigLip2VisionConfig
     base_model_prefix = "siglip2"
     supports_gradient_checkpointing = True
+    _supports_flash_attn_2 = True
+    _supports_sdpa = True
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -682,7 +679,7 @@ class SigLip2VisionTransformer(nn.Module):
         self._use_flash_attention_2 = config._attn_implementation == "flash_attention_2"
 
     def forward(
-         self,
+        self,
         pixel_values: torch.FloatTensor,
         attention_mask: torch.Tensor,
         spatial_shapes: torch.LongTensor,
@@ -690,8 +687,8 @@ class SigLip2VisionTransformer(nn.Module):
         output_hidden_states: Optional[bool] = None,
     ) -> BaseModelOutputWithPooling:
         r"""
-        Returns:
-
+        spatial_shapes (`torch.LongTensor` of shape `(batch_size, 2)`):
+            Tensor containing the spatial dimensions (height, width) of the input images.
         """
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -821,6 +818,7 @@ class SigLip2NaflexVisionTower(nn.Module):
         self.config = SigLip2VisionConfig()
 
         self.vision_tower_name = vision_tower
+        self.select_layer = vision_tower_cfg.mm_vision_select_layer
 
         self.image_processor = SigLip2ImageProcessor()
 
@@ -842,15 +840,15 @@ class SigLip2NaflexVisionTower(nn.Module):
             rank0_print("{} is already loaded, `load_model` called again, skipping.".format(self.vision_tower_name))
             return
 
-        self.vision_tower = SigLip2VisionModel.from_pretrained(self.vision_tower_name, device_map=device_map)
-
-        del self.vision_tower.vision_model.encoder.layers[-1:]
-        # self.vision_tower.vision_model.head = nn.Identity()
-        self.vision_tower.requires_grad_(False)
+        self.vision_tower = SigLip2VisionModel.from_pretrained(
+            self.vision_tower_name, 
+            device_map=device_map,
+            attn_implementation="flash_attention_2"
+        )
 
         self.is_loaded = True
 
-    def forward(self, images):
+    def forward(self, images, grid_thw=None, visible_indices=None):
         if type(images) is list:
             image_features = []
             for image in images:
@@ -859,7 +857,7 @@ class SigLip2NaflexVisionTower(nn.Module):
                 assert image_features.shape[-2] == 729
                 image_features.append(image_feature)
         elif hasattr(images, 'keys'):
-            # 原有的字典处理逻辑
+            # Handle dictionary input format
             pixel_values = images['pixel_values'].to(device=self.device, dtype=self.dtype)
             spatial_shapes = images['spatial_shapes'].to(device=self.device)
             pixel_attention_mask = images.get('pixel_attention_mask', None)
@@ -874,24 +872,31 @@ class SigLip2NaflexVisionTower(nn.Module):
             )
             image_features = image_forward_outs.hidden_states[-1]
         else:
-            # 新增：处理直接传入张量的情况
-            # 假定张量形状为 [batch_size, height, width, channels] 或 [batch_size, sequence_length, hidden_size]
+            # Handle direct tensor input
+            # Assumes tensor shape is [batch_size, height, width, channels] or [batch_size, sequence_length, hidden_size]
             batch_size = images.shape[0]
-            # assert 1==2, f'images.shape:{images.shape}'
             
-            # 如果是原始图像张量，需要进行预处理
-            if len(images.shape) == 4:  # [B, H, W, C] 格式
-                # 这里可能需要调用图像处理器进行处理
+            # If raw image tensor, preprocessing is needed
+            if len(images.shape) == 4:  # [B, H, W, C] format
+                # Call image processor to preprocess
                 processed = self.image_processor.preprocess(images, return_tensors="pt")
                 pixel_values = processed['pixel_values'].to(device=self.device, dtype=self.dtype)
                 spatial_shapes = processed['spatial_shapes'].to(device=self.device)
                 pixel_attention_mask = None
-            else:  # 假设已经是特征或标记化的张量
-                # 直接使用传入的张量作为像素值
+            else:
                 pixel_values = images.to(device=self.device, dtype=self.dtype)
-                feat_w, feat_h = int(pixel_values.shape[1]**0.5), int(pixel_values.shape[1]**0.5)
-                # 为每个批次项目估计标准形状 (35, 35)
-                spatial_shapes = torch.tensor([[feat_w, feat_h]] * batch_size, device=self.device)
+                if grid_thw is not None:
+                    spatial_shapes = []
+                    for b in range(batch_size):
+                        thw = grid_thw[b]
+                        feat_h = thw[1]
+                        feat_w = thw[2]
+                        spatial_shapes.append([feat_h, feat_w])
+                    spatial_shapes = torch.tensor(spatial_shapes, device=self.device)
+                else:
+                    feat_w, feat_h = int(pixel_values.shape[1]**0.5), int(pixel_values.shape[1]**0.5)
+                    # Estimate standard shape for each batch item
+                    spatial_shapes = torch.tensor([[feat_h, feat_w]] * batch_size, device=self.device)
                 pixel_attention_mask = None
             
             image_forward_outs = self.vision_tower(
@@ -900,7 +905,10 @@ class SigLip2NaflexVisionTower(nn.Module):
                 spatial_shapes, 
                 output_hidden_states=True
             )
-            image_features = image_forward_outs.hidden_states[-1]
+            if self.select_layer is not None:
+                image_features = image_forward_outs.hidden_states[self.select_layer]
+            else:
+                image_features = image_forward_outs.hidden_states[-2]
         
 
         return image_features
@@ -935,19 +943,3 @@ class SigLip2NaflexVisionTower(nn.Module):
     @property
     def image_size(self):
         return 560
-
-
-# vision_tower =  SigLip2NaflexVisionTower("/vlm/pretrain_models/SigLIP2/siglip2-so400m-patch16-naflex", vision_tower_cfg={})
-
-# image_path = '/vlm/yinxie/code/sa_514193.jpg'
-# from PIL import Image
-# image = Image.open(image_path).convert("RGB")
-# image = image.resize((560, 560), Image.BICUBIC)  # Resize to 256x256
-# image = vision_tower.image_processor.preprocess(image, do_resize=False, return_tensors="pt")
-# print('image.shape', image['pixel_values'][0].shape)  # Should be (1, 256, 256, 3)
-# vision_tower.to(vision_tower.device)
-# vision_tower.eval()
-# with torch.no_grad():
-#     image_features = vision_tower(image)
-#     print(image_features.shape)  # Should be (1, 768, 729)
-# print(vision_tower)
