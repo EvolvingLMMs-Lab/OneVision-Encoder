@@ -14,6 +14,7 @@
 
 - [Introduction](#-introduction)
 - [Setup](#-setup)
+- [Quick Start](#-quick-start)
 - [Training](#-training)
 - [Evaluation](#-evaluation)
 - [Packing ViT Model](#-packing-vit-model)
@@ -166,6 +167,56 @@ Inside the container, install the package in editable mode:
 ```bash
 pip install -e .
 ```
+
+---
+
+## ⚡ Quick Start
+
+> **Note:** This model supports native resolution input. For optimal performance:
+> - **Image**: 448×448 resolution (pre-trained)
+> - **Video**: 224×224 resolution with 256 tokens per frame (pre-trained)
+>
+> Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab/onevision-encoder-large).
+
+```python
+from transformers import AutoModel
+import torch
+
+# Load model
+model = AutoModel.from_pretrained(
+    "lmms-lab/onevision-encoder-large",
+    trust_remote_code=True,
+    attn_implementation="flash_attention_2"
+).to("cuda").eval()
+
+# Image inference: [B, C, H, W]
+image = torch.randn(1, 3, 448, 448).to("cuda")
+with torch.no_grad():
+    outputs = model(image)
+    # outputs.last_hidden_state: [B, num_patches, hidden_size]
+    # outputs.pooler_output: [B, hidden_size]
+
+# Video inference: [B, C, T, H, W] with visible_indices
+num_frames, frame_tokens, target_frames = 16, 256, 64
+video = torch.randn(1, 3, num_frames, 224, 224).to("cuda")
+
+# Build visible_indices for temporal sampling
+frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
+visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_tokens).cuda()).reshape(1, -1)
+# visible_indices example (with 256 tokens per frame):
+#   Frame 0 (pos=0):  indices [0, 1, 2, ..., 255]
+#   Frame 1 (pos=4):  indices [1024, 1025, 1026, ..., 1279]
+#   Frame 2 (pos=8):  indices [2048, 2049, 2050, ..., 2303]
+#   ...
+#   Frame 15 (pos=63): indices [16128, 16129, ..., 16383]
+
+with torch.no_grad():
+    outputs = model(video, visible_indices=visible_indices)
+```
+
+### Codec Input
+
+> **TODO:** Add codec-style input documentation for temporal saliency-based patch selection.
 
 ---
 
