@@ -77,7 +77,7 @@ class OneVisionEncoderConfig(PretrainedConfig):
         attention_dropout=0.0,
         initializer_range=0.02,
         rope_theta=10000.0,
-        rope_temporal_size=None,
+        rope_temporal_size=64,
         use_head=True,
         **kwargs,
     ):
