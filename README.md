@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Fully HEVC-Style Vision Transformer </strong>
+  <strong>OneVision Encoder</strong>
 </p>
 
 ## 📖 Table of Contents
@@ -29,11 +29,11 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
 ### Input Method Comparison
 
 <table>
-  <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">Comparison of Frame Sampling Input vs Codec Input</caption>
+  <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">Frame Sampling Input vs Codec Input</caption>
   <tr>
     <td align="center">
       <img src="pages/images/example.gif" alt="Animated demonstration of traditional uniform frame sampling method for video processing" width="400"><br>
-      <b>抽帧输入 (Frame Sampling Input)</b><br>
+      <b>Frame Sampling Input</b><br>
       Traditional uniform frame sampling approach
     </td>
     <td align="center">

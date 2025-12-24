@@ -20,7 +20,7 @@ from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC
 from training.lr_scheduler import PolynomialLRWarmup
 from onevision_encoder import OneVisionEncoderModel, OneVisionEncoderConfig
 
-torch._dynamo.config.optimize_ddp = True
+# fix: removed conflicting line (was: True immediately overwritten by False)
 torch._dynamo.config.optimize_ddp = False
 
 parser = argparse.ArgumentParser(description="Multi-dataset video training")
@@ -657,12 +657,15 @@ def main():
 
                 # 按 batch 固定划分：前50% residual, 中37.5% frame_sampling, 后12.5% collage
                 n1 = int(bs * 0.5)
-                n2 = int(bs * 0.375)
+                # fix: n2 must be cumulative threshold, not standalone percentage
+                # bug was: n2 = int(bs * 0.375) which gives n2=37 when bs=100
+                # this caused mask_frame_sampling = (idx >= 50) & (idx < 37) to be always False
+                n2 = int(bs * 0.875)  # cumulative: 50% + 37.5% = 87.5%
 
                 idx_range = torch.arange(bs, device=dev)
-                mask_residual = idx_range < n1
-                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)
-                mask_collage = idx_range >= n2
+                mask_residual = idx_range < n1                               # idx in [0, n1)
+                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)   # idx in [n1, n2)
+                mask_collage = idx_range >= n2                               # idx in [n2, bs)
 
                 # ---------- residual（前50%）: 生成 out 行 ----------
                 if mask_residual.any():
@@ -831,8 +834,8 @@ def main():
             opt.step()
             opt.zero_grad()
 
-        # 学习率更新
-        lr_scheduler.step()
+            # fix: lr update should only happen after opt.step(), not every micro-batch
+            lr_scheduler.step()
 
         batch_end_callback(
             global_step=global_step,
