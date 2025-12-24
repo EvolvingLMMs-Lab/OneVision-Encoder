@@ -130,7 +130,7 @@ def viz_residual(res: np.ndarray, signed: bool = True) -> np.ndarray:
         raise ValueError(f"Unexpected residual shape for viz: {res.shape}")
     return vis
 
-_HEVC_FEAT_DECODER = os.environ.get('HEVC_FEAT_DECODER', '/video_vit/yunyaoyan/umt/umt_split/decoder/bin/hevc')
+_HEVC_FEAT_DECODER = os.environ.get('HEVC_FEAT_DECODER', 'hevc')
 
 _FFMPEG_SUPPORTED_DECODERS = [ext.encode() for ext in [
     ".mp4", ".mkv", ".mov", ".hevc", ".h265", ".265"
