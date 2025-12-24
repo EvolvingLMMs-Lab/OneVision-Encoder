@@ -45,7 +45,7 @@ from llava.train.llava_trainer import LLaVATrainer
 
 from llava import conversation as conversation_lib
 from llava.model import *
-from llava.mm_utils import process_highres_image, process_anyres_image, process_highres_image_crop_split, tokenizer_image_token
+from llava.mm_utils import process_highres_image, process_native_image, process_anyres_image, process_highres_image_crop_split, tokenizer_image_token
 from llava.utils import rank0_print, process_video_with_pyav, process_video_with_decord
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -1086,6 +1086,11 @@ class LazySupervisedDataset(Dataset):
             image_aspect_ratio = overwrite_image_aspect_ratio
         if image_aspect_ratio == "highres":
             image = process_highres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
+        elif image_aspect_ratio == "native":
+            image = process_native_image(image, self.data_args.image_processor)
+            if type(image) is dict:
+                grid_thw = image['grid_thw']
+                image = image['pixel_values']
         elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
             image = process_anyres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
             if type(image) is dict:
@@ -1115,11 +1120,8 @@ class LazySupervisedDataset(Dataset):
                 image = image.resize((504, 504))
                 grid_thw = [1,36,36]
             
-            image = processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
-            # assert 1==3, f'image.size = {image['pixel_values'].shape}, processor = {processor}'
-            
+            image = processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]            
         else:
-            # assert 1==3, f'processor:{processor}, image.size={image.size}, image_aspect_ratio={image_aspect_ratio} not supported yet'
             if 'siglip' in str(processor).lower():
                 image = image.resize((512, 512))
                 image = processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
@@ -1127,7 +1129,6 @@ class LazySupervisedDataset(Dataset):
                 image = image.resize((504, 504))
                 image = processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]
             
-            # assert 1==3, f'image.size = {image.shape}, processor = {processor}'
         if grid_thw is None:
             return image, image_size, "image"
         return image, image_size, "image", grid_thw
