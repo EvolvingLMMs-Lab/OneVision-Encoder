@@ -188,6 +188,7 @@ ray_results/
 comet_ml/
 neptune/
 optuna/
+checkpoints/
 
 # Common data file formats (uncomment any you DO want to track)
 *.csv
