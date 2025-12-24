@@ -93,7 +93,7 @@ class OneVisionEncoderTower(nn.Module):
         else:
             # Handle tensor input
             pixel_values = images.to(device=self.device, dtype=self.dtype)
-            
+
             # Ensure correct shape: (B, C, H, W) or (B, C, T, H, W)
             if pixel_values.dim() == 3:
                 # (C, H, W) -> (1, C, H, W)
@@ -107,15 +107,15 @@ class OneVisionEncoderTower(nn.Module):
                 output_hidden_states=True,
                 visible_indices=visible_indices
             )
-            
-        # Get last hidden state (before head if exists)
-        if self.select_layer is not None:
-            image_features = image_forward_outs.hidden_states[self.select_layer]
-        else:
-            image_features = image_forward_outs.hidden_states[-2]
-        if bs == 8: # FIXME hardcoded for 8 images input as video sample
-            image_features = image_features.squeeze(0).reshape(8, -1, self.hidden_size)
-        
+
+            # Get hidden state from selected layer
+            if self.select_layer is not None:
+                image_features = image_forward_outs.hidden_states[self.select_layer]
+            else:
+                image_features = image_forward_outs.hidden_states[-2]
+            if bs == 8: # FIXME hardcoded for 8 images input as video sample
+                image_features = image_features.squeeze(0).reshape(8, -1, self.hidden_size)
+
         return image_features
 
     @property
