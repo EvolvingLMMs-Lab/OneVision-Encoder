@@ -93,36 +93,6 @@ def _split_yuv420_planes(buf: bytes, H: int, W: int, layout: str):
     else:
         raise ValueError(layout)
 
-
-# ---------------- YUV plane parsers ----------------
-def _split_yuv420_planes(buf: bytes, H: int, W: int, layout: str):
-    """Return Y (H,W), U (H/2,W/2), V (H/2,W/2) for layout in {i420,yv12,nv12,nv21}."""
-    nY = H*W
-    nUV = (H//2)*(W//2)
-    arr = np.frombuffer(buf, dtype=np.uint8)
-    if layout in ("i420","yv12"):
-        Y = arr[:nY].reshape(H, W)
-        UV = arr[nY:]
-        # planar U and V (each nUV)
-        U_planar, V_planar = (UV[:nUV], UV[nUV:]) if layout=="i420" else (UV[nUV:], UV[:nUV])
-        U = U_planar.reshape(H//2, W//2)
-        V = V_planar.reshape(H//2, W//2)
-        return Y, U, V
-    elif layout in ("nv12","nv21"):
-        Y = arr[:nY].reshape(H, W)
-        UVint = arr[nY:].reshape(H//2, W)  # interleaved per row: UVUV or VUVU
-        U = np.empty((H//2, W//2), dtype=np.uint8)
-        V = np.empty((H//2, W//2), dtype=np.uint8)
-        if layout == "nv12":  # UVUV...
-            U[:] = UVint[:, 0::2]
-            V[:] = UVint[:, 1::2]
-        else:                  # nv21: VUVU...
-            V[:] = UVint[:, 0::2]
-            U[:] = UVint[:, 1::2]
-        return Y, U, V
-    else:
-        raise ValueError(layout)
-
 # ---------------- manual YUV->BGR with matrix/range ----------------
 def _upsample_uv(U, V, H, W):
     # nearest-neighbor 2x upsample
@@ -564,9 +534,16 @@ class HevcFeatureReader:
         if self._proc is not None and self._proc.poll() is None:
             self._proc.stdin.close()
             self._proc.stdout.close()
-            # self._proc.stderr.close()
+            # stderr is redirected to DEVNULL, not a pipe
             self._terminate(0.2)
         self._proc = None
+        # fix: close DEVNULL file handle to prevent resource leak
+        if hasattr(self, 'DEVNULL') and self.DEVNULL is not None:
+            try:
+                self.DEVNULL.close()
+            except Exception:
+                pass
+            self.DEVNULL = None
 
     def _terminate(self, timeout=1.0):
         """Terminate the sub process."""
