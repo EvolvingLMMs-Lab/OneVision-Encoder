@@ -196,7 +196,7 @@ preprocessor = AutoImageProcessor.from_pretrained(
 )
 
 # Image inference: [B, C, H, W]
-image = Image.open("path/to/image.jpg")
+image = Image.open("path/to/your/image.jpg")  # Replace with your image path
 pixel_values = preprocessor(images=image, return_tensors="pt")["pixel_values"].to("cuda")
 with torch.no_grad():
     outputs = model(pixel_values)
@@ -205,10 +205,11 @@ with torch.no_grad():
 
 # Video inference: [B, C, T, H, W] with visible_indices
 num_frames, frame_tokens, target_frames = 16, 256, 64
-# Load video frames and preprocess each frame
+# Load video frames and preprocess each frame (replace with your video frame paths)
 frames = [Image.open(f"path/to/frame_{i}.jpg") for i in range(num_frames)]
 video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_values"]
-video = video_pixel_values.permute(1, 0, 2, 3).unsqueeze(0).to("cuda")  # [B, C, T, H, W]
+# Reshape from [T, C, H, W] to [B, C, T, H, W]
+video = video_pixel_values.permute(1, 0, 2, 3).unsqueeze(0).to("cuda")
 
 # Build visible_indices for temporal sampling
 frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
