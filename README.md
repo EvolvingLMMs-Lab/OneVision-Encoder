@@ -32,24 +32,6 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
   <img src="asset/method.jpg" alt="OneVision Encoder Method Overview" width="800" style="max-width: 100%;">
 </p>
 
-### Input Method Comparison
-
-<table>
-  <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">Frame Sampling Input vs Codec Input</caption>
-  <tr>
-    <td align="center">
-      <img src="pages/images/example.gif" alt="Animated demonstration of traditional uniform frame sampling method for video processing" width="400"><br>
-      <b>Frame Sampling Input</b><br>
-      Traditional uniform frame sampling approach
-    </td>
-    <td align="center">
-      <img src="pages/images/example_codec_input.gif" alt="Animated demonstration of efficient codec-based input decomposition with I-frames and P-frames" width="400"><br>
-      <b>Codec Input</b><br>
-      Our efficient codec-based input decomposition
-    </td>
-  </tr>
-</table>
-
 ### Cluster Discrimination Visualization
 
 <p align="center">
@@ -61,11 +43,13 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
 <table>
   <tr>
     <td align="center">
-      <img src="asset/case4.gif" alt="Case 4 Demonstration" width="400"><br>
+      <img src="asset/case4.gif" alt="Case 4 Demonstration" width="800"><br>
       <b>Case 4</b>
     </td>
+  </tr>
+  <tr>
     <td align="center">
-      <img src="asset/case6.gif" alt="Case 6 Demonstration" width="400"><br>
+      <img src="asset/case6.gif" alt="Case 6 Demonstration" width="800"><br>
       <b>Case 6</b>
     </td>
   </tr>
