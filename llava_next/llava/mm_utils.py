@@ -115,6 +115,75 @@ def process_highres_image(image, processor, grid_pinpoints):
     image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
     return torch.stack(image_patches, dim=0)
 
+def smart_resize(
+    height: int, 
+    width: int, 
+    patch_size: int = 16,
+    min_pixels: int = 32 * 32,
+):
+    """
+    Rescales the image dimensions so that:
+    1. Both dimensions (height and width) are divisible by 'factor' (32 for Siglip2).
+    2. The total number of pixels is within the range ['min_pixels', 'max_pixels'].
+    3. The aspect ratio of the image is maintained as closely as possible.
+    
+    This is similar to Qwen2VL's smart_resize but adapted for Siglip2's requirements.
+    
+    Args:
+        height: Original image height
+        width: Original image width
+        factor: Factor that dimensions must be divisible by (default: 32 = 2 * 16)
+        min_pixels: Minimum number of pixels (default: 1024 = 32*32)
+        max_pixels: Maximum number of pixels (default: 262144 = 512*512)
+    
+    Returns:
+        Tuple of (resized_height, resized_width)
+    """
+    if max(height, width) / min(height, width) > 200:
+        raise ValueError(
+            f"Absolute aspect ratio must be smaller than 200, got {max(height, width) / min(height, width)}"
+        )
+    
+    # Round to nearest factor
+    h_bar = round(height / patch_size) * patch_size
+    w_bar = round(width / patch_size) * patch_size
+    
+    # Ensure minimum factor size
+    h_bar = max(patch_size, h_bar)
+    w_bar = max(patch_size, w_bar)
+    
+    if h_bar * w_bar < min_pixels:
+        beta = math.sqrt(min_pixels / (height * width))
+        h_bar = math.ceil(height * beta / patch_size) * patch_size
+        w_bar = math.ceil(width * beta / patch_size) * patch_size
+    
+    return h_bar, w_bar
+
+
+def process_native_image(image, processor):
+    orig_width, orig_height = image.size
+    if 'siglip' in processor.__class__.__name__.lower():
+        target_height, target_width = smart_resize(
+                height=orig_height,
+                width=orig_width,
+                patch_size=16,
+                min_pixels=16*4,
+            )
+        image = image.resize((target_width, target_height), Image.BICUBIC)
+        image_patches = [processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]]
+        grid_thw = [1, target_height // 16, target_width // 16]
+        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+    else:
+        target_height, target_width = smart_resize(
+                height=orig_height,
+                width=orig_width,
+                patch_size=14,
+                min_pixels=14*4,
+            )
+        image = image.resize((target_width, target_height), Image.BICUBIC)
+        image_patches = [processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]]
+        grid_thw = [1, target_height // 14, target_width // 14]
+        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
 
 def select_best_resolution(original_size, possible_resolutions):
     """
@@ -279,7 +348,7 @@ def process_anyres_image(image, processor, grid_pinpoints):
         grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
         return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
     else: # FIXME: for onevision encoder
-        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
+        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
         return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
 
