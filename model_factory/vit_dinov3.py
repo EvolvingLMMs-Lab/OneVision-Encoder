@@ -31,9 +31,7 @@ class Dinov3(nn.Module):
         # pixel_values: [bs, 3, h, w]
         with torch.no_grad():
             outputs = self.model(pixel_values=pixel_values, output_hidden_states=True)
-            # 获取最后一层的 hidden state
-            last_hidden_state = outputs.last_hidden_state  # [bs, seq_len, hidden_size]
-
+            last_hidden_state = outputs.last_hidden_state
         return last_hidden_state
 
 
@@ -94,26 +92,16 @@ def dinov3_giant(pretrained=False, **kwargs):
 
 
 if __name__ == "__main__":
-    # Test the registered model with timm
     import timm
 
-    # Create the model using timm framework
     model = timm.create_model("dinov3_base", pretrained=False)
 
-    # 创建测试输入: [bs, 3, 224, 224]
     bs = 4
     test_input = torch.randn(bs, 3, 224, 224).cuda()
-
-    # 获取最后的 hidden state
     last_hidden_state = model(test_input)
 
-    # 打印形状信息
     print(f"Input shape: {test_input.shape}")
     print(f"Last hidden state shape: {last_hidden_state.shape}")
-    # 预期输出: [bs, seq_len, hidden_size]
-    # 例如 dinov3-base: [4, 257, 768] (256 patches + 1 CLS token for 224x224)
-    # 例如 dinov3-large: [4, 257, 1024]
-    # 例如 dinov3-giant: [4, 257, 1536]
 
     print("\nTesting all variants:")
     for variant in ["dinov3_base", "dinov3_large", "dinov3_giant"]:

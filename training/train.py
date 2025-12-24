@@ -25,112 +25,86 @@ torch._dynamo.config.optimize_ddp = False
 
 parser = argparse.ArgumentParser(description="Multi-dataset video training")
 
-# ---------------------------
-# General / 通用
-# ---------------------------
-parser.add_argument("--debug", type=int, default=0, help="Enable debug mode (0/1). When 1, may reduce dataset size or add extra checks / 是否开启调试模式")
-parser.add_argument("--output", default="output", help="Output directory for logs and checkpoints / 输出目录")
-parser.add_argument("--workers", type=int, default=2, help="Number of DataLoader workers per process / DataLoader 进程内工作线程数")
-parser.add_argument("--local_rank", type=int, default=0, help="Local rank passed by launcher; do not set manually / 启动器传入的本地进程序号，通常无需手动设置")
+# General
+parser.add_argument("--debug", type=int, default=0, help="Enable debug mode (0/1)")
+parser.add_argument("--output", default="output", help="Output directory for logs and checkpoints")
+parser.add_argument("--workers", type=int, default=2, help="Number of DataLoader workers per process")
+parser.add_argument("--local_rank", type=int, default=0, help="Local rank passed by launcher; do not set manually")
 
-# ---------------------------
-# Data loading / 数据加载
-# ---------------------------
-parser.add_argument("--dataloader-type", default="dali", help="Data loader backend, e.g., 'dali' or 'torch' / 数据加载后端")
-parser.add_argument("--dali_is_training", type=int, default=1, help="DALI training mode (0/1). 1 enables training augmentations / DALI 是否处于训练模式")
-parser.add_argument("--image_size", default="224", help="Input size as 'H,W' or single 'S' (interpreted as S,S) / 输入尺寸，'H,W' 或单值 'S'(等价于 S,S)")
-parser.add_argument("--image_size_video", default="224", help="Input size as 'H,W' or single 'S' (interpreted as S,S) / 输入尺寸，'H,W' 或单值 'S'(等价于 S,S)")
-parser.add_argument("--input_gray", type=int, default=0, help="Treat input as grayscale (0/1) / 输入按灰度处理（0/1）")
-parser.add_argument("--num_frames", type=int, default=8, help="Number of frames per clip / 每个样本的帧数")
-parser.add_argument("--random_diff", type=int, default=10, help="Random diff for sampling jitter across datasets / 数据集采样抖动的随机扰动")
+# Data loading
+parser.add_argument("--dataloader-type", default="dali", help="Data loader backend, e.g., 'dali' or 'torch'")
+parser.add_argument("--dali_is_training", type=int, default=1, help="DALI training mode (0/1)")
+parser.add_argument("--image_size", default="224", help="Input size as 'H,W' or single 'S' (S,S)")
+parser.add_argument("--image_size_video", default="224", help="Video input size as 'H,W' or single 'S' (S,S)")
+parser.add_argument("--input_gray", type=int, default=0, help="Treat input as grayscale (0/1)")
+parser.add_argument("--num_frames", type=int, default=8, help="Number of frames per clip")
+parser.add_argument("--random_diff", type=int, default=10, help="Random diff for sampling jitter")
 
-# ---------------------------
-# Multi-dataset (heads) / 多数据集（多头）
-# 说明：左侧为新复数参数名，右侧为旧名别名，dest 统一为新名，向后兼容
-# ---------------------------
+# Multi-dataset (heads)
 parser.add_argument("--list_datasets", nargs='+', type=str, default=["k710_ssv2_univit_pfs"],
-                    help="Dataset registry names, one or more / 数据集注册名，可多个")
+                    help="Dataset registry names, one or more")
 parser.add_argument("--list_batch_sizes", nargs='+', type=int, default=[32],
-                    help="Per-dataset batch sizes / 各数据集的 batch 大小")
+                    help="Per-dataset batch sizes")
 parser.add_argument("--list_sample_rates", nargs='+', type=float, default=[0.1],
-                    help="Per-dataset sampling rate / 各数据集采样权重")
+                    help="Per-dataset sampling rate")
 parser.add_argument("--list_margins", nargs='+', type=float, default=[0.3],
-                    help="Per-dataset loss margin / 各数据集损失 margin")
+                    help="Per-dataset loss margin")
 parser.add_argument("--list_filters", nargs='+', type=float, default=[0.75],
-                    help="Per-dataset filter ratio or threshold / 各数据集过滤比例或阈值")
+                    help="Per-dataset filter ratio or threshold")
 parser.add_argument("--list_lr_pfc_weights", nargs='+', type=float, default=[1.0],
-                    help="Per-dataset LR scale for PFC params / 各数据集 PFC 参数学习率缩放")
+                    help="Per-dataset LR scale for PFC params")
 parser.add_argument("--list_loss_weights", nargs='+', type=float, default=[1.0],
-                    help="Per-dataset loss weights / 各数据集损失权重")
+                    help="Per-dataset loss weights")
 parser.add_argument("--list_init_partial_fc_paths", nargs='+', type=str, default=["NULL"],
-                    help="Per-dataset init path for partial-FC or 'NULL' / 各数据集 PFC 初始化路径或 'NULL'")
+                    help="Per-dataset init path for partial-FC or 'NULL'")
 
-# ---------------------------
-# Model / 模型
-# ---------------------------
-parser.add_argument("--model_name", default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head", help="Backbone model name / 主干模型名称")
+# Model
+parser.add_argument("--model_name", default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head", help="Backbone model name")
 parser.add_argument("--model_weight", default=None,
                     help="Path to pretrained weights, HuggingFace model ID, or None")
-parser.add_argument("--embedding_size", type=int, default=384, help="Embedding dimension of the head / 头部嵌入维度")
-parser.add_argument("--gradient_checkpoint", type=int, default=0, help="Enable gradient checkpointing (0/1) / 是否启用梯度检查点（节省显存）")
-parser.add_argument("--mask", type=int, default=0, help="Enable mask-related training (0/1) / 是否启用 mask 相关训练")
-parser.add_argument("--finetune_backbone", type=int, default=1, help="Finetune backbone parameters (0/1) / 是否微调主干网络")
+parser.add_argument("--embedding_size", type=int, default=384, help="Embedding dimension of the head")
+parser.add_argument("--gradient_checkpoint", type=int, default=0, help="Enable gradient checkpointing (0/1)")
+parser.add_argument("--mask", type=int, default=0, help="Enable mask-related training (0/1)")
+parser.add_argument("--finetune_backbone", type=int, default=1, help="Finetune backbone parameters (0/1)")
 
-# ---------------------------
-# Optimization / 优化
-# ---------------------------
-parser.add_argument("--opt", default="adamw", help="Optimizer name, e.g., 'adamw' / 优化器名称")
-parser.add_argument("--lr", type=float, default=1e-3, help="Base learning rate / 基础学习率")
-parser.add_argument("--weight_decay", type=float, default=0.05, help="Weight decay for non-PFC params / 非 PFC 参数的权重衰减")
-parser.add_argument("--weight_decay_pfc", type=float, default=0.05, help="Weight decay for PFC params / PFC 参数的权重衰减")
-parser.add_argument("--warmup_ratio", type=float, default=0.1, help="Warmup ratio of total training steps / 训练总步数的预热比例")
-parser.add_argument("--backward_passes_per_step", type=int, default=1, help="Gradient accumulation steps before optimizer step / 每次优化前累积的反传次数")
-parser.add_argument("--repeat_pfc", type=int, default=0, help="Repeat factor for PFC ops or rebuild cycles / PFC 重复或重建次数（如适用）")
-parser.add_argument("--save_pfc", type=int, default=1, help="Save PFC weights in checkpoints (0/1) / 是否在检查点中保存 PFC 权重")
+# Optimization
+parser.add_argument("--opt", default="adamw", help="Optimizer name, e.g., 'adamw'")
+parser.add_argument("--lr", type=float, default=1e-3, help="Base learning rate")
+parser.add_argument("--weight_decay", type=float, default=0.05, help="Weight decay for non-PFC params")
+parser.add_argument("--weight_decay_pfc", type=float, default=0.05, help="Weight decay for PFC params")
+parser.add_argument("--warmup_ratio", type=float, default=0.1, help="Warmup ratio of total training steps")
+parser.add_argument("--backward_passes_per_step", type=int, default=1, help="Gradient accumulation steps")
+parser.add_argument("--repeat_pfc", type=int, default=0, help="Repeat factor for PFC ops or rebuild cycles")
+parser.add_argument("--save_pfc", type=int, default=1, help="Save PFC weights in checkpoints (0/1)")
 
-# ---------------------------
-# Initialization / Resume / 初始化与恢复
-# ---------------------------
-parser.add_argument("--init_backbone", default="NULL", help="Backbone init path or 'NULL' / 主干网络初始化路径，或 'NULL'")
+# Initialization / Resume
+parser.add_argument("--init_backbone", default="NULL", help="Backbone init path or 'NULL'")
 
-# ---------------------------
-# Logging & Checkpoint / 日志与检查点
-# ---------------------------
-parser.add_argument("--frequent", type=int, default=10, help="Log/validation frequency in steps / 日志与验证的步数间隔")
-parser.add_argument("--ckpt_interval", type=int, default=2000, help="Checkpoint save interval in steps / 检查点保存步数间隔")
+# Logging & Checkpoint
+parser.add_argument("--frequent", type=int, default=10, help="Log/validation frequency in steps")
+parser.add_argument("--ckpt_interval", type=int, default=2000, help="Checkpoint save interval in steps")
 
-# ---------------------------
-# Training schedule / 训练调度
-# ---------------------------
-parser.add_argument("--num_sampled_data", type=int, default=60000000, help="Total sampled examples used to compute total steps / 用于估算总步数的采样样本总量")
+# Training schedule
+parser.add_argument("--num_sampled_data", type=int, default=60000000, help="Total sampled examples for step calculation")
 
-# ---------------------------
-# Visualization / 可视化
-# ---------------------------
-parser.add_argument("--visualize", type=int, default=0, help="Save input clips as GIFs (0/1) / 是否将输入视频保存为 GIF")
-parser.add_argument("--vis_samples", type=int, default=2, help="Number of samples to visualize per batch / 每个 batch 可视化的样本数")
-parser.add_argument("--vis_interval", type=int, default=10, help="Visualization save interval in steps / 可视化保存的步数间隔")
+# Visualization
+parser.add_argument("--visualize", type=int, default=0, help="Save input clips as GIFs (0/1)")
+parser.add_argument("--vis_samples", type=int, default=2, help="Number of samples to visualize per batch")
+parser.add_argument("--vis_interval", type=int, default=10, help="Visualization save interval in steps")
 
-# ---------------------------
-# Index sampling for ViT input / ViT 输入的索引采样
-# ---------------------------
+# Index sampling for ViT input
+parser.add_argument("--total_indices", type=int, default=2048, help="Visible indices total count")
+parser.add_argument("--target_num", type=int, default=2048, help="Sampled indices count")
+parser.add_argument("--must_num", type=int, default=256, help="Number of indices that must be included (from front)")
+parser.add_argument("--num_tokens_per_frame", type=int, default=256, help="Number of tokens per frame")
 
-parser.add_argument("--total_indices", type=int, default=2048, help="Visible indices total count / 可见索引总数")
-parser.add_argument("--target_num", type=int, default=2048, help="Sampled indices count / 采样索引个数")
-parser.add_argument("--must_num", type=int, default=256, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
-parser.add_argument("--num_tokens_per_frame", type=int, default=256, help="Number of indices must be included (from front) / 必须包含的索引数 (前面)")
-
-# ---------------------------
-# Multi-frame training / 多帧训练
-# 说明：视频分支支持4帧、8帧、16帧、32帧混合训练，每个rank使用不同帧数
-# batch size反比：32帧bs=base, 16帧bs=2*base, 8帧bs=4*base, 4帧bs=8*base
-# ---------------------------
+# Multi-frame training (batch size inversely proportional to frame count)
 parser.add_argument("--enable_multi_frame", type=int, default=1,
-                    help="Enable multi-frame training (0/1). When enabled, different ranks use different frame counts / 是否启用多帧混合训练")
+                    help="Enable multi-frame training (0/1)")
 parser.add_argument("--multi_frame_list", nargs='+', type=int, default=[8],
-                    help="List of frame counts to use in multi-frame training / 多帧训练时使用的帧数列表")
+                    help="List of frame counts to use in multi-frame training")
 parser.add_argument("--base_num_frames", type=int, default=8,
-                    help="Base frame count for batch size calculation. Batch size is inversely proportional: bs = base_bs * (base_num_frames / actual_num_frames) / 用于计算batch size的基准帧数")
+                    help="Base frame count for batch size calculation")
 
 args = parser.parse_args()
 
@@ -145,7 +119,7 @@ torch.backends.cudnn.benchmark = True
 os.makedirs(args.output, exist_ok=True)
 
 if rank == 0:
-    logger: logging.Logger = logging.getLogger(__name__)  # 模块级 logger
+    logger: logging.Logger = logging.getLogger(__name__)
     formatter = logging.Formatter(f"rank-id:{rank:03d}:%(asctime)s-%(message)s")
     file_handler = logging.FileHandler(os.path.join(args.output, f"training_{rank:03d}.logger"))
     stream_handler = logging.StreamHandler(sys.stdout)
@@ -155,7 +129,7 @@ if rank == 0:
     logger.addHandler(stream_handler)
     logger.setLevel(logging.INFO)
 else:
-    logger: logging.Logger = logging.getLogger(__name__)  # 模块级 logger
+    logger: logging.Logger = logging.getLogger(__name__)
     formatter = logging.Formatter(f"rank-id:{rank:03d}:%(asctime)s-%(message)s")
     file_handler = logging.FileHandler(os.path.join(args.output, f"training_{rank:03d}.logger"))
     file_handler.setFormatter(formatter)
