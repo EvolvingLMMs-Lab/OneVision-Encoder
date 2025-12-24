@@ -55,6 +55,8 @@ def _mv_energy_norm(
     pct: float = 95.0,
 ):
     """Return (norm_HxW_float32_in_[0,1], scale_max_px). No gamma/colormap."""
+    if not _HAS_CV2:  # fix: check cv2 availability before use
+        raise ImportError("cv2 is required for _mv_energy_norm but not available")
     vx = mvx.astype(np.float32) / float(mv_unit_div)
     vy = mvy.astype(np.float32) / float(mv_unit_div)
     mag = np.sqrt(vx * vx + vy * vy)  # pixels
@@ -315,7 +317,7 @@ class ExternalInputCallable:
         video_path, video_label = example_info
         try:
             combined_data, duration, frame_id_list = self.get_frame_id_list(video_path, self.sequence_length)
-        except:
+        except Exception:  # fix: avoid bare except to allow KeyboardInterrupt/SystemExit to propagate
             video_path, video_label = self.replace_example_info
             combined_data, duration, frame_id_list = self.get_frame_id_list(video_path, self.sequence_length)
         
