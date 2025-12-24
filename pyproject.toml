@@ -3,11 +3,46 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "glimpse"
+name = "onevision-encoder"
 version = "0.1.0"
-description = ""
-authors = [{name=""}]
-dependencies = []
+description = "HEVC-Style Vision Transformer for efficient video understanding"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+    "timm>=0.9.0",
+    "numpy",
+    "Pillow",
+]
 
-[tool.setuptools]
-packages = ["dataloader", "model_factory", "training"]  # 或使用 find 命令式收集
+[project.optional-dependencies]
+train = [
+    "tensorboard",
+    "nvidia-dali-cuda110",
+    "decord",
+]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "onevision_encoder*",
+    "dataloader*",
+    "model_factory*",
+    "training*",
+    "dataset*",
+    "eval_encoder*",
+]
+exclude = [
+    "shells*",
+    "tools*",
+    "llava_next*",
+    "asset*",
+    "pages*",
+]
