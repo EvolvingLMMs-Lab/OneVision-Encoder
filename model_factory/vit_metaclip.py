@@ -25,7 +25,7 @@ class MetaClip(nn.Module):
 @register_model
 def metaclip_base16_fullcc(pretrained: bool = False, **kwargs):
     model = MetaClip(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-b16-fullcc2.5b/"),
+        ckpt=kwargs.get("ckpt", "facebook/metaclip-b16-fullcc2.5b"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -33,7 +33,7 @@ def metaclip_base16_fullcc(pretrained: bool = False, **kwargs):
 @register_model
 def metaclip_large14_fullcc(pretrained: bool = False, **kwargs):
     model = MetaClip(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-l14-fullcc2.5b/"),
+        ckpt=kwargs.get("ckpt", "facebook/metaclip-l14-fullcc2.5b"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -42,7 +42,7 @@ def metaclip_large14_fullcc(pretrained: bool = False, **kwargs):
 @register_model
 def metaclip2_large14(pretrained: bool = False, **kwargs):
     model = MetaClip(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/metaclip-2-worldwide-l14"),
+        ckpt=kwargs.get("ckpt", "facebook/metaclip-l14-fullcc2.5b"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model

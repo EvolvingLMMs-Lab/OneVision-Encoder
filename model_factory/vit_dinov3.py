@@ -49,8 +49,11 @@ def dinov3_base(pretrained=False, **kwargs):
     Returns:
         Dinov3: An instance of Dinov3.
     """
+    ckpt = kwargs.get("ckpt")
+    if ckpt is None:
+        raise ValueError("DINOv3 requires a checkpoint path via ckpt=... argument")
     model = Dinov3(
-        ckpt="/video_vit/pretrain_models/dinov3-vitb16-pretrain-lvd1689m",
+        ckpt=ckpt,
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -58,8 +61,11 @@ def dinov3_base(pretrained=False, **kwargs):
 
 @register_model
 def dinov3_large(pretrained=False, **kwargs):
+    ckpt = kwargs.get("ckpt")
+    if ckpt is None:
+        raise ValueError("DINOv3 requires a checkpoint path via ckpt=... argument")
     model = Dinov3(
-        ckpt="/video_vit/pretrain_models/dinov3-vitl16-pretrain-lvd1689m",
+        ckpt=ckpt,
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -77,8 +83,11 @@ def dinov3_giant(pretrained=False, **kwargs):
     Returns:
         Dinov3: An instance of Dinov3 with giant variant.
     """
+    ckpt = kwargs.get("ckpt")
+    if ckpt is None:
+        raise ValueError("DINOv3 requires a checkpoint path via ckpt=... argument")
     model = Dinov3(
-        ckpt="/video_vit/pretrain_models/dinov3-giant",
+        ckpt=ckpt,
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model

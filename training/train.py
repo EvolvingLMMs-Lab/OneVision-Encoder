@@ -69,8 +69,8 @@ parser.add_argument("--list_init_partial_fc_paths", nargs='+', type=str, default
 # Model / 模型
 # ---------------------------
 parser.add_argument("--model_name", default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head", help="Backbone model name / 主干模型名称")
-parser.add_argument("--model_weight", default="/vlm/xiangan/VideoMLCD/checkpoints/llava_vit_s_16.py/00190000/backbone.pt",
-                    help="Path to pretrained weights or None / 预训练权重路径，或 None")
+parser.add_argument("--model_weight", default=None,
+                    help="Path to pretrained weights, HuggingFace model ID, or None")
 parser.add_argument("--embedding_size", type=int, default=384, help="Embedding dimension of the head / 头部嵌入维度")
 parser.add_argument("--gradient_checkpoint", type=int, default=0, help="Enable gradient checkpointing (0/1) / 是否启用梯度检查点（节省显存）")
 parser.add_argument("--mask", type=int, default=0, help="Enable mask-related training (0/1) / 是否启用 mask 相关训练")

@@ -182,7 +182,7 @@ def siglip2_base(pretrained=False, **kwargs):
         Siglip2: An instance of Siglip2.
     """
     model = Siglip2(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-base-patch16-224"),
+        ckpt=kwargs.get("ckpt", "google/siglip2-base-patch16-224"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -202,7 +202,7 @@ def siglip2_large_patch16_256(pretrained=False, **kwargs):
         Siglip2: An instance of Siglip2.
     """
     model = Siglip2(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-large-patch16-256"),
+        ckpt=kwargs.get("ckpt", "google/siglip2-large-patch16-256"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model
@@ -222,7 +222,7 @@ def siglip2_so400m_patch16_naflex(pretrained=False, **kwargs):
         Siglip2Naflex: An instance of Siglip2Naflex.
     """
     model = Siglip2Naflex(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/siglip2-so400m-patch16-naflex"),
+        ckpt=kwargs.get("ckpt", "google/siglip2-so400m-patch16-naflex"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
     return model

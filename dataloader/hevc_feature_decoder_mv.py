@@ -229,7 +229,7 @@ class RobustHevcStream:
     def __init__(self, video, parallel=1, hevc_bin=None):
         self.video = video
         self.parallel = str(parallel)
-        self.hevc_bin = hevc_bin or os.environ.get('HEVC_FEAT_DECODER', '/video_vit/yunyaoyan/umt/umt_split/decoder/bin/hevc')
+        self.hevc_bin = hevc_bin or os.environ.get('HEVC_FEAT_DECODER', 'hevc')
         if not (os.path.isfile(self.hevc_bin) and os.access(self.hevc_bin, os.X_OK)):
             raise FileNotFoundError(f"HEVC binary not found/executable: {self.hevc_bin}")
         vinfo, _ = ffprobe(video)
@@ -427,7 +427,7 @@ def viz_residual(res: np.ndarray, signed: bool = True) -> np.ndarray:
         raise ValueError(f"Unexpected residual shape for viz: {res.shape}")
     return vis
 
-_HEVC_FEAT_DECODER = os.environ.get('HEVC_FEAT_DECODER', '/video_vit/yunyaoyan/umt/umt_split/decoder/bin/hevc')
+_HEVC_FEAT_DECODER = os.environ.get('HEVC_FEAT_DECODER', 'hevc')
 
 _FFMPEG_SUPPORTED_DECODERS = [ext.encode() for ext in [
     ".mp4", ".mkv", ".mov", ".hevc", ".h265", ".265"

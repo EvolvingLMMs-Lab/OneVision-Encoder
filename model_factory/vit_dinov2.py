@@ -7,9 +7,9 @@ from timm.models.registry import register_model
 class Dinov2(nn.Module):
     def __init__(
         self,
-        ckpt: str = "/video_vit/pretrain_models/dinov2-base",
+        ckpt: str = "facebook/dinov2-base",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        local_files_only: bool = True,
+        local_files_only: bool = False,
     ):
         """
         DINOv2 视觉 Transformer 封装（forward 返回去掉 CLS 的 patch tokens）
@@ -51,18 +51,18 @@ def dinov2_base(pretrained: bool = False, **kwargs):
         **kwargs: 透传给 Dinov2（ckpt, device, local_files_only）
     """
     model = Dinov2(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/dinov2-base"),
+        ckpt=kwargs.get("ckpt", "facebook/dinov2-base"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
-        local_files_only=kwargs.get("local_files_only", True),
+        local_files_only=kwargs.get("local_files_only", False),
     )
     return model
 
 @register_model
 def dinov2_large(pretrained: bool = False, **kwargs):
     model = Dinov2(
-        ckpt=kwargs.get("ckpt", "/video_vit/pretrain_models/dinov2-large"),
+        ckpt=kwargs.get("ckpt", "facebook/dinov2-large"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
-        local_files_only=kwargs.get("local_files_only", True),
+        local_files_only=kwargs.get("local_files_only", False),
     )
     return model
 
