@@ -179,26 +179,37 @@ pip install -e .
 > Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab/onevision-encoder-large).
 
 ```python
-from transformers import AutoModel
+from transformers import AutoModel, AutoImageProcessor
+from PIL import Image
 import torch
 
-# Load model
+# Load model and preprocessor
 model = AutoModel.from_pretrained(
     "lmms-lab/onevision-encoder-large",
     trust_remote_code=True,
     attn_implementation="flash_attention_2"
 ).to("cuda").eval()
 
+preprocessor = AutoImageProcessor.from_pretrained(
+    "lmms-lab/onevision-encoder-large",
+    trust_remote_code=True
+)
+
 # Image inference: [B, C, H, W]
-image = torch.randn(1, 3, 448, 448).to("cuda")
+image = Image.open("path/to/your/image.jpg")  # Replace with your image path
+pixel_values = preprocessor(images=image, return_tensors="pt")["pixel_values"].to("cuda")
 with torch.no_grad():
-    outputs = model(image)
+    outputs = model(pixel_values)
     # outputs.last_hidden_state: [B, num_patches, hidden_size]
     # outputs.pooler_output: [B, hidden_size]
 
 # Video inference: [B, C, T, H, W] with visible_indices
 num_frames, frame_tokens, target_frames = 16, 256, 64
-video = torch.randn(1, 3, num_frames, 224, 224).to("cuda")
+# Load video frames and preprocess each frame (replace with your video frame paths)
+frames = [Image.open(f"path/to/frame_{i}.jpg") for i in range(num_frames)]
+video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_values"]
+# Reshape from [T, C, H, W] to [B, C, T, H, W]
+video = video_pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4).to("cuda")
 
 # Build visible_indices for temporal sampling
 frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
