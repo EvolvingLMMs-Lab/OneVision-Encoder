@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>OneVision Encoder</strong>
+  <strong>HEVC-Style Vision Transformer</strong>
 </p>
 
 ## 📖 Table of Contents
@@ -24,7 +24,11 @@
 
 ## 🔍 Introduction
 
-OneVision Encoder is a vision encoder designed for multimodal large language models, featuring efficient video representation with sparse video input. This project provides training code, data processing tools, and model evaluation utilities.
+Video understanding models face a fundamental trade-off: processing more frames captures richer temporal information but increases computation quadratically. Traditional approaches address this through sparse frame sampling, but this discards fine-grained motion dynamics and treats all spatial regions equally—wasting computation on static backgrounds.
+
+We present OneVision Encoder, a vision transformer that resolves this trade-off using principles from HEVC video compression. Instead of sampling sparse frames densely (all patches from few frames), we sample dense frames sparsely (important patches from many frames). Our codec-style patch selection identifies temporally-salient regions—areas with motion, object interactions, or semantic changes—and processes only these informative patches.
+
+Combined with global contrastive learning using a 2M concept bank, OneVision Encoder achieves state-of-the-art results on video benchmarks (MVBench, VideoMME, Perception Test) and image understanding tasks (DocVQA, ChartQA, OCRBench).
 
 ### Method Overview
 
@@ -34,11 +38,16 @@ OneVision Encoder is a vision encoder designed for multimodal large language mod
 
 ### Cluster Discrimination Visualization
 
+Standard contrastive learning (e.g., CLIP) is limited by batch size—negative samples are drawn only from the current batch, typically 32K-64K examples. This creates a narrow view of the embedding space and leads to suboptimal representations. Our approach maintains a global concept bank of 2M clustered centers, enabling each training sample to contrast against a diverse, representative set of negatives regardless of batch composition. This produces more discriminative embeddings with better-separated semantic clusters.
+
+
 <p align="center">
   <img src="pages/images/global_contrastive_comparison.gif" alt="Global Contrastive Comparison" width="800" style="max-width: 100%;">
 </p>
 
-### Case Demonstrations
+### Video Processing Pipeline
+
+The visualization below demonstrates our complete video processing pipeline. The animation shows four key stages: (1) Original Video - a continuous 64-frame stream capturing the full temporal context, (2) Uniform Frame Sampling - traditional approach selecting 4-8 evenly-spaced frames, which is simple but lossy and misses inter-frame motion, (3) Temporal Saliency Detection - analysis of all 64 frames to identify regions with high temporal information such as motion, appearance changes, and semantic events, and (4) Codec-Style Patch Extraction - extraction of only the salient patches in zigzag order, achieving 75-98% compression while preserving temporal dynamics.
 
 <table>
   <tr>
