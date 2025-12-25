@@ -34,7 +34,11 @@ Combined with global contrastive learning using a 2M concept bank, OneVision Enc
 ### Method Overview
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method.jpg" alt="OneVision Encoder Method Overview" width="800" style="max-width: 100%;">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png">
+    <img alt="OneVision Encoder Method Overview" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png" width="800" style="max-width: 100%;">
+  </picture>
 </p>
 
 ### Cluster Discrimination Visualization
