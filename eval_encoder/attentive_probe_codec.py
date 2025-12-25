@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 import torchmetrics
 from dataloader.ap_dataloader_dali import get_dali_dataloader
-from dataloader.open_ap_dataloader_dali_codec import get_dali_dataloader_codec
+from dataloader.ap_dataloader_dali_codec import get_dali_dataloader_codec
 
 from timm.loss import LabelSmoothingCrossEntropy
 from timm.models import create_model
