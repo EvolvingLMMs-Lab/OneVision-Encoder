@@ -519,7 +519,7 @@ def _make_out_path(video_path: str, src: str, dst: str, suffix: str = ".visidx.n
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--list", type=str, default="/video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2/shuf_merged_list", help="视频列表文件（每行一个路径）")
+    ap.add_argument("--list", type=str, default="${DATA_DIR}", help="视频列表文件（每行一个路径）")
     # ===== 新增：分文件输出相关参数 =====
     ap.add_argument("--out_replace_src", default="clips_square_aug_k710_ssv2_hevc_v2", help="输出路径替换：原始路径中的子串（如原根目录）")
     ap.add_argument("--out_replace_dst", default="clips_square_aug_k710_ssv2_hevc_v2_residual_mv", help="输出路径替换：替换成的子串（如新根目录）")

@@ -42,19 +42,6 @@ Combined with global contrastive learning using a 2M concept bank, OneVision Enc
   </picture>
 </p>
 
-### Cluster Discrimination Visualization
-
-Standard contrastive learning (e.g., CLIP) is limited by batch size—negative samples are drawn only from the current batch, typically 32K-64K examples. This creates a narrow view of the embedding space and leads to suboptimal representations. Our approach maintains a global concept bank of 2M clustered centers, enabling each training sample to contrast against a diverse, representative set of negatives regardless of batch composition. This produces more discriminative embeddings with better-separated semantic clusters.
-
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_dark.gif">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_light.gif">
-    <img alt="Training Loss Visualization" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_light.gif" width="800" style="max-width: 100%;">
-  </picture>
-</p>
-
 ### Video Processing Pipeline
 
 The visualization below demonstrates our complete video processing pipeline. The animation shows four key stages: (1) Original Video - a continuous 64-frame stream capturing the full temporal context, (2) Uniform Frame Sampling - traditional approach selecting 4-8 evenly-spaced frames, which is simple but lossy and misses inter-frame motion, (3) Temporal Saliency Detection - analysis of all 64 frames to identify regions with high temporal information such as motion, appearance changes, and semantic events, and (4) Codec-Style Patch Extraction - extraction of only the salient patches in zigzag order, achieving 75-98% compression while preserving temporal dynamics.
@@ -71,6 +58,19 @@ The visualization below demonstrates our complete video processing pipeline. The
     </td>
   </tr>
 </table>
+
+### Cluster Discrimination Visualization
+
+Standard contrastive learning (e.g., CLIP) is limited by batch size—negative samples are drawn only from the current batch, typically 32K-64K examples. This creates a narrow view of the embedding space and leads to suboptimal representations. Our approach maintains a global concept bank of 2M clustered centers, enabling each training sample to contrast against a diverse, representative set of negatives regardless of batch composition. This produces more discriminative embeddings with better-separated semantic clusters.
+
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_light.gif">
+    <img alt="Training Loss Visualization" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_light.gif" width="800" style="max-width: 100%;">
+  </picture>
+</p>
 
 ### Pre-training Tips
 
@@ -149,23 +149,20 @@ docker run -it --gpus all --ipc host --net host --privileged \
 docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
     --ulimit memlock=-1 --ulimit stack=67108864 --rm \
     -v "$(pwd)":/workspace/OneVision-Encoder \
-    -v /train_tmp:/train_tmp \
-    -v /vlm:/vlm -v /video_vit:/video_vit -v /rice_ocr:/rice_ocr \
-    -v /data_0:/data_0 -v /data_1:/data_1 -v /data_2:/data_2 -v /data_3:/data_3 \
     -w /workspace/OneVision-Encoder \
     -e NCCL_TIMEOUT=1800 \
     -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
-    -e NCCL_SOCKET_IFNAME=eth0 \
-    -e NCCL_IB_GID_INDEX=3 \
-    -e NCCL_IB_DISABLE=0 \
-    -e NCCL_IB_HCA="mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1" \
-    -e NCCL_NET_GDR_LEVEL=2 \
-    -e NCCL_IB_QPS_PER_CONNECTION=4 \
-    -e NCCL_IB_TC=160 \
-    -e NCCL_IB_TIMEOUT=22 \
-    -e NCCL_CROSS_NIC=1 \
-    -e NCCL_MIN_NCHANNELS=8 \
-    -e NCCL_MAX_NCHANNELS=16 \
+    -e NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
+    -e NCCL_IB_GID_INDEX=${NCCL_IB_GID_INDEX:-3} \
+    -e NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0} \
+    -e NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_0}" \
+    -e NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-2} \
+    -e NCCL_IB_QPS_PER_CONNECTION=${NCCL_IB_QPS_PER_CONNECTION:-4} \
+    -e NCCL_IB_TC=${NCCL_IB_TC:-160} \
+    -e NCCL_IB_TIMEOUT=${NCCL_IB_TIMEOUT:-22} \
+    -e NCCL_CROSS_NIC=${NCCL_CROSS_NIC:-1} \
+    -e NCCL_MIN_NCHANNELS=${NCCL_MIN_NCHANNELS:-8} \
+    -e NCCL_MAX_NCHANNELS=${NCCL_MAX_NCHANNELS:-16} \
     llava_vit:25.11.22 bash -c "service ssh restart; bash"
 ```
 

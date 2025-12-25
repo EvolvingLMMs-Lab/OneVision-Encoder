@@ -302,7 +302,7 @@ def howto100m_kinetics_104948429_400000_split_80():
 
     assert world_size <= 80
 
-    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_0/preshuffled_trainset_split_80/preshuffled_trainset_part.lst_{rank:03d}"
+    list_mp4_label_path = ff"{os.getenv(\'VIDEO_VIT_DATA\', \'/path/to/data\')}/configs_for_llava_vit_versions_0_0_0/preshuffled_trainset_split_80/preshuffled_trainset_part.lst_{rank:03d}"
     # with open(list_mp4_label, "r", encoding="utf-8") as f:
         # lines = f.readlines()
 
@@ -326,7 +326,7 @@ def howto100m_kinetics_104948429_400000_split_128():
 
     assert world_size <= 128
 
-    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_0/preshuffled_trainset_split_128/preshuffled_trainset_part.lst_{rank:03d}"
+    list_mp4_label_path = ff"{os.getenv(\'VIDEO_VIT_DATA\', \'/path/to/data\')}/configs_for_llava_vit_versions_0_0_0/preshuffled_trainset_split_128/preshuffled_trainset_part.lst_{rank:03d}"
     # with open(list_mp4_label, "r", encoding="utf-8") as f:
         # lines = f.readlines()
 
@@ -349,7 +349,7 @@ def howto100m_panda70m_kinetics_126409811_400000_split_128():
 
     assert world_size <= 128
 
-    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_1_add_pandas70M/train_how_to_100m_panda70m_k710_split_128/part_{rank:03d}"
+    list_mp4_label_path = ff"{os.getenv(\'VIDEO_VIT_DATA\', \'/path/to/data\')}/configs_for_llava_vit_versions_0_0_1_add_pandas70M/train_how_to_100m_panda70m_k710_split_128/part_{rank:03d}"
     # with open(list_mp4_label, "r", encoding="utf-8") as f:
         # lines = f.readlines()
 
@@ -373,7 +373,7 @@ def configs_for_llava_vit_versions_0_0_2_add_pandas70M():
 
     assert world_size <= 128
 
-    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_split_128/part_{rank:03d}"
+    list_mp4_label_path = ff"{os.getenv(\'VIDEO_VIT_DATA\', \'/path/to/data\')}/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_split_128/part_{rank:03d}"
     # with open(list_mp4_label, "r", encoding="utf-8") as f:
         # lines = f.readlines()
 
@@ -397,7 +397,7 @@ def configs_for_llava_vit_versions_0_0_2_add_pandas70M_filtered():
 
     assert world_size <= 128
 
-    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_filtered_split_128/part_{rank:03d}"
+    list_mp4_label_path = ff"{os.getenv(\'VIDEO_VIT_DATA\', \'/path/to/data\')}/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_filtered_split_128/part_{rank:03d}"
     # with open(list_mp4_label, "r", encoding="utf-8") as f:
         # lines = f.readlines()
 
@@ -419,7 +419,7 @@ def configs_for_llava_vit_versions_0_0_2_square_with_index_filtered():
     world_size = int(os.getenv("WORLD_SIZE", "1"))
 
     assert world_size <= 128
-    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_square_with_index_filtered_split_128/part_{rank:03d}"
+    list_mp4_label_path = ff"{os.getenv(\'VIDEO_VIT_DATA\', \'/path/to/data\')}/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_square_with_index_filtered_split_128/part_{rank:03d}"
 
     return Property(
         name="configs_for_llava_vit_versions_0_0_2_square_with_index_filtered",
@@ -440,7 +440,7 @@ def configs_for_llava_vit_versions_0_0_2_add_pandas70M_split_80():
 
     assert world_size <= 80
 
-    list_mp4_label_path = f"/video_vit/dataset/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_split_80/part_{rank:03d}"
+    list_mp4_label_path = ff"{os.getenv(\'VIDEO_VIT_DATA\', \'/path/to/data\')}/configs_for_llava_vit_versions_0_0_2_add_pandas70M/train_how_to_100m_panda70m_k710_split_80/part_{rank:03d}"
     # with open(list_mp4_label, "r", encoding="utf-8") as f:
         # lines = f.readlines()
 
@@ -462,7 +462,7 @@ def fake_data():
     world_size = int(os.getenv("WORLD_SIZE", "1"))
     return Property(
         name="fake_data",
-        prefixes=["/video_vit/xiangan/LLaVA-ViT/fake_data/fake_data"],
+        prefixes=["/video_vit/LLaVA-ViT/fake_data/fake_data"],
         num_classes=10000,
         num_examples=0,
         num_shards=world_size,

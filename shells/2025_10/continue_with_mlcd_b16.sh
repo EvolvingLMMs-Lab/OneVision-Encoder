@@ -3,7 +3,7 @@ torchrun \
 --nnodes 8 \
 --node_rank $1 \
 --rdzv_backend=c10d \
---rdzv_endpoint=172.16.5.34:22347 \
+--rdzv_endpoint=${INTERNAL_IP:-127.0.0.1}:22347 \
 --rdzv_id=llava-vit-20251011 \
 -m training.train_univit \
   --model_name pretrain_encoder_base_patch16_224_v10_12_rms_unmask_with_head \
@@ -11,6 +11,6 @@ torchrun \
   --list_batch_sizes 32 32 \
   --num_sampled_data 150000000 \
   --list_datasets k710_ssv2_univit_pfs mlcd_coyo_laion \
-  --list_init_partial_fc_paths NULL /vlm/xiangan/VideoMLCD/checkpoints/llava_vit_b_16.py/00390626/MLCD_in_pfs/MLCD_in_pfs_%03d.pt \
-  --init_backbone /vlm/xiangan/VideoMLCD/checkpoints/llava_vit_b_16.py/00390626/backbone.pt \
-  --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh`
+  --list_init_partial_fc_paths NULL /vlm/VideoMLCD/checkpoints/llava_vit_b_16.py/00390626/MLCD_in_pfs/MLCD_in_pfs_%03d.pt \
+  --init_backbone ${INIT_BACKBONE} \
+  --output ${OUTPUT_DIR:-./output} $0 .sh`

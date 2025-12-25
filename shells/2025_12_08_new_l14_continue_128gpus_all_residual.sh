@@ -55,7 +55,7 @@ echo "nnode=$nnode"
 echo "node_rank=$node_rank"
 
 
-root_pfc=/video_vit/xiangan/checkpoint_llava_vit/2025_12_05_new_l14_continue_128gpus_how_to_100m_448px_224px_num_frames_16_huggingface_ocr/00170000
+root_pfc=/video_vit/2025_12_05_new_l14_continue_128gpus_how_to_100m_448px_224px_num_frames_16_huggingface_ocr/00170000
 path_llava_vit_si_ssd=${root_pfc}/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt
 path_configs_for_llava_vit_versions_0_0_2_add_pandas70M=${root_pfc}/configs_for_llava_vit_versions_0_0_2_add_pandas70M_filtered/configs_for_llava_vit_versions_0_0_2_add_pandas70M_filtered_%03d.pt
 path_ocr=${root_pfc}/llava_vit_ocr_ssd/llava_vit_ocr_ssd_%03d.pt
@@ -75,8 +75,8 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --lr 0.00005 \
   --warmup_ratio 0.001 \
   --list_datasets llava_vit_ocr_ssd llava_vit_si_ssd configs_for_llava_vit_versions_0_0_2_square_with_index_filtered  \
-  --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
-  --init_backbone /video_vit/xiangan/checkpoint_llava_vit/2025_12_05_new_l14_continue_128gpus_how_to_100m_448px_224px_num_frames_16_huggingface_ocr/00170000_hf \
+  --output ${OUTPUT_DIR:-./output} $0 .sh` \
+  --init_backbone ${INIT_BACKBONE} \
   --list_init_partial_fc_paths $path_ocr $path_llava_vit_si_ssd $path_configs_for_llava_vit_versions_0_0_2_add_pandas70M \
   --list_sample_rates 0.1 0.1 0.1 \
   --list_lr_pfc_weights 1 1 1 \

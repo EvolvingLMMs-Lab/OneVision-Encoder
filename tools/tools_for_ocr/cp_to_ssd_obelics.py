@@ -18,58 +18,18 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ----- Config (you can edit or pass via CLI) -----
+# Configure your cluster hosts here
 hosts = [
-    "172.16.5.19",
-    "172.16.5.27",
-    "172.16.5.81",
-    "172.16.5.82",
-    "172.16.5.85",
-    "172.16.5.86",
-    "172.16.5.87",
-    "172.16.5.88",
-    "172.16.5.89",
-    "172.16.5.90",
-    "172.16.5.91",
-    "172.16.5.92",
-    "172.16.5.93",
-    "172.16.5.94",
-    "172.16.5.95",
-    "172.16.5.96",
+    # "node-01",
+    # "node-02",
+    # Add your hosts...
 ]
 
+# Configure your source data paths here
 list_coyo = [
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_001",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_002",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_003",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_004",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_005",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_006",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_007",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_008",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_009",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_010",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_011",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_012",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_013",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_014",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_015",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_016",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_017",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_018",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_019",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_020",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_021",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_022",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_023",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_024",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_025",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_026",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_027",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_028",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_029",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_030",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_031",
-    "/rice_ocr/dataset_ocr/source/obelics/obelics_00300_00600_part_032",
+    # "/path/to/data/part_001",
+    # "/path/to/data/part_002",
+    # Add your data paths...
 ]
 
 
