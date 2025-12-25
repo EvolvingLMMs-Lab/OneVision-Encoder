@@ -11,9 +11,11 @@
 </p>
 
 <div align="center">
+
 🤗 **[Models](https://huggingface.co/lmms-lab/onevision-encoder-large)** |
 🤗 **[Datasets (Coming)]()** |
 📄 **[Technical Report (Coming)](https://arxiv.org/abs/2509.23661)** |
+
 </div>
 
 ## 📖 Table of Contents
@@ -23,7 +25,6 @@
 - [Quick Start](#-quick-start)
 - [Training](#-training)
 - [Evaluation](#-evaluation)
-- [Packing ViT Model](#-packing-vit-model)
 - [Contributors](#-contributors)
 - [License](#-license)
 - [Documentation](#-documentation)
