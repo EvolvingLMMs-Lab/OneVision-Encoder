@@ -10,6 +10,14 @@
   <strong>HEVC-Style Vision Transformer</strong>
 </p>
 
+<div align="center">
+
+🤗 **[Models](https://huggingface.co/lmms-lab/onevision-encoder-large)** |
+🤗 **[Datasets (Coming)]()** |
+📄 **[Technical Report (Coming)](https://arxiv.org/abs/2509.23661)** |
+
+</div>
+
 ## 📖 Table of Contents
 
 - [Introduction](#-introduction)
@@ -17,7 +25,6 @@
 - [Quick Start](#-quick-start)
 - [Training](#-training)
 - [Evaluation](#-evaluation)
-- [Packing ViT Model](#-packing-vit-model)
 - [Contributors](#-contributors)
 - [License](#-license)
 - [Documentation](#-documentation)
@@ -74,11 +81,6 @@ Standard contrastive learning (e.g., CLIP) is limited by batch size—negative s
   </picture>
 </p>
 
-### Pre-training Tips
-
-1. **Scale-up is the final step** - Maximize model capabilities before scaling, and ensure generalization phenomena emerge
-2. **Avoid direct supervision from existing models** - Indirect usage is preferred over direct distillation, which may limit scaling capabilities
-3. **Progressive training when resources are limited** - Start with low resolution/frame rate, then gradually fine-tune to higher settings (ref: CLIPA)
 
 ---
 
@@ -137,20 +139,6 @@ docker run -it --gpus all --ipc host --net host --privileged \
     ov_encoder:25.12 bash
 ```
 
-#### Multi Node
-
-> [!IMPORTANT]
-> 多机必须使用预编译的镜像，且镜像必须一致
-
-```bash
-docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
-    --ulimit memlock=-1 --ulimit stack=67108864 --rm \
-    -v "$(pwd)":/workspace/OneVision-Encoder \
-    -w /workspace/OneVision-Encoder \
-    -e NCCL_TIMEOUT=1800 \
-    -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
-    ov_encoder:25.12 bash -c "service ssh restart; bash"
-```
 
 ### Install Package
 
@@ -233,8 +221,86 @@ Training configurations and hyperparameters will be documented soon.  For now, p
 
 ### Attentive Probe Evaluation
 
+
+#### Chunk-wise Sampling Evaluation
+
+To evaluate the encoder with uniform frame sampling, first navigate to the evaluation directory:
+
 ```bash
+cd eval_encoder
 ```
+
+Then run the following command:
+
+```bash
+torchrun --nproc_per_node=8 --master_port=29507 attentive_probe.py \
+  --eval_freq 1 \
+  --default_lr_list 0.0001 \
+  --batch_size 32 \
+  --default_weight_decay 0 \
+  --dali_py_num_workers 8 \
+  --model_family llava_vit_sampling \
+  --dataset diving48 \
+  --num_frames 8 \
+  --model_weight lmms-lab/onevision-encoder-large \
+  --model_name hf_llava_vit_large_ln \
+  --embedding_size 1024 \
+  --frames_token_num 256
+```
+
+**Sampling-Specific Parameters:**
+- `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
+
+#### OV-Encoder Codec Evaluation
+
+To evaluate the encoder with codec-style patch selection, first navigate to the evaluation directory:
+
+```bash
+cd eval_encoder
+```
+
+Then run the following command:
+
+```bash
+torchrun --nproc_per_node=8 --master_port=29512 attentive_prob_codec.py \
+  --eval_freq 1 \
+  --default_lr_list 0.0001 \
+  --batch_size 4 \
+  --default_weight_decay 0 \
+  --dali_py_num_workers 8 \
+  --model_family llava_vit_codec \
+  --dataset diving48 \
+  --num_frames 64 \
+  --model_weight lmms-lab/onevision-encoder-large \
+  --model_name hf_llava_vit_large_ln \
+  --embedding_size 1024 \
+  --default_epoch 30 \
+  --data_root /path/to/your/data_attentive_probe/ \
+  --cache_dir /path/to/your/cache_residuals/ \
+  --K_keep 2048 \
+  --mv_compensate median
+```
+
+**Codec-Specific Parameters:**
+- `cache_dir`: Directory for cached codec patches. This is where the codec-selected patches will be stored/loaded.
+- `K_keep`: Number of patches to keep. For example, 256 patches per frame × 8 frames = 2048 total patches. Adjust based on your frame count and desired compression ratio.
+- `mv_compensate`: Motion vector compensation method (e.g., `median`).
+
+#### Shared Parameters
+
+The following parameters are common to both evaluation methods:
+
+- `dataset`: Dataset to evaluate on (e.g., `diving48`, `ssv2`, `kinetics400`). Prepare the dataset according to the Attentive Probe format.
+- `num_frames`: Total number of frames in the video sequence (e.g., 8 for sampling, 64 for codec).
+- `model_weight`: Path to the pre-trained model. Use `lmms-lab/onevision-encoder-large` to load directly from HuggingFace, or provide a local path.
+- `model_name`: Model architecture name (e.g., `hf_llava_vit_large_ln`).
+- `embedding_size`: Size of the embedding dimension (e.g., 1024).
+- `batch_size`: Training batch size (varies by evaluation type).
+- `default_lr_list`: Learning rate for the probe training.
+- `default_weight_decay`: Weight decay for optimization.
+- `eval_freq`: Evaluation frequency during training.
+- `dali_py_num_workers`: Number of DALI data loading workers.
+- `data_root`: Root directory containing your prepared dataset (codec evaluation only).
 
 
 
