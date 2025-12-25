@@ -241,6 +241,36 @@ For multi-node distributed training, configure your training script according to
 
 ### Attentive Probe Evaluation
 
+
+#### Sampling Evaluation
+
+To evaluate the encoder with uniform frame sampling, first navigate to the evaluation directory:
+
+```bash
+cd eval_encoder
+```
+
+Then run the following command:
+
+```bash
+torchrun --nproc_per_node=8 --master_port=29507 attentive_probe.py \
+  --eval_freq 1 \
+  --default_lr_list 0.0001 \
+  --batch_size 32 \
+  --default_weight_decay 0 \
+  --dali_py_num_workers 8 \
+  --model_family llava_vit_sampling \
+  --dataset diving48 \
+  --num_frames 8 \
+  --model_weight lmms-lab/onevision-encoder-large \
+  --model_name hf_llava_vit_large_ln \
+  --embedding_size 1024 \
+  --frames_token_num 256
+```
+
+**Sampling-Specific Parameters:**
+- `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
+
 #### Codec Evaluation
 
 To evaluate the encoder with codec-style patch selection, first navigate to the evaluation directory:
@@ -275,35 +305,6 @@ torchrun --nproc_per_node=8 --master_port=29512 attentive_prob_codec.py \
 - `cache_dir`: Directory for cached codec patches. This is where the codec-selected patches will be stored/loaded.
 - `K_keep`: Number of patches to keep. For example, 256 patches per frame × 8 frames = 2048 total patches. Adjust based on your frame count and desired compression ratio.
 - `mv_compensate`: Motion vector compensation method (e.g., `median`).
-
-#### Sampling Evaluation
-
-To evaluate the encoder with uniform frame sampling, first navigate to the evaluation directory:
-
-```bash
-cd eval_encoder
-```
-
-Then run the following command:
-
-```bash
-torchrun --nproc_per_node=8 --master_port=29507 attentive_probe.py \
-  --eval_freq 1 \
-  --default_lr_list 0.0001 \
-  --batch_size 32 \
-  --default_weight_decay 0 \
-  --dali_py_num_workers 8 \
-  --model_family llava_vit_sampling \
-  --dataset diving48 \
-  --num_frames 8 \
-  --model_weight lmms-lab/onevision-encoder-large \
-  --model_name hf_llava_vit_large_ln \
-  --embedding_size 1024 \
-  --frames_token_num 256
-```
-
-**Sampling-Specific Parameters:**
-- `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
 
 #### Shared Parameters
 
