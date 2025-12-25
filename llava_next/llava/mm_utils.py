@@ -8,6 +8,9 @@ import torch
 from transformers import StoppingCriteria
 from llava.constants import IMAGE_TOKEN_INDEX
 
+# PIL 10.0.0+ removed ANTIALIAS, use Resampling.LANCZOS instead
+LANCZOS = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.ANTIALIAS
+
 
 def resize_and_center_crop(image, shortest_edge_length):
     # Calculate new dimensions and resize
@@ -18,7 +21,7 @@ def resize_and_center_crop(image, shortest_edge_length):
     else:
         new_width = shortest_edge_length
         new_height = int(shortest_edge_length / aspect_ratio)
-    resized_image = image.resize((new_width, new_height), Image.ANTIALIAS)
+    resized_image = image.resize((new_width, new_height), LANCZOS)
 
     # Calculate the position and perform the center crop
     left = (new_width - shortest_edge_length) / 2
@@ -49,7 +52,7 @@ def auto_pad_images(image, grid_params):
         resize_height = int(resize_width / input_aspect_ratio)
     else:
         resize_width = int(resize_height * input_aspect_ratio)
-    resized_image = image.resize((resize_width, resize_height), Image.ANTIALIAS)
+    resized_image = image.resize((resize_width, resize_height), LANCZOS)
 
     # Step 5: Pad the resized image if necessary to match the target resolution
     pad_width = target_resolution[0] - resize_width

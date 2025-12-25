@@ -267,9 +267,12 @@ class HevcFeatureReader:
         if self._proc is not None and self._proc.poll() is None:
             self._proc.stdin.close()
             self._proc.stdout.close()
-            # self._proc.stderr.close()
             self._terminate(0.2)
         self._proc = None
+        if hasattr(self, 'DEVNULL') and self.DEVNULL:
+            try: self.DEVNULL.close()
+            except Exception: pass
+            self.DEVNULL = None
 
     def _terminate(self, timeout=1.0):
         """Terminate the sub process."""
@@ -429,7 +432,6 @@ class HevcFeatureReader:
             self.height + (self.height >> 1), self.width
         )
 
-        import os
         if int(os.environ.get('UMT_HEVC_Y_ONLY', '1')) != 0:
             y = all_yuv_data[:self.height, :self.width]
             y_res = all_yuv_data_residual[:self.height, :self.width]

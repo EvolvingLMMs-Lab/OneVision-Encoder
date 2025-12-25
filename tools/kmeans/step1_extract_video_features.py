@@ -275,7 +275,7 @@ def extract_features(
     total_processed = processed_videos
     gpu_cache = None
 
-    for batch_idx, (videos, labels) in enumerate(data_iter):
+    for batch_idx, (videos, _) in enumerate(data_iter):
         # videos: (B, C, T, H, W) -> (B*T, C, H, W)
         B, C, T, H, W = videos.shape
         frames = videos.permute(0, 2, 1, 3, 4).reshape(B * T, C, H, W)

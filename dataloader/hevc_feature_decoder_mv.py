@@ -94,35 +94,6 @@ def _split_yuv420_planes(buf: bytes, H: int, W: int, layout: str):
         raise ValueError(layout)
 
 
-# ---------------- YUV plane parsers ----------------
-def _split_yuv420_planes(buf: bytes, H: int, W: int, layout: str):
-    """Return Y (H,W), U (H/2,W/2), V (H/2,W/2) for layout in {i420,yv12,nv12,nv21}."""
-    nY = H*W
-    nUV = (H//2)*(W//2)
-    arr = np.frombuffer(buf, dtype=np.uint8)
-    if layout in ("i420","yv12"):
-        Y = arr[:nY].reshape(H, W)
-        UV = arr[nY:]
-        # planar U and V (each nUV)
-        U_planar, V_planar = (UV[:nUV], UV[nUV:]) if layout=="i420" else (UV[nUV:], UV[:nUV])
-        U = U_planar.reshape(H//2, W//2)
-        V = V_planar.reshape(H//2, W//2)
-        return Y, U, V
-    elif layout in ("nv12","nv21"):
-        Y = arr[:nY].reshape(H, W)
-        UVint = arr[nY:].reshape(H//2, W)  # interleaved per row: UVUV or VUVU
-        U = np.empty((H//2, W//2), dtype=np.uint8)
-        V = np.empty((H//2, W//2), dtype=np.uint8)
-        if layout == "nv12":  # UVUV...
-            U[:] = UVint[:, 0::2]
-            V[:] = UVint[:, 1::2]
-        else:                  # nv21: VUVU...
-            V[:] = UVint[:, 0::2]
-            U[:] = UVint[:, 1::2]
-        return Y, U, V
-    else:
-        raise ValueError(layout)
-
 # ---------------- manual YUV->BGR with matrix/range ----------------
 def _upsample_uv(U, V, H, W):
     # nearest-neighbor 2x upsample
@@ -248,8 +219,9 @@ class RobustHevcStream:
         self.off_plane_b  = self.mv_elems
         self.meta_bytes   = self.Y >> 2
         self.res_bytes    = self.yuv_bytes
+        self._devnull = open(os.devnull, 'wb')
         self.proc = sp.Popen([self.hevc_bin, "-i", self.video, "-p", self.parallel],
-                             stdin=sp.PIPE, stdout=sp.PIPE, stderr=open(os.devnull,'wb'))
+                             stdin=sp.PIPE, stdout=sp.PIPE, stderr=self._devnull)
         self.buf = bytearray()
 
     def close(self):
@@ -260,6 +232,10 @@ class RobustHevcStream:
             except Exception: pass
             self.proc.terminate()
         self.proc = None
+        if hasattr(self, '_devnull') and self._devnull:
+            try: self._devnull.close()
+            except Exception: pass
+            self._devnull = None
 
     def _read_exact(self, n):
         out = bytearray()
@@ -726,7 +702,6 @@ class HevcFeatureReader:
             self.height + (self.height >> 1), self.width
         )
 
-        import os
         if int(os.environ.get('UMT_HEVC_Y_ONLY', '1')) != 0:
             y = all_yuv_data[:self.height, :self.width]
             y_res = all_yuv_data_residual[:self.height, :self.width]
