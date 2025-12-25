@@ -10,11 +10,11 @@
   <strong>HEVC-Style Vision Transformer</strong>
 </p>
 
-
+<div align="center">
 🤗 **[Models](https://huggingface.co/lmms-lab/onevision-encoder-large)** |
 🤗 **[Datasets (Coming)]()** |
 📄 **[Technical Report (Coming)](https://arxiv.org/abs/2509.23661)** |
-
+</div>
 
 ## 📖 Table of Contents
 
