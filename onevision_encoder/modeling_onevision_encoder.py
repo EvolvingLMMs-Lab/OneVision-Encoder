@@ -531,8 +531,8 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         >>> from transformers import AutoModel, AutoImageProcessor
         >>> from PIL import Image
 
-        >>> model = AutoModel.from_pretrained("lmms-lab/onevision-encoder-large", trust_remote_code=True)
-        >>> preprocessor = AutoImageProcessor.from_pretrained("lmms-lab/onevision-encoder-large", trust_remote_code=True)
+        >>> model = AutoModel.from_pretrained("lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True)
+        >>> preprocessor = AutoImageProcessor.from_pretrained("lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True)
         >>> image = Image.open("path/to/your/image.jpg")  # Replace with your image path
         >>> pixel_values = preprocessor(images=image, return_tensors="pt")["pixel_values"]
         >>> outputs = model(pixel_values)
