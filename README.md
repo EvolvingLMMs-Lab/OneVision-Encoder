@@ -241,8 +241,40 @@ For multi-node distributed training, configure your training script according to
 
 ### Attentive Probe Evaluation
 
+#### Codec Evaluation
+
+To evaluate the encoder with codec-style patch selection, first navigate to the evaluation directory:
+
 ```bash
+cd eval_encoder
 ```
+
+Then run the following command:
+
+```bash
+torchrun --nproc_per_node=8 --master_port=29512 attentive_prob_codec.py \
+  --eval_freq 1 \
+  --default_lr_list 0.0001 \
+  --batch_size 4 \
+  --default_weight_decay 0 \
+  --dali_py_num_workers 8 \
+  --model_family llava_vit_codec \
+  --dataset diving48 \
+  --num_frames 64 \
+  --model_weight lmms-lab/onevision-encoder-large \
+  --model_name hf_llava_vit_large_ln \
+  --embedding_size 1024 \
+  --default_epoch 30 \
+  --data_root /data_3/data_attentive_probe/ \
+  --cache_dir /data_3/data_attentive_probe/diving48_hevc/cache_residuals/ \
+  --K_keep 2048 \
+  --mv_compensate median
+```
+
+**Parameter Notes:**
+- `K_keep`: Number of patches to keep. For example, 256 patches per frame × 8 frames = 2048 total patches.
+- `model_weight`: Path to your pre-trained model weights. Set this to your own model path.
+- `cache_dir`: Directory for cached codec patches. Set this to your own cache directory path.
 
 
 
