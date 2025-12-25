@@ -219,23 +219,15 @@ with torch.no_grad():
 
 ### Codec Input
 
-> **TODO:** Add codec-style input documentation for temporal saliency-based patch selection.
+Add codec-style input documentation for temporal saliency-based patch selection.
 
 ---
 
 ## 🚀 Training
 
-### Single Node
+### Single Node & Multi Node
 
-```bash
-torchrun --nproc_per_node 8 -m training.train --help
-```
-
-### Multi Node
-
-For multi-node distributed training, configure your training script according to your cluster setup. See example scripts in the `shells/` directory.
-
----
+Training configurations and hyperparameters will be documented soon.  For now, please refer to `--help` for available options.
 
 ## 📊 Evaluation
 

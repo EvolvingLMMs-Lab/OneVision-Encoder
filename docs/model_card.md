@@ -86,18 +86,6 @@ with torch.no_grad():
     outputs = model(video, visible_indices=visible_indices)
 ```
 
-## Training
-
-### Training Data
-
-See [datacard.md](datacard.md) for detailed information about the training datasets.
-
-### Training Procedure & Tips
-
-1. **Pre-training**: Global contrastive learning with 2M concept bank for discriminative embeddings
-2. **Scale-up is the final step** - Maximize model capabilities before scaling, and ensure generalization phenomena emerge
-3. **Avoid direct supervision from existing models** - Indirect usage is preferred over direct distillation, which may limit scaling capabilities
-4. **Progressive training when resources are limited** - Start with low resolution/frame rate, then gradually fine-tune to higher settings
 
 ## Evaluation Results
 
