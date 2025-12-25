@@ -139,20 +139,6 @@ docker run -it --gpus all --ipc host --net host --privileged \
     ov_encoder:25.12 bash
 ```
 
-#### Multi Node
-
-> [!IMPORTANT]
-> 多机必须使用预编译的镜像，且镜像必须一致
-
-```bash
-docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK \
-    --ulimit memlock=-1 --ulimit stack=67108864 --rm \
-    -v "$(pwd)":/workspace/OneVision-Encoder \
-    -w /workspace/OneVision-Encoder \
-    -e NCCL_TIMEOUT=1800 \
-    -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
-    ov_encoder:25.12 bash -c "service ssh restart; bash"
-```
 
 ### Install Package
 
