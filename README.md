@@ -38,7 +38,7 @@ Combined with global contrastive learning using a 2M concept bank, OneVision Enc
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_dark.png">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png">
-    <img alt="OneVision Encoder Method Overview" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png" width="800" style="max-width: 100%;">
+    <img alt="OneVision Encoder Method Overview" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png" width="900" style="max-width: 100%;">
   </picture>
 </p>
 
@@ -46,6 +46,7 @@ Combined with global contrastive learning using a 2M concept bank, OneVision Enc
 
 The visualization below demonstrates our complete video processing pipeline. The animation shows four key stages: (1) Original Video - a continuous 64-frame stream capturing the full temporal context, (2) Uniform Frame Sampling - traditional approach selecting 4-8 evenly-spaced frames, which is simple but lossy and misses inter-frame motion, (3) Temporal Saliency Detection - analysis of all 64 frames to identify regions with high temporal information such as motion, appearance changes, and semantic events, and (4) Codec-Style Patch Extraction - extraction of only the salient patches in zigzag order, achieving 75-98% compression while preserving temporal dynamics.
 
+<div align="center">
 <table>
   <tr>
     <td align="center">
@@ -58,6 +59,7 @@ The visualization below demonstrates our complete video processing pipeline. The
     </td>
   </tr>
 </table>
+</div>
 
 ### Cluster Discrimination Visualization
 
@@ -80,13 +82,6 @@ Standard contrastive learning (e.g., CLIP) is limited by batch size—negative s
 
 ---
 
-### Attentive Probe Results
-
-Performance comparison of different vision encoders using Attentive Probe evaluation. Models are evaluated using single clip input and trained for 10 epochs across 8 action recognition datasets. Results show average performance and per-dataset scores for 8-frame and 16-frame configurations.
-
-<p align="center">
-  <img src="asset/result_ap.png" alt="AP" width="800" style="max-width: 100%;">
-</p>
 
 ### LMM Probe Results
 
@@ -99,6 +94,22 @@ Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K sample
     <img alt="LMM Probe Results" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_lmm_github_light.png" width="800" style="max-width: 100%;">
   </picture>
 </p>
+
+### Attentive Probe Results
+
+Performance comparison of different vision encoders using Attentive Probe evaluation. Models are evaluated using single clip input and trained for 10 epochs across 8 action recognition datasets. Results show average performance and per-dataset scores for 8-frame and 16-frame configurations.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_video_github_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_video_github_light.png">
+    <img alt="LMM Probe Results" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_lmm_github_light.png" width="900" style="max-width: 100%;">
+  </picture>
+</p>
+
+
+
+
 
 ## 🔧 Setup
 
