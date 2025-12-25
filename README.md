@@ -12,7 +12,7 @@
 
 <div align="center">
 
-🤗 **[Models](https://huggingface.co/lmms-lab/onevision-encoder-large)** |
+🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
 🤗 **[Datasets (Coming)]()** |
 📄 **[Technical Report (Coming)](https://arxiv.org/abs/2509.23661)** |
 
@@ -242,7 +242,7 @@ torchrun --nproc_per_node=8 --master_port=29507 attentive_probe.py \
   --model_family llava_vit_sampling \
   --dataset diving48 \
   --num_frames 8 \
-  --model_weight lmms-lab/onevision-encoder-large \
+  --model_weight lmms-lab-encoder/onevision-encoder-large \
   --model_name hf_llava_vit_large_ln \
   --embedding_size 1024 \
   --frames_token_num 256
@@ -292,7 +292,7 @@ The following parameters are common to both evaluation methods:
 
 - `dataset`: Dataset to evaluate on (e.g., `diving48`, `ssv2`, `kinetics400`). Prepare the dataset according to the Attentive Probe format.
 - `num_frames`: Total number of frames in the video sequence (e.g., 8 for sampling, 64 for codec).
-- `model_weight`: Path to the pre-trained model. Use `lmms-lab/onevision-encoder-large` to load directly from HuggingFace, or provide a local path.
+- `model_weight`: Path to the pre-trained model. Use `lmms-lab-encoder/onevision-encoder-large` to load directly from HuggingFace, or provide a local path.
 - `model_name`: Model architecture name (e.g., `hf_llava_vit_large_ln`).
 - `embedding_size`: Size of the embedding dimension (e.g., 1024).
 - `batch_size`: Training batch size (varies by evaluation type).
