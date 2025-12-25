@@ -81,11 +81,6 @@ Standard contrastive learning (e.g., CLIP) is limited by batch size—negative s
   </picture>
 </p>
 
-### Pre-training Tips
-
-1. **Scale-up is the final step** - Maximize model capabilities before scaling, and ensure generalization phenomena emerge
-2. **Avoid direct supervision from existing models** - Indirect usage is preferred over direct distillation, which may limit scaling capabilities
-3. **Progressive training when resources are limited** - Start with low resolution/frame rate, then gradually fine-tune to higher settings (ref: CLIPA)
 
 ---
 
