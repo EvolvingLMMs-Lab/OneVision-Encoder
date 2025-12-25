@@ -20,6 +20,7 @@
 - [Packing ViT Model](#-packing-vit-model)
 - [Contributors](#-contributors)
 - [License](#-license)
+- [Documentation](#-documentation)
 
 ---
 
@@ -300,3 +301,10 @@ model = OneVisionEncoderModel.from_pretrained("./output/packed_model")
 ## 📄 License
 
 This project is released under the Apache 2.0 License.
+
+---
+
+## 📚 Documentation
+
+- [Model Card](docs/model_card.md) - Detailed documentation for OneVision Encoder Large model
+- [Data Card](docs/datacard.md) - Training dataset information and statistics
