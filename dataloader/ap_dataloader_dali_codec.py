@@ -1,6 +1,7 @@
 import os
 import logging
 import traceback
+import math
 import numpy as np
 import nvidia.dali.fn as fn
 from typing import List, Tuple, Dict, Any
@@ -28,6 +29,155 @@ except Exception:
 import warnings
 warnings.filterwarnings("ignore")
 
+# ------- MV global motion model cache (per-process) -------
+_MV_GLOBAL_DESIGN_CACHE = {}
+
+
+def _mv_get_design_matrix(Hm: int, Wm: int, mode: str):
+    """Return cached (x_flat, y_flat, A_full) for the MV grid.
+
+    Coordinates are normalized to [-1, 1] to improve conditioning.
+
+    similarity params [tx, ty, a, b]:
+      dx = tx + a*x - b*y
+      dy = ty + b*x + a*y
+
+    affine params [a0, a1, a2, b0, b1, b2]:
+      dx = a0 + a1*x + a2*y
+      dy = b0 + b1*x + b2*y
+    """
+    key = (int(Hm), int(Wm), str(mode).lower())
+    if key in _MV_GLOBAL_DESIGN_CACHE:
+        return _MV_GLOBAL_DESIGN_CACHE[key]
+
+    Hm = int(Hm)
+    Wm = int(Wm)
+    ys = np.linspace(-1.0, 1.0, Hm, dtype=np.float32)
+    xs = np.linspace(-1.0, 1.0, Wm, dtype=np.float32)
+    xx, yy = np.meshgrid(xs, ys)
+    x = xx.reshape(-1).astype(np.float32)
+    y = yy.reshape(-1).astype(np.float32)
+
+    m = str(mode).lower()
+    if m == "similarity":
+        # 2N x 4
+        N = x.shape[0]
+        A = np.zeros((2 * N, 4), dtype=np.float32)
+        # dx rows
+        A[0::2, 0] = 1.0
+        A[0::2, 2] = x
+        A[0::2, 3] = -y
+        # dy rows
+        A[1::2, 1] = 1.0
+        A[1::2, 2] = y
+        A[1::2, 3] = x
+    elif m == "affine":
+        # 2N x 6
+        N = x.shape[0]
+        A = np.zeros((2 * N, 6), dtype=np.float32)
+        # dx rows
+        A[0::2, 0] = 1.0
+        A[0::2, 1] = x
+        A[0::2, 2] = y
+        # dy rows
+        A[1::2, 3] = 1.0
+        A[1::2, 4] = x
+        A[1::2, 5] = y
+    else:
+        raise ValueError(f"Unknown design mode: {mode}")
+
+    _MV_GLOBAL_DESIGN_CACHE[key] = (x, y, A)
+    return x, y, A
+
+
+def _mv_predict_from_params(x_flat: np.ndarray, y_flat: np.ndarray, params: np.ndarray, mode: str):
+    """Predict dx, dy for all grid points."""
+    m = str(mode).lower()
+    if m == "similarity":
+        tx, ty, a, b = [float(v) for v in params.reshape(-1)[:4]]
+        dx = tx + a * x_flat - b * y_flat
+        dy = ty + b * x_flat + a * y_flat
+        return dx.astype(np.float32), dy.astype(np.float32)
+    elif m == "affine":
+        a0, a1, a2, b0, b1, b2 = [float(v) for v in params.reshape(-1)[:6]]
+        dx = a0 + a1 * x_flat + a2 * y_flat
+        dy = b0 + b1 * x_flat + b2 * y_flat
+        return dx.astype(np.float32), dy.astype(np.float32)
+    else:
+        raise ValueError(f"Unknown predict mode: {mode}")
+
+
+def _mv_fit_global_model(vx: np.ndarray, vy: np.ndarray, mode: str,
+                         max_points: int = 5000,
+                         trim_ratio: float = 0.7,
+                         iters: int = 2):
+    """Robustly fit a global camera-motion model on MV grid and return predicted (vx_cam, vy_cam).
+
+    Uses iterative trimming: fit -> residual -> keep smallest trim_ratio -> refit.
+    Falls back to median translation if not enough valid points.
+    """
+    Hm, Wm = vx.shape
+    x_flat, y_flat, A_full = _mv_get_design_matrix(Hm, Wm, mode=mode)
+
+    vxf = vx.reshape(-1).astype(np.float32)
+    vyf = vy.reshape(-1).astype(np.float32)
+
+    mag1 = np.abs(vxf) + np.abs(vyf)
+    valid = np.isfinite(mag1) & (mag1 > 1e-3)
+    idx = np.nonzero(valid)[0]
+
+    if idx.size < 64:
+        vx_cam = np.full_like(vx, float(np.median(vx)), dtype=np.float32)
+        vy_cam = np.full_like(vy, float(np.median(vy)), dtype=np.float32)
+        return vx_cam, vy_cam
+
+    # deterministic subsampling to cap cost
+    if idx.size > int(max_points):
+        step = int(math.ceil(idx.size / float(max_points)))
+        idx = idx[::step]
+
+    def build_system(sel_idx: np.ndarray):
+        rows0 = 2 * sel_idx
+        rows1 = 2 * sel_idx + 1
+        rows = np.concatenate([rows0, rows1], axis=0)
+        A = A_full[rows]
+        b = np.concatenate([vxf[sel_idx], vyf[sel_idx]], axis=0).astype(np.float32)
+        return A, b
+
+    sel = idx
+    params = None
+    for _ in range(max(1, int(iters))):
+        A, b = build_system(sel)
+        try:
+            params = np.linalg.lstsq(A, b, rcond=None)[0].astype(np.float32)
+        except Exception:
+            params = None
+            break
+
+        dx_all, dy_all = _mv_predict_from_params(x_flat, y_flat, params, mode=mode)
+        rx = vxf[sel] - dx_all[sel]
+        ry = vyf[sel] - dy_all[sel]
+        r = np.sqrt(rx * rx + ry * ry)
+
+        if sel.size < 128:
+            break
+
+        keep_n = int(max(64, round(sel.size * float(trim_ratio))))
+        if keep_n >= sel.size:
+            break
+        order = np.argsort(r)
+        sel = sel[order[:keep_n]]
+
+    if params is None:
+        vx_cam = np.full_like(vx, float(np.median(vx)), dtype=np.float32)
+        vy_cam = np.full_like(vy, float(np.median(vy)), dtype=np.float32)
+        return vx_cam, vy_cam
+
+    dx_all, dy_all = _mv_predict_from_params(x_flat, y_flat, params, mode=mode)
+    vx_cam = dx_all.reshape(Hm, Wm).astype(np.float32)
+    vy_cam = dy_all.reshape(Hm, Wm).astype(np.float32)
+    return vx_cam, vy_cam
+
 def _fuse_energy(norm_mv: np.ndarray, norm_res: np.ndarray, mode: str = "weighted", w_mv: float = 1.0, w_res: float = 1.0):
     """Fuse two normalized maps into one normalized map in [0,1]."""
     mode = (mode or "weighted").lower()
@@ -42,9 +192,43 @@ def _fuse_energy(norm_mv: np.ndarray, norm_res: np.ndarray, mode: str = "weighte
         fused = (float(w_mv) * norm_mv + float(w_res) * norm_res) / denom
     return np.clip(fused, 0.0, 1.0).astype(np.float32)
 
-def _residual_energy_norm(res_y: np.ndarray, pct: float = 95.0):
+# ---- Center prior helper ----
+def _apply_center_prior(fused: np.ndarray, center_prior: float = 0.0, center_sigma: float = 0.35) -> np.ndarray:
+    """Apply a center-Gaussian prior to fused map. fused is HxW float32 in [0,1]."""
+    cp = float(center_prior)
+    if cp <= 0.0:
+        return fused
+
+    H, W = int(fused.shape[0]), int(fused.shape[1])
+    if H <= 1 or W <= 1:
+        return fused
+
+    sigma = float(center_sigma) * float(min(H, W))
+    sigma = max(sigma, 1.0)
+
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    cy = (H - 1) * 0.5
+    cx = (W - 1) * 0.5
+    d2 = (xx - cx) ** 2 + (yy - cy) ** 2
+    w = np.exp(-0.5 * d2 / (sigma * sigma)).astype(np.float32)
+    m = float(w.max())
+    if m > 0:
+        w = w / m
+
+    out = fused.astype(np.float32) * (1.0 + cp * w)
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+def _residual_energy_norm(res_y: np.ndarray, pct: float = 95.0, use_grad: bool = False):
     """Return (norm_HxW_float32_in_[0,1], scale_max_level). No gamma/colormap."""
-    x = np.abs(res_y.astype(np.float32) - 128.0)
+    if not use_grad:
+        x = np.abs(res_y.astype(np.float32) - 128.0)
+    else:
+        # Edge/structure energy: less biased to texture/noise than pure magnitude
+        r = res_y.astype(np.float32)
+        gx = np.abs(np.roll(r, -1, axis=1) - np.roll(r, 1, axis=1))
+        gy = np.abs(np.roll(r, -1, axis=0) - np.roll(r, 1, axis=0))
+        x = 0.5 * (gx + gy)
+
     a = float(np.percentile(x, pct))
     a = max(a, 1.0)
     norm = np.clip(x / a, 0.0, 1.0)
@@ -54,33 +238,38 @@ import numpy as np
 
 def resize_and_center_crop_residuals(residuals_y, input_size):
     """
-    residuals_y: numpy 数组，形状 (F, H, W) 或 (F, H, W, 1)
-    返回: res_zero_masks，形状 (F, input_size, input_size, 1)，dtype=uint8
+    Resize and center crop residuals.
+    
+    Args:
+        residuals_y: numpy array, shape (F, H, W) or (F, H, W, 1)
+    
+    Returns:
+        res_zero_masks: shape (F, input_size, input_size, 1), dtype=uint8
     """
-    # 如果是 (F, H, W, 1)，先去掉最后一维
+    # If shape is (F, H, W, 1), remove last dimension
     if residuals_y.ndim == 4 and residuals_y.shape[-1] == 1:
         residuals_y = residuals_y[..., 0]  # -> (F, H, W)
 
     F, H, W = residuals_y.shape
 
-    # 按你 DALI 里的逻辑：resize_shorter=input_size -> 按短边缩放
+    # Following DALI logic: resize_shorter=input_size -> scale by short side
     scale = input_size / min(H, W)
     new_w = int(round(W * scale))
     new_h = int(round(H * scale))
 
-    # 中心裁剪坐标（所有帧分辨率相同，只算一次）
+    # Center crop coordinates (all frames have same resolution, calculate once)
     x1 = (new_w - input_size) // 2
     y1 = (new_h - input_size) // 2
     x2 = x1 + input_size
     y2 = y1 + input_size
 
-    # 预分配输出: (F, input_size, input_size, 1) 对应 DALI 的 "FHWC"
+    # Pre-allocate output: (F, input_size, input_size, 1) corresponding to DALI's "FHWC"
     res_zero_masks = np.empty((F, input_size, input_size, 1), dtype=np.uint8)
 
     for i in range(F):
         frame = residuals_y[i]  # (H, W)
 
-        # INTER_CUBIC 对应 DALI 的 INTERP_CUBIC
+        # INTER_CUBIC corresponds to DALI's INTERP_CUBIC
         resized_long = cv2.resize(
             frame,
             (new_w, new_h),
@@ -89,60 +278,58 @@ def resize_and_center_crop_residuals(residuals_y, input_size):
 
         cropped = resized_long[y1:y2, x1:x2]  # (input_size, input_size)
 
-        # DALI 输出是 UINT8，这里也转成 uint8；如果你 residual 本来是 float，可以自定义归一化/阈值
+        # DALI outputs UINT8, convert to uint8 here; if residual is float, customize normalization/threshold
         res_zero_masks[i, :, :, 0] = cropped.astype(np.uint8)
 
     return res_zero_masks
-
-import numpy as np
 
 def compute_visible_indices_cpu(
     residuals_y: np.ndarray,
     patch_size: int | tuple[int, int],
     K: int,
+    static_fallback: bool = True,
+    static_abs_thresh: float = 2.0,
+    static_rel_thresh: float = 0.15,
+    static_uniform_frames: int = 4,
 ) -> np.ndarray:
     """
-    CPU 版的 Top-K 可见 patch 选择逻辑，对应 PyTorch 版 mask_by_residual_topk 的单样本情形 (B=1)，
-    只返回 visible_indices（不返回 mask 和 ids_restore）。
+    CPU version of Top-K visible patch selection logic, corresponding to PyTorch mask_by_residual_topk single sample case (B=1),
+    returns only visible_indices (not mask and ids_restore).
 
     Args:
         residuals_y: np.ndarray
-            形状 (F, H, W, 1) 或 (F, H, W)，表示单个样本的残差。
-            注意：建议在调用前就把 residuals_y 处理成“带符号”的残差，
-            即与训练时喂给 mask_by_residual_topk 的 res.abs() 语义一致。
-            如果 residuals_y 目前是 uint8 (0~255)，你可以在外部先做:
+            Shape (F, H, W, 1) or (F, H, W), representing residuals for a single sample.
+            Note: It's recommended to process residuals_y into "signed" residuals before calling,
+            i.e., consistent with res.abs() semantics fed to mask_by_residual_topk during training.
+            If residuals_y is currently uint8 (0~255), you can do this externally first:
                 residuals_y = residuals_y.astype(np.int16) - 128
-        patch_size: int 或 (ph, pw)
-            patch 的高宽。
+        patch_size: int or (ph, pw)
+            Patch height and width.
         input_size: int
-            目标输入尺寸 H=W=input_size。
-            如果 residuals_y 的 H,W 已经是 input_size，可以不用它；
-            此参数主要是为了兼容原函数签名。
+            Target input size H=W=input_size.
+            If residuals_y's H,W are already input_size, you may not need it;
+            This parameter is mainly for compatibility with original function signature.
         sequence_length: int
-            序列长度 F（帧数），主要用于接口兼容；实际以 residuals_y 的第 0 维为准。
+            Sequence length F (frame count), mainly for interface compatibility; actually uses residuals_y dimension 0.
         K: int
-            要保留的 Top-K patch 数量（k_keep）。
+            Number of Top-K patches to keep (k_keep).
 
     Returns:
-        visible_indices: np.ndarray, 形状 (K',)，dtype=int32
-            选中的 patch 线性索引（升序），K' = clamp(K, 0, L)，L 为总 patch 数。
+        visible_indices: np.ndarray, shape (K',), dtype=int32
+            Selected patch linear indices (ascending), K' = clamp(K, 0, L), L is total patch count.
     """
-    # ---------- 1. 统一 residuals_y 形状 ----------
-    # 支持 (F, H, W, 1) 或 (F, H, W)
+    # ---------- 1. Unify residuals_y shape ----------
+    # Support (F, H, W, 1) or (F, H, W)
     if residuals_y.ndim == 4 and residuals_y.shape[-1] == 1:
         residuals_y = residuals_y.squeeze(-1)  # (F, H, W)
 
     if residuals_y.ndim != 3:
-        raise ValueError(f"residuals_y 必须是 (F,H,W) 或 (F,H,W,1)，当前形状: {residuals_y.shape}")
+        raise ValueError(f"residuals_y must be (F,H,W) or (F,H,W,1), current shape: {residuals_y.shape}")
 
-    F, H, W = residuals_y.shape  # 实际使用的 F,H,W 以数据为准
-    # sequence_length 和 input_size 主要是接口兼容，如果你想强约束可加检查：
-    # if F != sequence_length:
-    #     raise ValueError(f"sequence_length={sequence_length}, 但 residuals_y.shape[0]={F}")
-    # if H != input_size or W != input_size:
-    #     raise ValueError(f"input_size={input_size}, 但 residuals_y 形状为 H={H}, W={W}")
-
-    # ---------- 2. patch 网格划分 ----------
+    F, H, W = residuals_y.shape  # Actual F,H,W based on data
+    # sequence_length and input_size are mainly for interface compatibility, add checks if strict constraint needed:
+    
+    # ---------- 2. Patch grid division ----------
     if isinstance(patch_size, int):
         ph = pw = patch_size
     else:
@@ -150,65 +337,183 @@ def compute_visible_indices_cpu(
 
     if H % ph != 0 or W % pw != 0:
         raise ValueError(
-            f"H/W 必须能被 patch 大小整除，当前 H={H}, W={W}, ph={ph}, pw={pw}"
+            f"H/W must be divisible by patch size, current H={H}, W={W}, ph={ph}, pw={pw}"
         )
 
-    hb, wb = H // ph, W // pw  # 每帧的 patch 网格数
-    L = F * hb * wb            # 总 patch 数
+    hb, wb = H // ph, W // pw  # Patch grid count per frame
+    L = F * hb * wb            # Total patch count
 
-    # ---------- 3. K 边界处理（与 PyTorch 版一致） ----------
+    # ---------- 3. K boundary handling (consistent with PyTorch version) ----------
     K_clamped = int(max(0, min(K, L)))
     if K_clamped == 0:
         return np.empty((0,), dtype=np.int32)
 
-    # ---------- 4. 计算每个 patch 的残差得分 ----------
-    # PyTorch 版是：res_abs = res.abs().squeeze(1);
+    # ---------- 4. Calculate residual score for each patch ----------
+    # PyTorch version: res_abs = res.abs().squeeze(1);
     #               scores = res_abs.reshape(B,T,hb,ph,wb,pw).sum(dim=(3,5))
-    # 这里是单样本 (B=1)，且 residuals_y 已经是绝对值或带符号残差：
+    # Here is single sample (B=1), and residuals_y is already absolute value or signed residual:
     res_abs = np.abs(residuals_y)  # (F,H,W)
 
-    # reshape 成 (F, hb, ph, wb, pw)，对 patch 内求和 -> (F, hb, wb)
+    # Reshape to (F, hb, ph, wb, pw), sum over patch interior -> (F, hb, wb)
     res_reshaped = res_abs.reshape(F, hb, ph, wb, pw)
     patch_scores = res_reshaped.sum(axis=(2, 4))      # (F, hb, wb)
 
-    # 展平为一维 (L,) —— 对应 PyTorch 版 scores.reshape(B,L) 中 B=1 的情况
+    # Flatten to 1D (L,) - corresponding to PyTorch version scores.reshape(B,L) with B=1
     patch_scores_flat = patch_scores.reshape(L)       # (L,)
 
-    # ---------- 5. 选 Top-K 索引（与 PyTorch 版逻辑对应） ----------
-    # PyTorch: topk_idx = torch.topk(scores, k=K, dim=1, largest=True, sorted=False).indices
-    #         visible_indices = torch.sort(topk_idx, dim=1).values
-    # NumPy 等价写法：
-    # - argpartition 到倒数第 K_clamped 个，再取这 K_clamped 个；
-    # - 再排序，得到升序索引。
+    # ---------- 4.5 Static/low-energy video fallback (Hybrid): uniform few frames + remaining Top-K ----------
+    # patch_scores_flat is patch interior energy sum (proportional to ph*pw).
+    # Use patch interior average intensity for static detection: patch_mean ~ [0,255].
+    if bool(static_fallback):
+        area = float(ph * pw)
+        if area <= 0:
+            area = 1.0
+        patch_mean = patch_scores_flat.astype(np.float32) / area
+
+        # Adaptive detection: absolute low energy + relative low contrast (flat distribution)
+        p95 = float(np.percentile(patch_mean, 95.0))
+        p50 = float(np.percentile(patch_mean, 50.0))
+        rel_contrast = float((p95 - p50) / max(p95, 1e-6))
+
+        is_static = (p95 < float(static_abs_thresh)) or (
+            (p95 < float(static_abs_thresh) * 2.0) and (rel_contrast < float(static_rel_thresh))
+        )
+
+        if is_static:
+            patches_per_frame = hb * wb
+
+            # 1) Uniformly select a few frames (default 4 frames), deduplicate and fill
+            f_u = int(static_uniform_frames) if int(static_uniform_frames) > 0 else 1
+            f_u = max(1, min(F, f_u))
+            if f_u >= F:
+                t_list = list(range(F))
+            else:
+                t_list = np.linspace(0, F - 1, f_u, dtype=int).tolist()
+                t_list = list(dict.fromkeys(t_list))
+                if len(t_list) < f_u:
+                    need = f_u - len(t_list)
+                    for t in range(F):
+                        if t not in t_list:
+                            t_list.append(t)
+                            need -= 1
+                            if need <= 0:
+                                break
+
+            # 2) First try to cover as many patches as possible on these frames (if budget sufficient take all; otherwise uniformly subsample by budget)
+            uniform_idx = []
+            max_uniform = len(t_list) * patches_per_frame
+
+            if K_clamped >= max_uniform:
+                for t in t_list:
+                    base = t * patches_per_frame
+                    uniform_idx.extend(range(base, base + patches_per_frame))
+            else:
+                # Insufficient budget: distribute K evenly to these frames, uniformly sample spatially per frame
+                k_base = K_clamped // len(t_list)
+                k_rem = K_clamped % len(t_list)
+                for j, t in enumerate(t_list):
+                    k_t = k_base + (1 if j < k_rem else 0)
+                    if k_t <= 0:
+                        continue
+                    if k_t >= patches_per_frame:
+                        pos_list = list(range(patches_per_frame))
+                    else:
+                        step = float(patches_per_frame) / float(k_t)
+                        pos_list = [min(patches_per_frame - 1, int(round(i * step))) for i in range(k_t)]
+                        pos_list = list(dict.fromkeys(pos_list))
+                        if len(pos_list) < k_t:
+                            need = k_t - len(pos_list)
+                            for p in range(patches_per_frame):
+                                if p not in pos_list:
+                                    pos_list.append(p)
+                                    need -= 1
+                                    if need <= 0:
+                                        break
+                    base = t * patches_per_frame
+                    uniform_idx.extend([base + p for p in pos_list])
+
+            uniform_idx = np.asarray(uniform_idx, dtype=np.int32)
+            if uniform_idx.size > K_clamped:
+                uniform_idx = uniform_idx[:K_clamped]
+
+            # 3) Remaining tokens continue Top-K (excluding uniform_idx)
+            k_remain = int(K_clamped - uniform_idx.size)
+            if k_remain <= 0:
+                return np.sort(uniform_idx).astype(np.int32)
+
+            scores = patch_scores_flat.astype(np.float32).copy()
+            scores[uniform_idx] = -np.inf
+
+            remain_candidates = int(np.isfinite(scores).sum())
+            if k_remain >= remain_candidates:
+                topk_rem = np.where(np.isfinite(scores))[0].astype(np.int32)
+            else:
+                topk_rem = np.argpartition(scores, -k_remain)[-k_remain:].astype(np.int32)
+
+            selected = np.unique(np.concatenate([uniform_idx, topk_rem], axis=0))
+            if selected.size > K_clamped:
+                selected = selected[:K_clamped]
+            elif selected.size < K_clamped:
+                all_idx = np.arange(L, dtype=np.int32)
+                mask = np.ones(L, dtype=bool)
+                mask[selected] = False
+                extra = all_idx[mask][: (K_clamped - selected.size)]
+                selected = np.concatenate([selected, extra], axis=0)
+
+            return np.sort(selected).astype(np.int32)
+
+    # ---------- 5. Select Top-K indices (corresponding to PyTorch version logic) ----------
     topk_indices = np.argpartition(patch_scores_flat, -K_clamped)[-K_clamped:]
     visible_indices = np.sort(topk_indices).astype(np.int32)  # (K_clamped,)
 
     return visible_indices
 
 
-def _get_cache_path(video_path: str, cache_dir: str) -> str:
+# ---- helper: fast box filter / local variance (numpy only) ----
+
+def _box_filter2d(x: np.ndarray, k: int = 3) -> np.ndarray:
+    """Fast kxk box filter using integral image (numpy only)."""
+    k = int(k)
+    if k <= 1:
+        return x.astype(np.float32)
+    pad = k // 2
+    xp = np.pad(x.astype(np.float32), ((pad, pad), (pad, pad)), mode="edge")
+    ii = np.cumsum(np.cumsum(xp, axis=0), axis=1)
+    s = ii[k:, k:] - ii[:-k, k:] - ii[k:, :-k] + ii[:-k, :-k]
+    return s / float(k * k)
+
+
+def _local_var2d(x: np.ndarray, k: int = 3) -> np.ndarray:
+    """Local variance in a kxk window."""
+    x = x.astype(np.float32)
+    m1 = _box_filter2d(x, k)
+    m2 = _box_filter2d(x * x, k)
+    v = m2 - m1 * m1
+    return np.maximum(v, 0.0).astype(np.float32)
+
+def _get_cache_path(video_path: str, cache_dir: str, cache_key: str = "") -> str:
     """
     Generate a cache file path for a given video path.
     
     Args:
         video_path: Path to the video file
         cache_dir: Directory to store cache files
-        
+        cache_key: Additional key for cache uniqueness
     Returns:
         Path to the cache pkl file
     """
     if not cache_dir:
         return None
     
-    # Create a unique filename based on the video path
-    # Use the video path hash to avoid filesystem issues with long paths
-    video_hash = hashlib.md5(video_path.encode()).hexdigest()
+    # Create a unique filename based on the video path and cache_key
+    base = video_path if not cache_key else (video_path + "|" + str(cache_key))
+    video_hash = hashlib.md5(base.encode()).hexdigest()
     cache_filename = f"visible_indices_{video_hash}.pkl"
     cache_path = os.path.join(cache_dir, cache_filename)
     
     return cache_path
 
-def save_cache(visible_indices: np.ndarray, video_path: str, cache_dir: str) -> None:
+def save_cache(visible_indices: np.ndarray, video_path: str, cache_dir: str, cache_key: str = "") -> None:
     """
     Save visible_indices to a pkl file.
     
@@ -216,11 +521,12 @@ def save_cache(visible_indices: np.ndarray, video_path: str, cache_dir: str) -> 
         visible_indices: numpy array of visible indices to save
         video_path: Path to the video file (used to generate cache filename)
         cache_dir: Directory to store cache files
+        cache_key: Additional key for cache uniqueness
     """
     if not cache_dir:
         return
     
-    cache_path = _get_cache_path(video_path, cache_dir)
+    cache_path = _get_cache_path(video_path, cache_dir, cache_key=cache_key)
     if cache_path is None:
         return
     
@@ -239,21 +545,21 @@ def save_cache(visible_indices: np.ndarray, video_path: str, cache_dir: str) -> 
         # Don't raise - caching is optional
         print(f"Warning: Failed to save cache for {video_path}: {e}")
 
-def get_cache(video_path: str, cache_dir: str) -> np.ndarray:
+def get_cache(video_path: str, cache_dir: str, cache_key: str = "") -> np.ndarray:
     """
     Load visible_indices from a pkl file.
     
     Args:
         video_path: Path to the video file (used to generate cache filename)
         cache_dir: Directory where cache files are stored
-        
+        cache_key: Additional key for cache uniqueness
     Returns:
         numpy array of visible indices, or None if cache doesn't exist
     """
     if not cache_dir:
         return None
     
-    cache_path = _get_cache_path(video_path, cache_dir)
+    cache_path = _get_cache_path(video_path, cache_dir, cache_key=cache_key)
     if cache_path is None or not os.path.exists(cache_path):
         return None
     
@@ -272,14 +578,58 @@ def _mv_energy_norm(
     W: int,
     mv_unit_div: float = 4.0,
     pct: float = 95.0,
+    compensate: str = "none",
+    use_inconsistency: bool = False,
+    incon_ksize: int = 3,
 ):
-    """Return (norm_HxW_float32_in_[0,1], scale_max_px). No gamma/colormap."""
+    """Return (norm_HxW_float32_in_[0,1], scale_max_px). No gamma/colormap.
+
+    compensate:
+      - 'none'       : no compensation
+      - 'median'     : subtract global median translation per frame (helps remove camera pan/track motion)
+      - 'mean'       : subtract global mean translation per frame
+      - 'similarity' : fit a global similarity camera-motion field (translation + rotation + isotropic scale)
+      - 'affine'     : fit a global affine camera-motion field (adds anisotropic scale + shear)
+    """
     vx = mvx.astype(np.float32) / float(mv_unit_div)
     vy = mvy.astype(np.float32) / float(mv_unit_div)
+
+    c = (compensate or "none").lower()
+    if c == "median":
+        vx = vx - np.median(vx)
+        vy = vy - np.median(vy)
+    elif c == "mean":
+        vx = vx - float(np.mean(vx))
+        vy = vy - float(np.mean(vy))
+    elif c == "none":
+        pass
+    elif c in ("similarity", "affine"):
+        # Fit a global camera-motion model on the MV grid (handles zoom/rotation better than pure translation)
+        try:
+            vx_cam, vy_cam = _mv_fit_global_model(vx, vy, mode=c)
+            vx = vx - vx_cam
+            vy = vy - vy_cam
+        except Exception:
+            # fallback to median translation
+            vx = vx - np.median(vx)
+            vy = vy - np.median(vy)
+    else:
+        raise ValueError(f"Unknown mv compensate mode: {compensate}")
+
     mag = np.sqrt(vx * vx + vy * vy)  # pixels
-    a = float(np.percentile(mag, pct))
+
+    if use_inconsistency:
+        k = int(incon_ksize)
+        k = 3 if k < 3 else k
+        if (k % 2) == 0:
+            k += 1
+        score = _local_var2d(mag, k=k)
+    else:
+        score = mag.astype(np.float32)
+
+    a = float(np.percentile(score, pct))
     a = max(a, 1e-6)
-    norm = np.clip(mag / a, 0.0, 1.0)
+    norm = np.clip(score / a, 0.0, 1.0)
     norm_u = cv2.resize(norm, (W, H), interpolation=cv2.INTER_NEAREST)
     return norm_u.astype(np.float32), a
 
@@ -324,7 +674,21 @@ class ExternalInputCallable:
         self.patch_size = source_params['patch_size']
         self.cache_dir = source_params.get('cache_dir', '')
         self.K_keep = source_params.get('K_keep')
-        
+        self.mv_compensate = source_params.get('mv_compensate', 'none')
+        self.mv_use_inconsistency = bool(source_params.get('mv_use_inconsistency', False))
+        self.mv_incon_ksize = int(source_params.get('mv_incon_ksize', 3))
+        self.res_use_grad = bool(source_params.get('res_use_grad', False))
+
+        # optional: duplicate masking & center prior (online residual/mv energy)
+        self.mask_all_duplicates = bool(source_params.get('mask_all_duplicates', False))
+        self.center_prior = float(source_params.get('center_prior', 0.0) or 0.0)
+        self.center_sigma = float(source_params.get('center_sigma', 0.35) or 0.35)
+        # optional: static-video hybrid fallback (uniform few frames + remaining topk)
+        self.static_fallback = bool(source_params.get('static_fallback', True))
+        self.static_abs_thresh = float(source_params.get('static_abs_thresh', 2.0) or 2.0)
+        self.static_rel_thresh = float(source_params.get('static_rel_thresh', 0.15) or 0.15)
+        self.static_uniform_frames = int(source_params.get('static_uniform_frames', 4) or 4)
+
         # If the dataset size is not divisible by number of shards, the trailing samples will be omitted.
         self.shard_size = len(self.file_list) // self.num_shards
         self.shard_offset = self.shard_size * self.shard_id
@@ -338,16 +702,19 @@ class ExternalInputCallable:
         self.enable_res_zero_mask = True
         self.hevc_y_only = True
         self.tokeq_target_frames = 8
-        
 
-    def get_frame_id_list(self, video_path, sequence_length,    
+    def get_frame_id_list(self, video_path, sequence_length,
                           mv_unit_div: float = 4.0,   # quarter-pel -> pixel
-                          mv_pct: float = 95.0,       # MV 归一化分位数（传给 _mv_energy_norm）
-                          res_pct: float = 95.0,      # 残差归一化分位数（传给 _residual_energy_norm）
+                          mv_pct: float = 95.0,       # MV normalization percentile (passed to _mv_energy_norm)
+                          res_pct: float = 95.0,      # Residual normalization percentile (passed to _residual_energy_norm)
                           fuse_mode: str = "weighted",
                           w_mv: float = 1.0,
-                          w_res: float = 1.0,):
-        
+                          w_res: float = 1.0,
+                          mv_compensate: str = "none",
+                          mv_use_inconsistency: bool = False,
+                          mv_incon_ksize: int = 3,
+                          res_use_grad: bool = False):
+
         decord_vr = decord.VideoReader(video_path, num_threads=2, ctx=decord.cpu(0))
         duration = len(decord_vr)
 
@@ -361,25 +728,23 @@ class ExternalInputCallable:
                 elif hasattr(decord_vr, "get_keyframes"):
                     key_idx = decord_vr.get_keyframes()
                 if key_idx is not None:
-                    # key_idx 可能是 NDArray；转成 Python list 的整型帧号集合 只保留一帧为I帧
+                    # key_idx may be NDArray; convert to Python list of integer frame numbers, keep only one I-frame
                     I_list = np.asarray(key_idx)
                     I_list = I_list.tolist()[0] if I_list.ndim > 1 else I_list.tolist()
                     I_list = [int(i) for i in I_list if int(i) in frame_id_list]
                     if len(I_list) >= self.tokeq_target_frames:
-                        # 如果 I 帧过多，优先保留前面的
+                        # If too many I frames, prioritize keeping the first ones
                         I_list = I_list[:self.tokeq_target_frames]
                         P_list = []
                     else:
                         P_list = [i for i in range(len(frame_id_list)) if i not in I_list]
             except Exception:
-                # 保底处理：忽略异常，后续用默认策略
-                print("没有读取成功")
-                # gop = max(1,int(self.gop_size))
-                # I_list = [i for i, fid in enumerate(frame_id_list)if(int(fid)% gop)== 0]
-                # 第一帧为I帧
+                # Fallback handling: ignore exception, use default strategy
+                print("Failed to read key indices")
+                # First frame is I-frame
                 I_list = [0]
-                # 其余为 P 帧
-                P_list = [i for i in range(len(frame_id_list))if i not in I_list]
+                # Rest are P frames
+                P_list = [i for i in range(len(frame_id_list)) if i not in I_list]
                 # Map absolute frame id -> position in the sampled sequence
                 frame_ids = frame_id_list
                 pos_map = {fid: i for i, fid in enumerate(frame_ids)}
@@ -387,11 +752,11 @@ class ExternalInputCallable:
             frame_ids = frame_id_list
             pos_map = {fid: i for i, fid in enumerate(frame_ids)}
             
-            # 读取视频帧
+            # Read video frames
             decord_vr.seek(0)
             video_data = decord_vr.get_batch(frame_id_list).asnumpy()
 
-            # 转成 numpy array
+            # Convert to numpy array
             I_list = np.array(I_list, dtype=np.int64)
             P_list = np.array(P_list, dtype=np.int64)
             I_pos_set = set(I_list.tolist())
@@ -434,47 +799,53 @@ class ExternalInputCallable:
                                     residual,
                                 ) = frame_tuple
 
-                                # I 帧：直接置 0（与你 residual 逻辑一致）
+                                # I frame: set to 0 directly (consistent with residual logic)
                                 if pos in I_pos_set:
                                     if H0 is None:
-                                        # 用残差Y来确定输出尺寸/类型
+                                        # Use residual Y to determine output dimensions/type
                                         y0 = residual if residual.ndim == 2 else cv2.cvtColor(residual, cv2.COLOR_BGR2YUV)[:, :, 0]
                                         y0 = np.asarray(y0)
                                         H0, W0, dtype0 = int(y0.shape[0]), int(y0.shape[1]), y0.dtype
                                     residuals_y[pos] = np.zeros((H0, W0), dtype=dtype0 or np.uint8)
 
                                 else:
-                                    # 1) 取 MV (L0) 并上采样到 H×W
+                                    # 1) Extract MV (L0) and upsample to H×W
                                     mvx_hw = rdr._upsample_mv_to_hw(mv_x_L0.astype(np.float32))
                                     mvy_hw = rdr._upsample_mv_to_hw(mv_y_L0.astype(np.float32))
 
-                                    # 2) 取残差 Y
+                                    # 2) Extract residual Y
                                     Y_res = residual if residual.ndim == 2 else cv2.cvtColor(residual, cv2.COLOR_BGR2YUV)[:, :, 0]
 
-                                    # 初始化输出尺寸/类型（只在第一次命中时做）
+                                    # Initialize output dimensions/type (only on first hit)
                                     if H0 is None:
                                         H0, W0, dtype0 = int(Y_res.shape[0]), int(Y_res.shape[1]), Y_res.dtype
 
-                                    # 若当前帧的尺寸与 H0×W0 不一致，做一次 resize 对齐（极少见，兜底）
+                                    # If current frame dimensions don't match H0×W0, resize to align (very rare, fallback)
                                     if (Y_res.shape[0] != H0) or (Y_res.shape[1] != W0):
                                         Y_res = cv2.resize(Y_res, (W0, H0), interpolation=cv2.INTER_AREA)
                                     if (mvx_hw.shape[0] != H0) or (mvx_hw.shape[1] != W0):
                                         mvx_hw = cv2.resize(mvx_hw, (W0, H0), interpolation=cv2.INTER_NEAREST)
                                         mvy_hw = cv2.resize(mvy_hw, (W0, H0), interpolation=cv2.INTER_NEAREST)
 
-                                    # 3) 归一化到 [0,1]
-                                    #    下面这些超参请确保在外层有定义；如果没有，你也可以给个默认值：
-                                    #    mv_unit_div, mv_pct, res_pct, fuse_mode, w_mv, w_res
-                                    mv_norm, _ = _mv_energy_norm(mvx_hw, mvy_hw, H0, W0, mv_unit_div=mv_unit_div, pct=mv_pct)
-                                    res_norm, _ = _residual_energy_norm(Y_res, pct=res_pct)
+                                    # 3) Normalize to [0,1]
+                                    mv_norm, _ = _mv_energy_norm(
+                                        mvx_hw, mvy_hw, H0, W0,
+                                        mv_unit_div=mv_unit_div,
+                                        pct=mv_pct,
+                                        compensate=mv_compensate,
+                                        use_inconsistency=bool(mv_use_inconsistency),
+                                        incon_ksize=int(mv_incon_ksize),
+                                    )
+                                    res_norm, _ = _residual_energy_norm(Y_res, pct=res_pct, use_grad=bool(res_use_grad))
 
-                                    # 4) 融合（weighted/sum/max/geomean 均可，默认 weighted）
+                                    # 4) Fuse + center prior
                                     fused = _fuse_energy(mv_norm, res_norm, mode=fuse_mode, w_mv=w_mv, w_res=w_res)
+                                    fused = _apply_center_prior(fused, center_prior=self.center_prior, center_sigma=self.center_sigma)
 
-                                    # 写回你原来的容器（保持最小改动，用 uint8 存）
+                                    # Write back to container (keep uint8 storage)
                                     residuals_y[pos] = (np.clip(fused, 0.0, 1.0) * 255.0).astype(dtype0 or np.uint8)
 
-                                # 结束条件
+                                # End condition
                                 if all(x is not None for x in residuals_y):
                                     break
 
@@ -497,7 +868,7 @@ class ExternalInputCallable:
                     # combined_data = np.concatenate([video_data, residuals_y], axis=-1)
 
                     if H0 != video_data.shape[1] or W0 != video_data.shape[2]:
-                        print("[warn] residual尺寸与视频不一致: res=(%d,%d) video=(%d,%d)" % (H0, W0, video_data.shape[1], video_data.shape[2]))
+                        print("[warn] Residual dimensions don't match video: res=(%d,%d) video=(%d,%d)" % (H0, W0, video_data.shape[1], video_data.shape[2]))
                 finally:
                     if _prev_y_only is None:
                         os.environ.pop("UMT_HEVC_Y_ONLY", None)
@@ -516,32 +887,55 @@ class ExternalInputCallable:
         sample_idx = self.perm[sample_info.idx_in_epoch + self.shard_offset]
         example_info = self.file_list[sample_idx]
         video_path, video_label = example_info
-        
+
         # Try to load visible_indices from cache first
-        visible_indices = get_cache(video_path, self.cache_dir)
-        
+        cache_key = (
+            f"K{self.K_keep}_mvcomp{self.mv_compensate}_mvincon{int(self.mv_use_inconsistency)}_ks{int(self.mv_incon_ksize)}_resgrad{int(self.res_use_grad)}"
+            f"_dup{int(self.mask_all_duplicates)}_cp{self.center_prior:.4f}_cs{self.center_sigma:.4f}"
+            f"_st{int(self.static_fallback)}_sta{self.static_abs_thresh:.3f}_str{self.static_rel_thresh:.3f}_stf{int(self.static_uniform_frames)}"
+        )
+        visible_indices = get_cache(video_path, self.cache_dir, cache_key=cache_key)
+
         if visible_indices is None:
             try:
-                video_data, residuals_y, duration, frame_id_list = self.get_frame_id_list(video_path, self.sequence_length)
+                video_data, residuals_y, duration, frame_id_list = self.get_frame_id_list(
+                    video_path,
+                    self.sequence_length,
+                    mv_compensate=self.mv_compensate,
+                    mv_use_inconsistency=self.mv_use_inconsistency,
+                    mv_incon_ksize=self.mv_incon_ksize,
+                    res_use_grad=self.res_use_grad,
+                )
             except:
                 video_path, video_label = self.replace_example_info
-                video_data, residuals_y, duration, frame_id_list = self.get_frame_id_list(video_path, self.sequence_length)
+                video_data, residuals_y, duration, frame_id_list = self.get_frame_id_list(
+                    video_path,
+                    self.sequence_length,
+                    mv_compensate=self.mv_compensate,
+                    mv_use_inconsistency=self.mv_use_inconsistency,
+                    mv_incon_ksize=self.mv_incon_ksize,
+                    res_use_grad=self.res_use_grad,
+                )
             residuals_y = resize_and_center_crop_residuals(residuals_y, input_size=self.input_size)
             visible_indices = compute_visible_indices_cpu(
                 residuals_y=residuals_y,
                 patch_size=self.patch_size,
                 K=self.K_keep,
+                static_fallback=self.static_fallback,
+                static_abs_thresh=self.static_abs_thresh,
+                static_rel_thresh=self.static_rel_thresh,
+                static_uniform_frames=self.static_uniform_frames,
             )
-            save_cache(visible_indices, video_path, self.cache_dir)
+            save_cache(visible_indices, video_path, self.cache_dir, cache_key=cache_key)
         else:
             try:
                 video_data, duration, frame_id_list = self.get_frame_id_list_simple(video_path, self.sequence_length)
             except:
                 video_path, video_label = self.replace_example_info
                 video_data, duration, frame_id_list = self.get_frame_id_list_simple(video_path, self.sequence_length)
-        
+
         visible_indices = visible_indices.astype(np.int64)
-        
+
         return video_data, visible_indices, np.int64([int(video_label)]), np.array(frame_id_list, dtype=np.int64), np.int64([duration])
     
     def get_frame_id_list_simple(self, video_path, sequence_length):
@@ -580,7 +974,7 @@ def dali_pipeline(mode, source_params):
             video,
             device="gpu",
             crop=[input_size, input_size],
-            crop_pos_x=0.5,   # 中心裁剪
+            crop_pos_x=0.5,   # Center crop
             crop_pos_y=0.5,
             dtype=types.UINT8,
             output_layout="FHWC"
@@ -624,7 +1018,7 @@ def dali_pipeline(mode, source_params):
             video,
             device="gpu",
             crop=[input_size, input_size],
-            crop_pos_x=0.5,   # 中心裁剪
+            crop_pos_x=0.5,   # Center crop
             crop_pos_y=0.5,
             dtype=types.UINT8,
             output_layout="FHWC"
@@ -638,7 +1032,7 @@ def dali_pipeline(mode, source_params):
         total_frames = total_frames.gpu()
         return videos, visible_indices, labels, indices, total_frames
 
-
+ 
 def get_dali_dataloader_codec(
     data_root_path: str,
     data_csv_path: str,
@@ -658,15 +1052,37 @@ def get_dali_dataloader_codec(
     patch_size: int = 14,
     cache_dir: str = None,
     K_keep: int = 2048,
+    mv_compensate: str = "similarity",
+    mv_use_inconsistency: bool = True,
+    mv_incon_ksize: int = 3,
+    res_use_grad: bool = False,
+    mask_all_duplicates: bool = False,
+    center_prior: float = 0.3,
+    center_sigma: float = 0.35,
+    static_fallback: bool = True,
+    static_abs_thresh: float = 116.0,
+    static_rel_thresh: float = 0.55,
+    static_uniform_frames: int = 4,
 ) -> DALIWarper:
     """
-    Create a DALI dataloader for video data with IP-MV (motion vector) features.
+    Create a DALI dataloader for video data with motion vector features from codec.
     
     Args:
         cache_dir: Directory to store cached residuals. If None, uses data_root_path/cache_residuals.
                    Set to empty string "" to disable caching.
+        mv_compensate: 'none'|'median'|'mean'|'similarity'|'affine' for MV global compensation (camera-motion removal)
+        mv_use_inconsistency: Whether to use local variance of MV magnitude (highlights moving subject vs background)
+        mv_incon_ksize: Neighborhood size (odd >=3) for MV inconsistency
+        res_use_grad: Use gradient-based residual energy (more structural, less texture-driven)
+        mask_all_duplicates: If uniform sampling produces duplicate frame ids, fully mask those sampled time steps
+        center_prior: Strength of center Gaussian prior applied to fused map (0 disables)
+        center_sigma: Gaussian sigma as a fraction of min(H,W)
+        static_fallback: Enable hybrid fallback for almost-static videos (uniform few frames + remaining Top-K)
+        static_abs_thresh: Absolute low-energy threshold on patch mean intensity (~0..255)
+        static_rel_thresh: Relative contrast threshold (0..1), smaller means flatter distribution
+        static_uniform_frames: Number of uniformly-picked frames for the hybrid part (e.g., 4)
     """
-    print(f"[{mode} loader] Reading for: {data_csv_path}")
+    print(f"[{mode} loader] Reading from: {data_csv_path}")
     
     # Set default cache directory if not specified
     if cache_dir is None:
@@ -725,6 +1141,17 @@ def get_dali_dataloader_codec(
         "patch_size": patch_size,
         "cache_dir": cache_dir,
         "K_keep": K_keep,
+        "mv_compensate": mv_compensate,
+        "mv_use_inconsistency": mv_use_inconsistency,
+        "mv_incon_ksize": mv_incon_ksize,
+        "res_use_grad": res_use_grad,
+        "mask_all_duplicates": bool(mask_all_duplicates),
+        "center_prior": float(center_prior),
+        "center_sigma": float(center_sigma),
+        "static_fallback": bool(static_fallback),
+        "static_abs_thresh": float(static_abs_thresh),
+        "static_rel_thresh": float(static_rel_thresh),
+        "static_uniform_frames": int(static_uniform_frames),
     }
     pipe = dali_pipeline(
         batch_size = batch_size,
