@@ -94,7 +94,7 @@ Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K sample
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_lmm_github_dark.png">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_lmm_github_dark_fixed.png">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_lmm_github_light.png">
     <img alt="LMM Probe Results" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/probe_lmm_github_light.png" width="800" style="max-width: 100%;">
   </picture>
@@ -107,32 +107,12 @@ Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K sample
 - Docker with NVIDIA GPU support
 - CUDA-compatible GPU(s)
 
-### Mount Data Storage (Optional)
-
-If using shared storage for datasets, mount your NFS/CFS volumes:
-
-```bash
-mkdir -p /video_vit /vlm
-mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport <your-nfs-server>:/ /video_vit
-mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport <your-nfs-server>:/ /vlm
-```
-
-> [!NOTE]
-> Replace `<your-nfs-server>` with your actual storage endpoint. Internal users should refer to the internal documentation for specific mount configurations.
-
 ### Docker Build
 
 #### Option 1: Build from Dockerfile
 
 ```bash
-docker build -t llava_vit:25.11 .
-```
-
-#### Option 2: Load Pre-built Docker Image
-
-```bash
-docker load -i /video_vit/docker_images/llava_vit_tag_25.11.22.tar && \
-docker tag $(docker images -q | head -n 1) llava_vit:25.11.22
+docker build -t ov_encoder:25.12 .
 ```
 
 ### Running the Container
@@ -143,7 +123,7 @@ docker tag $(docker images -q | head -n 1) llava_vit:25.11.22
 docker run -it --gpus all --ipc host --net host --privileged \
     -v "$(pwd)":/workspace/OneVision-Encoder \
     -w /workspace/OneVision-Encoder \
-    llava_vit:25.11.22 bash
+    ov_encoder:25.12 bash
 ```
 
 #### Multi Node
@@ -158,18 +138,7 @@ docker run -it --gpus all --ipc host --net host --privileged --cap-add IPC_LOCK 
     -w /workspace/OneVision-Encoder \
     -e NCCL_TIMEOUT=1800 \
     -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
-    -e NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
-    -e NCCL_IB_GID_INDEX=${NCCL_IB_GID_INDEX:-3} \
-    -e NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0} \
-    -e NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_0}" \
-    -e NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-2} \
-    -e NCCL_IB_QPS_PER_CONNECTION=${NCCL_IB_QPS_PER_CONNECTION:-4} \
-    -e NCCL_IB_TC=${NCCL_IB_TC:-160} \
-    -e NCCL_IB_TIMEOUT=${NCCL_IB_TIMEOUT:-22} \
-    -e NCCL_CROSS_NIC=${NCCL_CROSS_NIC:-1} \
-    -e NCCL_MIN_NCHANNELS=${NCCL_MIN_NCHANNELS:-8} \
-    -e NCCL_MAX_NCHANNELS=${NCCL_MAX_NCHANNELS:-16} \
-    llava_vit:25.11.22 bash -c "service ssh restart; bash"
+    ov_encoder:25.12 bash -c "service ssh restart; bash"
 ```
 
 ### Install Package
@@ -248,9 +217,7 @@ with torch.no_grad():
 ### Single Node
 
 ```bash
-torchrun --nproc_per_node 8 -m training.train_univit \
-    --list_batch_size 64 \
-    --output ./output/baseline
+torchrun --nproc_per_node 8 -m training.train --help
 ```
 
 ### Multi Node
@@ -264,44 +231,9 @@ For multi-node distributed training, configure your training script according to
 ### Attentive Probe Evaluation
 
 ```bash
-torchrun --nproc_per_node 8 --master_port 15555 \
-    eval_encoder/attentive_probe.py \
-    --eval_freq 1 \
-    --default_lr_list 0.0003 \
-    --batch_size 16 \
-    --default_weight_decay 0 \
-    --dali_py_num_workers 8 \
-    --model_family llava_vit_sampling \
-    --dataset ssv2
 ```
 
-### Supported Evaluation Datasets
 
-- SSv2 (Something-Something v2)
-- UCF101
-- And more...
-
----
-
-## 📦 Packing ViT Model
-
-To package a trained ViT model for distribution or deployment:
-
-```bash
-python -m tools.pack_model \
-    --checkpoint ./output/baseline/checkpoint.pt \
-    --output ./output/packed_model
-```
-
-The packed model can be loaded directly with HuggingFace Transformers:
-
-```python
-from onevision_encoder import OneVisionEncoderModel
-
-model = OneVisionEncoderModel.from_pretrained("./output/packed_model")
-```
-
----
 
 ## 👥 Contributors
 
