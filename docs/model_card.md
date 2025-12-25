@@ -54,13 +54,13 @@ import torch
 
 # Load model and preprocessor
 model = AutoModel.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
+    "lmms-lab-encoder/onevision-encoder-large",
     trust_remote_code=True,
     attn_implementation="flash_attention_2"
 ).to("cuda").eval()
 
 preprocessor = AutoImageProcessor.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
+    "lmms-lab-encoder/onevision-encoder-large",
     trust_remote_code=True
 )
 
@@ -116,4 +116,4 @@ Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K sample
 
 ## Contact
 
-For questions and issues, please open an issue on the [GitHub repository](https://github.com/EvolvingLMMs-Lab/OneVision-Encoder).
+For questions and issues, please open an issue on the [GitHub repository](https://github.com/Evolvinglmms-lab/OneVision-Encoder).

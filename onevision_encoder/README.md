@@ -18,13 +18,13 @@ import torch
 
 # Load model and preprocessor
 model = AutoModel.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
+    "lmms-lab-encoder/onevision-encoder-large",
     trust_remote_code=True,
     attn_implementation="flash_attention_2"
 ).to("cuda").eval()
 
 preprocessor = AutoImageProcessor.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
+    "lmms-lab-encoder/onevision-encoder-large",
     trust_remote_code=True
 )
 

@@ -403,7 +403,7 @@ def get_model(args: argparse.Namespace) -> nn.Module:
 
     if args.model_name == "ov_encoder_large":
         model = AutoModel.from_pretrained(
-            "lmms-lab/onevision-encoder-large",
+            "lmms-lab-encoder/onevision-encoder-large",
             trust_remote_code=True,
             attn_implementation="flash_attention_2")
         model = torch.compile(model)
