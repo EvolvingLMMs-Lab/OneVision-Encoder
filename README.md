@@ -33,11 +33,12 @@
 
 ## 🔍 Introduction
 
-Video understanding models face a fundamental trade-off: processing more frames captures richer temporal information but increases computation quadratically. Traditional approaches address this through sparse frame sampling, but this discards fine-grained motion dynamics and treats all spatial regions equally, wasting computation on static backgrounds.
+Video understanding models face a fundamental trade-off: incorporating more frames enables richer temporal reasoning but increases computational cost quadratically. 
+Conventional approaches mitigate this by sparsely sampling frames, however, this strategy discards fine-grained motion dynamics and treats all spatial regions uniformly, resulting in wasted computation on static content.
 
-We present OneVision Encoder, a vision transformer that resolves this trade-off using principles from HEVC (High-Efficiency Video Coding) video compression. Instead of sampling sparse frames densely (all patches from few frames), we sample dense frames sparsely (important patches from many frames). Our codec-style patch selection identifies temporally-salient regions with motion, object interactions, or semantic changes and processes only these informative patches.
+We introduce OneVision Encoder, a vision transformer that resolves this trade-off by drawing inspiration from HEVC (High-Efficiency Video Coding). Rather than densely processing all patches from a few frames, OneVision Encoder sparsely selects informative patches from many frames. This codec-inspired patch selection mechanism identifies temporally salient regions (e.g., motion, object interactions, and semantic changes) and allocates computation exclusively to these informative areas.
 
-Combined with global contrastive learning using a 2M concept memory bank, OneVision Encoder achieves state-of-the-art results on video benchmarks (MVBench, VideoMME, Perception Test) and image understanding tasks (DocVQA, ChartQA, OCRBench).
+Coupled with global contrastive learning over a 2M-scale concept memory bank, OneVision Encoder achieves state-of-the-art performance across major video benchmarks (MVBench, VideoMME, Perception Test), while also delivering strong results on image understanding tasks (DocVQA, ChartQA, and OCRBench).
 
 ### Method Overview
 
@@ -51,7 +52,11 @@ Combined with global contrastive learning using a 2M concept memory bank, OneVis
 
 ### Video Processing Pipeline
 
-The visualization below demonstrates our complete video processing pipeline. The animation shows four key stages: (1) Original Video - a continuous 64-frame stream capturing the full temporal context, (2) Uniform Frame Sampling - traditional approach selecting 4-8 evenly-spaced frames, which is simple but lossy and misses inter-frame motion, (3) Temporal Saliency Detection - analysis of all 64 frames to identify regions with high temporal information such as motion, appearance changes, and semantic events, and (4) Codec-Style Patch Extraction - extraction of only the salient patches in zigzag order, achieving 75-98% compression while preserving temporal dynamics.
+The visualization below illustrates four different video processing pipelines. 
+(1) Original Video: a continuous 64-frame sequence that preserves the complete temporal context.
+(2) Uniform Frame Sampling: a conventional strategy that selects 4–8 evenly spaced frames; while simple and efficient, it is inherently lossy and fails to capture fine-grained inter-frame motion.
+(3) Temporal Saliency Detection: a global analysis of all 64 frames to identify regions rich in temporal information, including motion patterns, appearance variations, and semantic events.
+(4) Codec-Style Patch Extraction: selective extraction of the temporally salient patches in a zigzag order, achieving 75–98% compression while retaining critical temporal dynamics.
 
 <div align="center">
 <table>
@@ -70,7 +75,7 @@ The visualization below demonstrates our complete video processing pipeline. The
 
 ### Cluster Discrimination Visualization
 
-Standard contrastive learning (e.g., CLIP) is limited by batch size—negative samples are drawn only from the current batch, typically 32K-64K examples. This creates a narrow view of the embedding space and leads to suboptimal representations. Our approach maintains a global concept bank of 2M clustered centers, enabling each training sample to contrast against a diverse, representative set of negatives regardless of batch composition. This produces more discriminative embeddings with better-separated semantic clusters.
+Standard contrastive learning methods (e.g., CLIP) are fundamentally constrained by batch size, as negative samples are drawn only from the current batch, typically limited to 32K–64K examples. This restriction yields a narrow and incomplete view of the embedding space, often resulting in suboptimal representation learning. In contrast, our approach maintains a global concept bank comprising 2M clustered centers, allowing each training sample to contrast against a diverse and representative set of negatives independent of batch composition. This global contrasting mechanism leads to more discriminative embeddings and well-separated semantic clusters.
 
 
 <p align="center">
@@ -87,7 +92,7 @@ Standard contrastive learning (e.g., CLIP) is limited by batch size—negative s
 
 ### LMM Probe Results
 
-Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K samples from LLaVA-Video SFT. The training pipeline proceeds directly to Stage 2 fine-tuning. We adopt a streamlined native-resolution strategy inspired by LLaVA-OneVision: when the input frame resolution matches the model's native input size, it is fed directly—without tiling or cropping—to evaluate the ViT's native resolution capability.
+We train the model on a mixed dataset comprising 740K samples from LLaVA-OneVision and 800K samples from LLaVA-Video SFT, proceeding directly to Stage-2 fine-tuning. Following a streamlined native-resolution strategy inspired by LLaVA-OneVision, input frames that match the model’s native resolution are fed directly into the network without tiling or cropping, allowing us to fully evaluate the ViT’s native-resolution modeling capability.
 
 <p align="center">
   <picture>
@@ -99,7 +104,7 @@ Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K sample
 
 ### Attentive Probe Results
 
-Performance comparison of different vision encoders using Attentive Probe evaluation. Models are evaluated using single clip input and trained for 10 epochs across 8 action recognition datasets. Results show average performance and per-dataset scores for 8-frame and 16-frame configurations.
+We compare the performance of different vision encoders using the Attentive Probe evaluation protocol. All models are evaluated with a single-clip input and trained for 10 epochs across eight action recognition datasets. The results report both the average accuracy and per-dataset performance under 8-frame and 16-frame input configurations.
 
 <p align="center">
   <picture>
@@ -215,7 +220,7 @@ Add codec-style input documentation for temporal saliency-based patch selection.
 
 ### Single Node & Multi Node
 
-Training configurations and hyperparameters will be documented soon.  For now, please refer to `--help` for available options.
+Training configurations and hyperparameters will be documented soon. For now, please refer to `--help` for available options.
 
 ## 📊 Evaluation
 
@@ -301,7 +306,6 @@ The following parameters are common to both evaluation methods:
 - `eval_freq`: Evaluation frequency during training.
 - `dali_py_num_workers`: Number of DALI data loading workers.
 - `data_root`: Root directory containing your prepared dataset (codec evaluation only).
-
 
 
 ## 👥 Contributors
