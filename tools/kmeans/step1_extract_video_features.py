@@ -378,8 +378,6 @@ def main(args):
         my_videos = all_videos
         print(f"[Rank {rank}] Processing all {len(my_videos)} videos")
 
-    # with open(f"{args.input}_padding.txt", 'w') as f:
-    #     f.writelines(all_videos)
     # Load checkpoint
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -448,8 +446,7 @@ def main(args):
                 print(f"Final feature shape: {cleaned_features.shape}")
             elif pad_count == features_per_file:
                 # 整个最后一个文件都是 padding，直接删掉文件更合理
-                import os
-                os.remove(str(last_npy_path))
+                last_npy_path.unlink()
                 print(f"Removed entire last file since it was all padding ({pad_count} rows).")
             else:
                 # 需要继续往前删前一个文件，当前代码未实现，给出提示

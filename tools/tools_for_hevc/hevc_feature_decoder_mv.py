@@ -703,7 +703,6 @@ class HevcFeatureReader:
             self.height + (self.height >> 1), self.width
         )
 
-        import os
         if int(os.environ.get('UMT_HEVC_Y_ONLY', '1')) != 0:
             y = all_yuv_data[:self.height, :self.width]
             y_res = all_yuv_data_residual[:self.height, :self.width]

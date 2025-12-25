@@ -1,8 +1,13 @@
 import os
 import json
 import pathlib
+import warnings
 import numpy as np
-np.bool = np.bool_  # 解决 mxnet 与 numpy 冲突
+# mxnet uses deprecated np.bool; suppress warning and patch
+with warnings.catch_warnings():
+    warnings.filterwarnings('ignore', category=DeprecationWarning)
+    if not hasattr(np, 'bool') or np.bool is bool:
+        np.bool = np.bool_
 
 import mxnet as mx
 import mxnet.recordio as recordio

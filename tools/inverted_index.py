@@ -1,6 +1,5 @@
 import numpy as np
 import pickle
-import json
 import argparse
 from collections import defaultdict
 from pathlib import Path

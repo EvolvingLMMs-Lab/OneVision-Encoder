@@ -257,28 +257,6 @@ def resize_and_pad_image(image, target_resolution):
     return new_image
 
 
-def divide_to_patches(image, patch_size):
-    """
-    Divides an image into patches of a specified size.
-
-    Args:
-        image (PIL.Image.Image): The input image.
-        patch_size (int): The size of each patch.
-
-    Returns:
-        list: A list of PIL.Image.Image objects representing the patches.
-    """
-    patches = []
-    width, height = image.size
-    for i in range(0, height, patch_size):
-        for j in range(0, width, patch_size):
-            box = (j, i, j + patch_size, i + patch_size)
-            patch = image.crop(box)
-            patches.append(patch)
-
-    return patches
-
-
 def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     """
     Calculate the shape of the image patch grid after the preprocessing for images of any resolution.
@@ -351,23 +329,6 @@ def process_anyres_image(image, processor, grid_pinpoints):
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
         return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
-
-    patches = divide_to_patches(image_padded, processor.crop_size["height"])
-
-    # FIXME: this seems to be a bug that it resizes instead of pad.
-    # but to keep it consistent with previous, i will keep it as it is
-    # TODO: uncomment below to ablate with the padding
-    if isinstance(processor.size, dict):
-        shortest_edge = processor.size["shortest_edge"]
-    else:
-        shortest_edge = min(processor.size)
-    image_original_resize = image.resize((shortest_edge, shortest_edge))
-    # image_padded_square = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
-    # image_original_resize = image_padded_square.resize((processor.size['shortest_edge'], processor.size['shortest_edge']))
-
-    image_patches = [image_original_resize] + patches
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
-    return torch.stack(image_patches, dim=0)
 
 
 def load_image_from_base64(image):

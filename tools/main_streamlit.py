@@ -462,7 +462,7 @@ def main():
                     # 保存路径到会话状态
                     st.session_state.index_file = index_file
                     st.session_state.video_list_file = video_list_file
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("请输入所有必要的文件路径")
 
@@ -486,7 +486,7 @@ def main():
             del st.session_state.index_file
         if 'video_list_file' in st.session_state:
             del st.session_state.video_list_file
-        st.experimental_rerun()
+        st.rerun()
 
     # 配置参数
     st.sidebar.subheader("可视化配置")
