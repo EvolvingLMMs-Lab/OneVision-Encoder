@@ -242,7 +242,7 @@ For multi-node distributed training, configure your training script according to
 ### Attentive Probe Evaluation
 
 
-#### Sampling Evaluation
+#### Chunk-wise Sampling Evaluation
 
 To evaluate the encoder with uniform frame sampling, first navigate to the evaluation directory:
 
@@ -271,7 +271,7 @@ torchrun --nproc_per_node=8 --master_port=29507 attentive_probe.py \
 **Sampling-Specific Parameters:**
 - `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
 
-#### Codec Evaluation
+#### OV-Encoder Codec Evaluation
 
 To evaluate the encoder with codec-style patch selection, first navigate to the evaluation directory:
 
