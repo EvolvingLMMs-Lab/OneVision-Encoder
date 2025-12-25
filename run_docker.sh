@@ -12,6 +12,7 @@ docker run \
     --ulimit stack=67108864 \
     --rm \
     -v "$(pwd)":/workspace/OneVision-Encoder \
+    -v /data_3:/data_3 \
     -w /workspace/OneVision-Encoder \
     -e NCCL_TIMEOUT=1800 \
     -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
