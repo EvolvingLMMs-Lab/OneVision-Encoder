@@ -268,7 +268,7 @@ cd eval_encoder
 Then run the following command:
 
 ```bash
-torchrun --nproc_per_node=8 --master_port=29512 attentive_prob_codec.py \
+torchrun --nproc_per_node=8 --master_port=29512 attentive_probe_codec.py \
   --eval_freq 1 \
   --default_lr_list 0.0001 \
   --batch_size 4 \
