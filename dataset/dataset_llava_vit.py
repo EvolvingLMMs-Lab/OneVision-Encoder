@@ -9,98 +9,15 @@ from .properties import Property
 
 logger = logging.getLogger(__file__)
 
-list_coyo = [
-    "/vlm/data/coyo400m_part1/coyo700m_00",
-    "/vlm/data/coyo400m_part1/coyo700m_01",
-    "/vlm/data/coyo400m_part1/coyo700m_02",
-    "/vlm/data/coyo400m_part1/coyo700m_03",
-    "/vlm/data/coyo400m_part1/coyo700m_04",
-    "/vlm/data/coyo400m_part1/coyo700m_05",
-    "/vlm/data/coyo400m_part1/coyo700m_06",
-    "/vlm/data/coyo400m_part1/coyo700m_07",
-    "/vlm/data/coyo400m_part1/coyo700m_08",
-    "/vlm/data/coyo400m_part1/coyo700m_09",
-    "/vlm/data/coyo400m_part2/coyo700m_10",
-    "/vlm/data/coyo400m_part2/coyo700m_11",
-    "/vlm/data/coyo400m_part2/coyo700m_12",
-    "/vlm/data/coyo400m_part2/coyo700m_13",
-    "/vlm/data/coyo400m_part2/coyo700m_14",
-    "/vlm/data/coyo400m_part2/coyo700m_15",
-    "/vlm/data/coyo400m_part2/coyo700m_16",
-    "/vlm/data/coyo400m_part2/coyo700m_17",
-    "/vlm/data/coyo400m_part2/coyo700m_18",
-    "/vlm/data/coyo400m_part2/coyo700m_19",
-    "/vlm/data/coyo400m_part3/coyo700m_20",
-    "/vlm/data/coyo400m_part3/coyo700m_21",
-    "/vlm/data/coyo400m_part3/coyo700m_22",
-    "/vlm/data/coyo400m_part3/coyo700m_24",
-    "/vlm/data/coyo400m_part3/coyo700m_25",
-    "/vlm/data/coyo400m_part3/coyo700m_26",
-    "/vlm/data/coyo400m_part3/coyo700m_27",
-    "/vlm/data/coyo400m_part3/coyo700m_28",
-    "/vlm/data/coyo400m_part3/coyo700m_29",
-    "/vlm/data/coyo400m_part4/coyo700m_30",
-    "/vlm/data/coyo400m_part4/coyo700m_31",
-    "/vlm/data/coyo400m_part4/coyo700m_31",
-]
-list_laion = [
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-20-tencentos",
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-21-tencentos",
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-23-tencentos",
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-28-tencentos",
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-34-tencentos",
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-58-tencentos",
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-62-tencentos",
-    "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-85-tencentos",
-]
+# data paths - configure via environment or replace with your paths
+DATA_ROOT = os.getenv("DATA_ROOT", "/path/to/data")
+list_coyo = [f"{DATA_ROOT}/coyo400m/coyo700m_{i:02d}" for i in range(32)]
+list_laion = [f"{DATA_ROOT}/laion/laion_part_{i:02d}" for i in range(8)]
 
 
 @DATASET_REGISTRY.register()
 def llava_vit_si_2025_12_12():
-    list_coyo = [
-        "/vlm/data/coyo400m_part1/coyo700m_00",
-        "/vlm/data/coyo400m_part1/coyo700m_01",
-        "/vlm/data/coyo400m_part1/coyo700m_02",
-        "/vlm/data/coyo400m_part1/coyo700m_03",
-        "/vlm/data/coyo400m_part1/coyo700m_04",
-        "/vlm/data/coyo400m_part1/coyo700m_05",
-        "/vlm/data/coyo400m_part1/coyo700m_06",
-        "/vlm/data/coyo400m_part1/coyo700m_07",
-        "/vlm/data/coyo400m_part1/coyo700m_08",
-        "/vlm/data/coyo400m_part1/coyo700m_09",
-        "/vlm/data/coyo400m_part2/coyo700m_10",
-        "/vlm/data/coyo400m_part2/coyo700m_11",
-        "/vlm/data/coyo400m_part2/coyo700m_12",
-        "/vlm/data/coyo400m_part2/coyo700m_13",
-        "/vlm/data/coyo400m_part2/coyo700m_14",
-        "/vlm/data/coyo400m_part2/coyo700m_15",
-        "/vlm/data/coyo400m_part2/coyo700m_16",
-        "/vlm/data/coyo400m_part2/coyo700m_17",
-        "/vlm/data/coyo400m_part2/coyo700m_18",
-        "/vlm/data/coyo400m_part2/coyo700m_19",
-        "/vlm/data/coyo400m_part3/coyo700m_20",
-        "/vlm/data/coyo400m_part3/coyo700m_21",
-        "/vlm/data/coyo400m_part3/coyo700m_22",
-        "/vlm/data/coyo400m_part3/coyo700m_24",
-        "/vlm/data/coyo400m_part3/coyo700m_25",
-        "/vlm/data/coyo400m_part3/coyo700m_26",
-        "/vlm/data/coyo400m_part3/coyo700m_27",
-        "/vlm/data/coyo400m_part3/coyo700m_28",
-        "/vlm/data/coyo400m_part3/coyo700m_29",
-        "/vlm/data/coyo400m_part4/coyo700m_30",
-        "/vlm/data/coyo400m_part4/coyo700m_31",
-        "/vlm/data/coyo400m_part4/coyo700m_31",
-    ]
-    list_laion = [
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-20-tencentos",
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-21-tencentos",
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-23-tencentos",
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-28-tencentos",
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-34-tencentos",
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-58-tencentos",
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-62-tencentos",
-        "/vlm/data/LAION224M_HOI31M_IN13M_labeled_2024_03_05/LAION224M_HOI31M_IN13M_labeled_2024_03_05_VM-2-85-tencentos",
-    ]
+    # use module-level list_coyo and list_laion
     rank = int(os.getenv("RANK", "0"))
     world_size = int(os.getenv("WORLD_SIZE", "1")) # Expected to be 128
 
