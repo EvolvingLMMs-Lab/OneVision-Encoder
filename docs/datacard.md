@@ -9,8 +9,8 @@ This document describes the datasets used for training OneVision Encoder. The tr
 | Category | Total Samples |
 |----------|---------------|
 | **Image** | ~694M |
-| **Video** | ~60M+ |
-| **Total** | ~754M+ |
+| **Video** | ~100M+ |
+| **Total** | ~794M+ |
 
 ---
 
@@ -57,19 +57,19 @@ This document describes the datasets used for training OneVision Encoder. The tr
 
 | Dataset | Samples | Description |
 |---------|---------|-------------|
-| **HowTo100M** | 30M | Instructional videos with narrated activities |
-| **Panda-70M** | 30M | Large-scale video-text dataset with high-quality captions |
+| **HowTo100M** | 50M | Instructional videos with narrated activities |
+| **Panda-70M** | 50M | Large-scale video-text dataset with high-quality captions |
 | **Kinetics-710** | - | Human action recognition benchmark (for evaluation/fine-tuning) |
 | **Something-Something V2 (SSv2)** | - | Fine-grained temporal reasoning benchmark (for evaluation/fine-tuning) |
 
 ### Video Dataset Details
 
-#### HowTo100M (30M samples)
+#### HowTo100M
 - **Source**: YouTube instructional videos
 - **Content**: How-to videos with automatic speech recognition transcripts
 - **Usage**: Learning temporal dynamics and action understanding
 
-#### Panda-70M (30M samples)
+#### Panda-70M
 - **Source**: Curated video-text pairs
 - **Content**: High-quality video clips with detailed captions
 - **Usage**: Video-language alignment pre-training
