@@ -168,7 +168,7 @@ pip install -e .
 > - **Image**: 448×448 resolution (pre-trained)
 > - **Video**: 224×224 resolution with 256 tokens per frame (pre-trained)
 >
-> Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab/onevision-encoder-large).
+> Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large).
 
 ```python
 from transformers import AutoModel, AutoImageProcessor
@@ -177,13 +177,13 @@ import torch
 
 # Load model and preprocessor
 model = AutoModel.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
+    "lmms-lab-encoder/onevision-encoder-large",
     trust_remote_code=True,
     attn_implementation="flash_attention_2"
 ).to("cuda").eval()
 
 preprocessor = AutoImageProcessor.from_pretrained(
-    "lmms-lab/onevision-encoder-large",
+    "lmms-lab-encoder/onevision-encoder-large",
     trust_remote_code=True
 )
 
