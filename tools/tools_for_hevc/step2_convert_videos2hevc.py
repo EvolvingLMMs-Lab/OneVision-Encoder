@@ -11,12 +11,12 @@ deepspeed \
   --hostfile hosts_14 \
   --num_nodes 12 \
   --num_gpus 8 \
-  --master_addr 172.16.5.34 \
+  --master_addr ${NODE_IP} \
   --master_port 29600 \
   step2_convert_videos2hevc.py \
-  --file /video_vit/dataset/clips_square_aug_k710_ssv2/merged_list.txt \
-  --source_root /video_vit/dataset/clips_square_aug_k710_ssv2 \
-  --target_root /video_vit/dataset/clips_square_aug_k710_ssv2_hevc
+  --file /video_vit/clips_square_aug_k710_ssv2/merged_list.txt \
+  --source_root /video_vit/clips_square_aug_k710_ssv2 \
+  --target_root /video_vit/clips_square_aug_k710_ssv2_hevc
 """
 
 import os

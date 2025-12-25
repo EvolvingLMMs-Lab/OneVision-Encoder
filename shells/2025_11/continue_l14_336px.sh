@@ -18,7 +18,7 @@ export NCCL_NSOCKS_PERTHREAD=1
 export NCCL_IB_GID_INDEX=3
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=0
-export NCCL_IB_HCA=mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1
+export NCCL_IB_HCA=${NCCL_IB_HCA:-"mlx5_0"}
 export NCCL_NET_GDR_LEVEL=2
 export NCCL_IB_QPS_PER_CONNECTION=8
 export NCCL_IB_TC=160
@@ -28,28 +28,28 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # 主机名列表
 list_hostname=(
-  instance-5-34
-  instance-5-35
-  instance-5-36
-  instance-5-38
-  instance-5-39
-  instance-5-40
-  instance-5-41
-  instance-5-42
-  instance-5-44
-  instance-5-45
-  instance-5-46
-  instance-5-47
-  # instance-5-36
-  # instance-5-38
-  # instance-5-39
-  # instance-5-40
-  # instance-5-41
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  example-node
+  # example-node
+  # example-node
+  # example-node
+  # example-node
+  # example-node
 )
 
 # 主节点地址和端口
-master_addr="172.16.5.35"
-master_port=$((18889 + 305))
+master_addr="${MASTER_ADDR:-127.0.0.1}"
+master_port="${MASTER_PORT:-29500}"
 
 # 计算节点总数
 nnode=${#list_hostname[@]}
@@ -82,7 +82,7 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --image_size 336 \
   --warmup_ratio 0.001 \
   --list_datasets llava_vit_si_ssd \
-  --init_backbone /video_vit/xiangan/checkpoint_llava_vit/continue_l14/00117188/backbone.pt \
-  --list_init_partial_fc_paths /video_vit/xiangan/checkpoint_llava_vit/continue_l14/00117188/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt \
-  --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
+  --init_backbone ${INIT_BACKBONE} \
+  --list_init_partial_fc_paths /video_vit/checkpoint_llava_vit/continue_l14/00117188/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt \
+  --output ${OUTPUT_DIR:-./output} $0 .sh` \
   --num_sampled_data 1_200_000_000

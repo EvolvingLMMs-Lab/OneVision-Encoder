@@ -19,89 +19,77 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ----- Config (you can edit or pass via CLI) -----
 hosts = [
-    "172.16.5.19",
-    "172.16.5.27",
-    "172.16.5.81",
-    "172.16.5.82",
-    "172.16.5.85",
-    "172.16.5.86",
-    "172.16.5.87",
-    "172.16.5.88",
-    "172.16.5.89",
-    "172.16.5.90",
-    "172.16.5.91",
-    "172.16.5.92",
-    "172.16.5.93",
-    "172.16.5.94",
-    "172.16.5.95",
-    "172.16.5.96",
+    # Configure your cluster hosts here
+    # "node-01",
+    # "node-02",
+    # Add your hosts...
 ]
 
 list_coyo = [
-    "/video_vit/output_parts/en_obelics_00300_00600_part_001",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_002",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_003",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_004",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_005",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_006",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_007",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_008",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_009",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_010",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_011",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_012",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_013",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_014",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_015",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_016",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_017",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_018",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_019",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_020",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_021",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_022",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_023",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_024",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_025",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_026",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_027",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_028",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_029",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_030",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_031",
-    "/video_vit/output_parts/en_obelics_00300_00600_part_032",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_001",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_002",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_003",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_004",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_005",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_006",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_007",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_008",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_009",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_010",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_011",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_012",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_013",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_014",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_015",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_016",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_017",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_018",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_019",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_020",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_021",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_022",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_023",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_024",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_025",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_026",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_027",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_028",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_029",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_030",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_031",
-    # "/video_vit/output_parts/zh_obelics_00300_00600_part_032",
+    "/video_vit/en_obelics_00300_00600_part_001",
+    "/video_vit/en_obelics_00300_00600_part_002",
+    "/video_vit/en_obelics_00300_00600_part_003",
+    "/video_vit/en_obelics_00300_00600_part_004",
+    "/video_vit/en_obelics_00300_00600_part_005",
+    "/video_vit/en_obelics_00300_00600_part_006",
+    "/video_vit/en_obelics_00300_00600_part_007",
+    "/video_vit/en_obelics_00300_00600_part_008",
+    "/video_vit/en_obelics_00300_00600_part_009",
+    "/video_vit/en_obelics_00300_00600_part_010",
+    "/video_vit/en_obelics_00300_00600_part_011",
+    "/video_vit/en_obelics_00300_00600_part_012",
+    "/video_vit/en_obelics_00300_00600_part_013",
+    "/video_vit/en_obelics_00300_00600_part_014",
+    "/video_vit/en_obelics_00300_00600_part_015",
+    "/video_vit/en_obelics_00300_00600_part_016",
+    "/video_vit/en_obelics_00300_00600_part_017",
+    "/video_vit/en_obelics_00300_00600_part_018",
+    "/video_vit/en_obelics_00300_00600_part_019",
+    "/video_vit/en_obelics_00300_00600_part_020",
+    "/video_vit/en_obelics_00300_00600_part_021",
+    "/video_vit/en_obelics_00300_00600_part_022",
+    "/video_vit/en_obelics_00300_00600_part_023",
+    "/video_vit/en_obelics_00300_00600_part_024",
+    "/video_vit/en_obelics_00300_00600_part_025",
+    "/video_vit/en_obelics_00300_00600_part_026",
+    "/video_vit/en_obelics_00300_00600_part_027",
+    "/video_vit/en_obelics_00300_00600_part_028",
+    "/video_vit/en_obelics_00300_00600_part_029",
+    "/video_vit/en_obelics_00300_00600_part_030",
+    "/video_vit/en_obelics_00300_00600_part_031",
+    "/video_vit/en_obelics_00300_00600_part_032",
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
+    # /path/to/data/...
 ]
 
 

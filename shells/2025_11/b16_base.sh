@@ -20,7 +20,7 @@ export NCCL_NSOCKS_PERTHREAD=1
 export NCCL_IB_GID_INDEX=3
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=0
-export NCCL_IB_HCA=mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1
+export NCCL_IB_HCA=${NCCL_IB_HCA:-"mlx5_0"}
 export NCCL_NET_GDR_LEVEL=2
 export NCCL_IB_QPS_PER_CONNECTION=8
 export NCCL_IB_TC=160
@@ -32,21 +32,14 @@ export NCCL_BLOCKING_WAIT=1  # 使 NCCL 等待更长时间
 
 # 主机名列表
 list_hostname=(
-  instance-5-35
-  instance-5-36
-  instance-5-38
-  instance-5-39
-  instance-5-40
-  instance-5-41
-  instance-5-42
-  instance-5-44
-  instance-5-45
-  instance-5-46
+  # Configure your hostnames here
+  # example-node-01
+  # example-node-02
 )
 
 # 主节点地址和端口
-master_addr="172.16.5.35"
-master_port=$((18889 + 305))
+master_addr="${MASTER_ADDR:-127.0.0.1}"
+master_port="${MASTER_PORT:-29500}"
 
 # 计算节点总数
 nnode=${#list_hostname[@]}
@@ -76,5 +69,5 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --lr 8e-4 \
   --warmup_ratio 0.1 \
   --list_datasets llava_vit_si_ssd \
-  --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
+  --output ${OUTPUT_DIR:-./output} $0 .sh` \
   --num_sampled_data 13_000_000_000

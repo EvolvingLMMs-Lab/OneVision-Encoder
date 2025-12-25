@@ -18,7 +18,7 @@ export NCCL_NSOCKS_PERTHREAD=1
 export NCCL_IB_GID_INDEX=3
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=0
-export NCCL_IB_HCA=mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_1
+export NCCL_IB_HCA=${NCCL_IB_HCA:-"mlx5_0"}
 export NCCL_NET_GDR_LEVEL=2
 export NCCL_IB_QPS_PER_CONNECTION=8
 export NCCL_IB_TC=160
@@ -28,27 +28,14 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # 主机名列表
 list_hostname=(
-  instance-5fbzrg73
-  instance-21s8vw5h
-  instance-mtntjld4-01
-  instance-mtntjld4-02
-  instance-mtntjld4-03
-  instance-mtntjld4-04
-  instance-mtntjld4-05
-  instance-mtntjld4-06
-  instance-mtntjld4-07
-  instance-mtntjld4-08
-  instance-mtntjld4-09
-  instance-mtntjld4-10
-  instance-mtntjld4-11
-  instance-mtntjld4-12
-  instance-mtntjld4-13
-  instance-mtntjld4-14
+  # Configure your hostnames here
+  # example-node-01
+  # example-node-02
 )
 
 # 主节点地址和端口
-master_addr="172.16.5.19"
-master_port=$((18889 + 305))
+master_addr="${MASTER_ADDR:-127.0.0.1}"
+master_port="${MASTER_PORT:-29500}"
 
 # 计算节点总数
 nnode=${#list_hostname[@]}
@@ -82,9 +69,9 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --lr 0.0001 \
   --warmup_ratio 0.001 \
   --list_datasets llava_vit_si_ssd configs_for_llava_vit_versions_0_0_2_add_pandas70M  \
-  --output /video_vit/xiangan/checkpoint_llava_vit/`basename $0 .sh` \
-  --init_backbone /video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/backbone.pt \
-  --list_init_partial_fc_paths /video_vit/xiangan/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt NULL  \
+  --output ${OUTPUT_DIR:-./output} $0 .sh` \
+  --init_backbone ${INIT_BACKBONE} \
+  --list_init_partial_fc_paths /video_vit/checkpoint_llava_vit/2025_11_22_new_l14_continue_128gpus_how_to_100m_448px_224px/00148000/llava_vit_si_ssd/llava_vit_si_ssd_%03d.pt NULL  \
   --list_sample_rates 0.1 0.1 \
   --num_sampled_data 1280000000 \
   --finetune_backbone 1 \

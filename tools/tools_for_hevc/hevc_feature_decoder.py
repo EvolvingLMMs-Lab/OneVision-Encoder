@@ -10,7 +10,7 @@ _RES_MAGIC = 0x31534552
 _HDR_FMT = '<IHHHHBBI'
 _HDR_SIZE = struct.calcsize(_HDR_FMT)
 
-_HEVC_FEAT_DECODER = os.environ.get('HEVC_FEAT_DECODER', '/video_vit/yunyaoyan/openHEVC_feature_decoder-Interface_MV_Residual/openHEVC_feature_decoder-Interface_MV_Residual/build/hevc')
+_HEVC_FEAT_DECODER = os.environ.get('HEVC_FEAT_DECODER', '/video_vit/openHEVC_feature_decoder-Interface_MV_Residual/openHEVC_feature_decoder-Interface_MV_Residual/build/hevc')
 
 class ResPipeReader:
     """

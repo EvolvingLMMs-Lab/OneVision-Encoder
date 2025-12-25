@@ -458,7 +458,7 @@ def _save_image(img_hwc_uint8, path):
 def main():
     parser = argparse.ArgumentParser(description="Quick DALI dataloader visual check")
     group = parser.add_mutually_exclusive_group(required=False)
-    group.add_argument("--file-list", type=str, default="/video_vit/train_UniViT/mp4_list.txt")
+    group.add_argument("--file-list", type=str, default="${DATA_DIR}")
     parser.add_argument("--outdir", type=str, default="./dali_debug_out", help="Output dir to save frames")
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--sequence-length", type=int, default=8)
@@ -479,7 +479,7 @@ def main():
     if not file_list:
         raise SystemExit("file_list is empty")
 
-    labels = np.load("/video_vit/train_UniViT/list_merged.npy")
+    labels = np.load("/video_vit/list_merged.npy")
 
     # Important: set num_shards=1, shard_id=0 to avoid None handling issues in source_params
     dataloader = dali_dataloader(

@@ -19,22 +19,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ----- Config (you can edit or pass via CLI) -----
 hosts = [
-    "172.16.5.19",
-    "172.16.5.27",
-    "172.16.5.81",
-    "172.16.5.82",
-    "172.16.5.85",
-    "172.16.5.86",
-    "172.16.5.87",
-    "172.16.5.88",
-    "172.16.5.89",
-    "172.16.5.90",
-    "172.16.5.91",
-    "172.16.5.92",
-    "172.16.5.93",
-    "172.16.5.94",
-    "172.16.5.95",
-    "172.16.5.96",
+    # Configure your cluster hosts here
+    # "node-01",
+    # "node-02",
+    # Add your hosts...
 ]
 
 list_coyo = [

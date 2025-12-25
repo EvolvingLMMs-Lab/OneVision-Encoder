@@ -669,8 +669,8 @@ def main() -> None:
     if args.dataset == "COIN":
         args.train_data_root_path = args.data_root
         args.val_data_root_path = args.data_root
-        args.train_data_csv_path = "/video_vit/feilong/LLaVA-ViT/eval_encoder/annotations/train_new.csv"
-        args.val_data_csv_path = "/video_vit/feilong/LLaVA-ViT/eval_encoder/annotations/val_new.csv"
+        args.train_data_csv_path = "/video_vit/LLaVA-ViT/eval_encoder/annotations/train_new.csv"
+        args.val_data_csv_path = "/video_vit/LLaVA-ViT/eval_encoder/annotations/val_new.csv"
     if args.dataset == "jester":
         args.train_data_root_path = os.path.join(args.data_root, "jester_hevc")
         args.val_data_root_path = os.path.join(args.data_root, "jester_hevc")

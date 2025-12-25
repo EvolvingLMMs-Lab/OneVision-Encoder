@@ -6,7 +6,7 @@ Features are saved in order matching the input video list.
 
 Usage with DeepSpeed:
     torchrun --nproc_per_node 8 step1_extract_video_features.py \
-        --input /video_vit/train_UniViT/mp4_list.txt \
+        --input /video_vit/mp4_list.txt \
         --output /output/features \
         --batch_size 32 \
         --num_frames 8 \
@@ -14,7 +14,7 @@ Usage with DeepSpeed:
 
     # Multi-node
     deepspeed --num_gpus=8 --num_nodes=2 --hostfile=hostfile step1_extract_video_features.py \
-        --input /video_vit/train_UniViT/mp4_list.txt \
+        --input /video_vit/mp4_list.txt \
         --output /output/features \
         --batch_size 32 \
         --num_frames 8
@@ -29,8 +29,8 @@ Usage with DeepSpeed:
     --num_gpus=8 \
     --num_nodes=12 \
     --hostfile=hostfile step1_extract_video_features.py \
-    --input /video_vit/dataset/clips_HowTo100M_meta_llava_vit/list_all_valid_part_000 \
-    --output /video_vit/dataset/clips_HowTo100M_meta_llava_vit/output_list_all_valid_part_000 \
+    --input /video_vit/clips_HowTo100M_meta_llava_vit/list_all_valid_part_000 \
+    --output /video_vit/clips_HowTo100M_meta_llava_vit/output_list_all_valid_part_000 \
     --batch_size 32 \
     --num_frames 8
 """
@@ -463,7 +463,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Extract MetaCLIP-H/14 features from videos")
     parser.add_argument("--input", required=True, help="Input video list")
     parser.add_argument("--output", required=True, help="Output directory")
-    parser.add_argument("--model_path", default="/vlm/xiangan/pretrain_models/metaclip/metaclip_h_14.pt")
+    parser.add_argument("--model_path", default="/vlm/pretrain_models/metaclip/metaclip_h_14.pt")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_frames", type=int, default=8)
     parser.add_argument("--chunk_size", type=int, default=32 << 10)  # Save every 1024 videos

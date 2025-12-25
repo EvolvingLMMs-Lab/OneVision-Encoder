@@ -104,9 +104,9 @@ class ExternalInputCallable:
         return video_data
 
     def get_label_and_visible_indices(self, video_path):
-        # label:    /video_vit/dataset/clips_square_aug_k710_ssv2/6/3/rank_068_sample_0000145663_label.npy
-        # video:    /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2/6/3/rank_068_sample_0000145663.mp4
-        # residual: /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2_residual/6/3/rank_068_sample_0000145663.visidx.npy
+        # /path/to/data/...
+        # /path/to/data/...
+        # /path/to/data/...
 
         label_path = video_path.replace("clips_square_aug_k710_ssv2_hevc_v2", "clips_square_aug_k710_ssv2")
         label_path = label_path.replace(".mp4", "_label.npy")
@@ -138,9 +138,9 @@ class ExternalInputCallable:
 
         video_path = self.file_list[sample_idx]
 
-        # label:    /video_vit/dataset/clips_square_aug_k710_ssv2/6/3/rank_068_sample_0000145663_label.npy
-        # video:    /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2/6/3/rank_068_sample_0000145663.mp4
-        # residual: /video_vit/dataset/clips_square_aug_k710_ssv2_hevc_v2_residual/6/3/rank_068_sample_0000145663.visidx.npy
+        # /path/to/data/...
+        # /path/to/data/...
+        # /path/to/data/...
         test_info = None
         # print(video_path)
 
