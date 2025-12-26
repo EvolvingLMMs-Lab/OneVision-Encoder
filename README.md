@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>HEVC-Style Vision Transformer</strong>
+  <strong>HEVC-style vision transformer with codec-style patch selection</strong>
 </p>
 
 <div align="center">
