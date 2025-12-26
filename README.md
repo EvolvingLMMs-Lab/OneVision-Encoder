@@ -12,10 +12,10 @@
 
 <div align="center">
 
+📝 **[Homepage](https://www.lmms-lab.com/onevision-encoder/index.html)**
 🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
-🤗 **[Datasets]()** |
-📄 **[Technical Report]()** |
-📝 **[Blog](https://www.lmms-lab.com/onevision-encoder/index.html)**
+🤗 **[Datasets](coming)** |
+📄 **[Tech Report (coming)]()** |
 
 </div>
 
