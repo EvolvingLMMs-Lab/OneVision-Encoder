@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_name", default="llava_vit_base_ln")
     parser.add_argument("--model_weight", default="NULL")
     parser.add_argument("--num_frames", type=int, default=64)
-    parser.add_argument("--num_tokens", type=int, default=1568)
+    parser.add_argument("--num_tokens", type=int, default=256)
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--tubelet_size", type=int, default=1)
     parser.add_argument("--patch_size", type=int, default=14, help="Patch size used for residual patching (default: 14)")
@@ -265,7 +265,7 @@ def get_feature(
                 patches_per_side = H // patch_size  # 224 // 14 = 16
                 patches_per_frame = patches_per_side * patches_per_side  # 16 * 16 = 256
                 
-                group_size = 8
+                group_size = args.K_keep // patches_per_frame
                 assert T % group_size == 0, "Frame count must be divisible by 8"
                 
                 # Extract patches based on visible_indices
