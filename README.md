@@ -14,7 +14,7 @@
 
 🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
 🤗 **[Datasets]()** |
-📄 **[Technical Report](https://arxiv.org/abs/2509.23661)** |
+📄 **[Technical Report]()** |
 📝 **[Blog](https://www.lmms-lab.com/onevision-encoder/index.html)**
 
 </div>
