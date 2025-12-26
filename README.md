@@ -325,3 +325,7 @@ This project is released under the Apache 2.0 License.
 
 - [Model Card](docs/model_card.md) - Detailed documentation for OneVision Encoder Large model
 - [Data Card](docs/datacard.md) - Training dataset information and statistics
+
+## 🔗 Related Projects
+
+- [nano-hevc](https://github.com/Luodian/nano-hevc) – A minimal and educational HEVC (H.265) encoder written in Python, designed to expose the full encoding pipeline and core design principles.
