@@ -117,45 +117,6 @@ We compare the performance of different vision encoders using the Attentive Prob
 
 
 
-
-
-## 🔧 Setup
-
-### Prerequisites
-
-- Docker with NVIDIA GPU support
-- CUDA-compatible GPU(s)
-
-### Docker Build
-
-#### Option 1: Build from Dockerfile
-
-```bash
-docker build -t ov_encoder:25.12 .
-```
-
-### Running the Container
-
-#### Single Node
-
-```bash
-docker run -it --gpus all --ipc host --net host --privileged \
-    -v "$(pwd)":/workspace/OneVision-Encoder \
-    -w /workspace/OneVision-Encoder \
-    ov_encoder:25.12 bash
-```
-
-
-### Install Package
-
-Inside the container, install the package in editable mode:
-
-```bash
-pip install -e .
-```
-
----
-
 ## ⚡ Quick Start
 
 > **Note:** This model supports native resolution input. For optimal performance:
@@ -219,7 +180,62 @@ Add codec-style input documentation for temporal saliency-based patch selection.
 
 ## 🚀 Training
 
-### Single Node & Multi Node
+You can set up the environment using **one of the following two methods**:
+
+### Option 1 (Conda + Pip)
+
+```bash
+conda env create -f environment.yml -n ov_encoder
+pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu118
+pip install --extra-index-url https://pypi.nvidia.com --upgrade nvidia-dali-cuda110
+pip install -r requirements.txt
+```
+
+### Option 2 (Docker)
+
+More documentation will be added soon.
+
+
+```bash
+docker build -t ov_encoder:25.12 .
+```
+
+```bash
+docker run -it --gpus all --ipc host --net host --privileged \
+    -v "$(pwd)":/workspace/OneVision-Encoder \
+    -w /workspace/OneVision-Encoder \
+    ov_encoder:25.12 bash
+```
+
+
+### Install Package
+
+Inside the container, install the package in editable mode:
+
+```bash
+pip install -e .
+```
+
+### Single Node Dry Run To Test Setup
+
+```bash
+bash shells/ov_encoder_base_stage1_si_dry_run.sh
+```
+
+### Single Node Stage-1 Single Image
+
+```bash
+bash shells/ov_encoder_base_stage1_si.sh
+```
+
+### Single Node Stage-2 Video Contine Pretraining
+
+More documentation will be added soon.
+
+```bash
+bash shells/ov_encoder_large_stage2_residual_8gpus.sh
+```
+
 
 Training configurations and hyperparameters will be documented soon. For now, please refer to `--help` for available options.
 
