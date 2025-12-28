@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python
+  - python=3.11
+  
+  # 基础工具
+  - pip

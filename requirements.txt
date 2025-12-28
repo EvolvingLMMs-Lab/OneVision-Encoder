@@ -1,0 +1,6 @@
+decord
+easydict
+huggingface-hub>=0.23.2,<1.0
+tensorboard
+timm
+transformers==4.53.1

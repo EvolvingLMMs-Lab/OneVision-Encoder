@@ -13,14 +13,15 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
 from transformers import CLIPImageProcessor
 
+import dataset
 import model_factory
 from dataset import DATASET_REGISTRY, Property
+from onevision_encoder import OneVisionEncoderConfig, OneVisionEncoderModel
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
-from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
+from training.fused_partial_fc_v2_multi_res import (CombinedMarginLoss,
+                                                    PartialFC_V2)
 from training.lr_scheduler import PolynomialLRWarmup
-from onevision_encoder import OneVisionEncoderModel, OneVisionEncoderConfig
 
-# fix: removed conflicting line (was: True immediately overwritten by False)
 torch._dynamo.config.optimize_ddp = False
 
 parser = argparse.ArgumentParser(description="Multi-dataset video training")
@@ -213,17 +214,10 @@ def main():
     if len(args.image_size_video) == 1:
         args.image_size_video = args.image_size_video * 2
 
-    # =====================================================
-    # Multi-frame training configuration / 多帧训练配置
-    # 根据 rank % 4 确定每个 GPU 使用的帧数
-    # batch size 与帧数成反比: base_bs * (base_num_frames / actual_num_frames)
-    # =====================================================
     if args.enable_multi_frame:
         num_frame_options = len(args.multi_frame_list)
         frame_index = rank % num_frame_options
         args.actual_num_frames = args.multi_frame_list[frame_index]
-        # 计算 batch size 缩放因子：帧数越少，batch size 越大
-        # 验证 base_num_frames 必须能被 actual_num_frames 整除
         if args.base_num_frames % args.actual_num_frames != 0:
             raise ValueError(
                 f"base_num_frames ({args.base_num_frames}) must be divisible by "
@@ -239,7 +233,6 @@ def main():
         frame_scale_factor = 1
         logger.info(f"[Single-frame] Using fixed num_frames={args.actual_num_frames}")
 
-    # 实例化数据集（使用复数参数名）
     args.list_datasets = [DATASET_REGISTRY.get(x)() for x in args.list_datasets]
     args.num_heads = len(args.list_datasets)
 
@@ -266,25 +259,18 @@ def main():
     args.list_loss_weights = _expand("list_loss_weights", args.list_loss_weights)
     args.list_init_partial_fc_paths = _expand("list_init_partial_fc_paths", args.list_init_partial_fc_paths)
 
-    # =====================================================
-    # 根据多帧配置调整每个数据集的 batch size
-    # 对于 video 类型 (dali_type == "decord")，应用帧数缩放
-    # =====================================================
     args.list_batch_sizes_adjusted = []
     for head_id, dataset_config in enumerate(args.list_datasets):
         base_bs = args.list_batch_sizes[head_id]
         if dataset_config.dali_type == "decord":
-            # 视频分支：batch size 与帧数成反比
             adjusted_bs = base_bs * frame_scale_factor
             logger.info(f"[head_id={head_id}] Video branch: base_bs={base_bs}, "
                         f"adjusted_bs={adjusted_bs} (scale={frame_scale_factor}x)")
         else:
-            # 图像分支：保持原有 batch size
             adjusted_bs = base_bs
             logger.info(f"[head_id={head_id}] Image branch: bs={adjusted_bs}")
         args.list_batch_sizes_adjusted.append(adjusted_bs)
 
-    # 其余派生量
     args.batch_size = sum(args.list_batch_sizes_adjusted)
     args.list_head_names = [x.name for x in args.list_datasets]
     args.total_steps = int(args.num_sampled_data / args.batch_size / world_size)
@@ -316,24 +302,16 @@ def main():
             backbone.load_state_dict(state_dict, strict=True)
             logger.info(f"Loaded backbone weights from {args.init_backbone}")
 
-    # 根据 finetune_backbone 控制哪些层参与训练：
-    # - finetune_backbone = 1: 整个 backbone 可训练
-    # - finetune_backbone = 0: 只有 head 可训练，其它全部冻结
     if args.finetune_backbone:
         backbone.requires_grad_(True)
     else:
-        # 先全部冻结
         backbone.requires_grad_(False)
-        # 仅打开 head 的梯度（假设 LlavaViTEncoder 上有 .head）
         backbone_module = unwrap_module(backbone)
         if hasattr(backbone_module, "head"):
             for p in backbone_module.head.parameters():
                 p.requires_grad = True
         else:
-            raise RuntimeError(
-                "finetune_backbone==0 但 backbone 上没有属性 'head'，"
-                "请确认使用的是 LlavaViTEncoder 并且 use_head=True。"
-            )
+            raise RuntimeError()
 
     backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
 
@@ -433,17 +411,15 @@ def main():
             static_graph=True)
 
     backbone_ddp = wrap_ddp(backbone)
-    # backbone_ddp_compiled = backbone_ddp
     backbone_ddp_compiled = torch.compile(backbone_ddp)
 
     list_dali_dataloader = []
     list_head_names = []
-    # print("开始加载数据了")
     for head_id, dataset_config in enumerate(args.list_datasets):
         if dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video_sampling_frame import get_dali_dataloader
+            from dataloader.data_decord_video_sampling_frame import \
+                get_dali_dataloader
 
-            # 使用调整后的 batch size 和实际帧数
             train_iter = get_dali_dataloader(
                 data_root_path="",
                 data_csv_path=dataset_config.prefixes[0],
@@ -463,7 +439,6 @@ def main():
         elif dataset_config.dali_type == "decord_residual":
             from dataloader.data_decord_llava_vit import get_dali_dataloader
 
-            # 使用调整后的 batch size 和实际帧数
             train_iter = get_dali_dataloader(
                 data_root_path="",
                 data_csv_path=dataset_config.prefixes[0],
@@ -489,7 +464,6 @@ def main():
                 )
             else:
                 from dataloader.data_v2 import MultiRecDALIWarper
-                # print("dataset_config.prefix", dataset_config.prefixes)
                 train_iter = MultiRecDALIWarper(
                     list_prefix=dataset_config.prefixes,
                     batch_size=args.list_batch_sizes_adjusted[head_id],
@@ -506,7 +480,6 @@ def main():
                 )
             else:
                 from dataloader.data_v2_ocr import MultiRecDALIWarper
-                # print("dataset_config.prefix", dataset_config.prefixes)
                 train_iter = MultiRecDALIWarper(
                     list_prefix=dataset_config.prefixes,
                     batch_size=args.list_batch_sizes_adjusted[head_id],
@@ -539,8 +512,6 @@ def main():
     log_args(args, logger, writer=tb_writer, save_dir=args.output, rank=rank)
 
 
-    # -------- 这里加一段logger，输出每个rank分到的数据 --------
-
     for head_id, dataset_config in enumerate(args.list_datasets):
         name = dataset_config.name if hasattr(dataset_config, "name") else f"head_{head_id}"
         prefixes = getattr(dataset_config, "prefixes", None)
@@ -550,16 +521,11 @@ def main():
         if prefixes is not None:
             preview_prefixes = prefixes
             logger.info(f"[rank {rank}][local_rank {local_rank}] prefixes preview: {preview_prefixes}")
-            # 如需全部打印，可以用:
-            # for p in prefixes:
-            #     logger.info(f"    {p}")
 
-    # -----------------------------------------------------
 
     list_iter = []
     list_next_data_batch = []
     for i in range(args.num_heads):
-        # list_dali_dataloader[i].reset()
         list_iter.append(iter(list_dali_dataloader[i]))
         list_next_data_batch.append(next(list_iter[i]))
 
@@ -587,28 +553,22 @@ def main():
                 bs, C, T, H, W = videos.shape
                 target_frames = 64
 
-                # === 插值indices到目标帧数 ===
                 interpolated_indices = interpolate_frame_indices(
                     frame_indices,
                     total_frames.view(-1),
                     target_frames
-                )   # [B, seq_len]
+                )
 
-                padded_videos = torch.zeros(bs, C, target_frames, H, W, device="cuda", dtype=videos.dtype)
-                # 为scatter准备indices
                 seq_len = frame_indices.shape[1]
                 frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
-                # scatter填充各帧
-                padded_videos.scatter_(dim=2, index=frame_idx_expanded, src=videos)
 
-                # 计算可见帧token编号
                 per = torch.arange(args.num_tokens_per_frame, device="cuda")
                 visible_index = (interpolated_indices.unsqueeze(-1) * args.num_tokens_per_frame + per).reshape(bs, -1)
                 visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
 
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
 
-                    output = backbone_ddp_compiled(padded_videos, visible_index)
+                    output = backbone_ddp_compiled(videos, visible_index)
                     if hasattr(output, "pooler_output"):
                         head_embedding = output.pooler_output
                     else:
@@ -626,22 +586,15 @@ def main():
                 bs = visible_indices.shape[0]
                 dev = visible_indices.device
 
-                # 初始化 out：默认使用 visible_indices 的前 args.target_num 列的拷贝
                 out = visible_indices[:, :args.target_num].clone()
-
-                # 按 batch 固定划分：前50% residual, 中37.5% frame_sampling, 后12.5% collage
                 n1 = int(bs * 0.5)
-                # fix: n2 must be cumulative threshold, not standalone percentage
-                # bug was: n2 = int(bs * 0.375) which gives n2=37 when bs=100
-                # this caused mask_frame_sampling = (idx >= 50) & (idx < 37) to be always False
-                n2 = int(bs * 0.875)  # cumulative: 50% + 37.5% = 87.5%
+                n2 = int(bs * 0.875)
 
                 idx_range = torch.arange(bs, device=dev)
                 mask_residual = idx_range < n1                               # idx in [0, n1)
                 mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)   # idx in [n1, n2)
                 mask_collage = idx_range >= n2                               # idx in [n2, bs)
 
-                # ---------- residual（前50%）: 生成 out 行 ----------
                 if mask_residual.any():
                     vis_a = visible_indices[mask_residual, :args.total_indices]
                     must = vis_a[:, :args.must_num]
@@ -660,7 +613,7 @@ def main():
                         sel_a = torch.cat([sel_a, pad], dim=1)
                     out[mask_residual] = sel_a
 
-                # ---------- frame_sampling（中35%）: 生成 out 行 ----------
+
                 if mask_frame_sampling.any():
                     nB = visible_indices[mask_frame_sampling].size(0)
                     SEQ = 8
@@ -682,7 +635,7 @@ def main():
                         pad = sel_b[:, -1:].repeat(1, args.target_num - sel_b.size(1))
                         out[mask_frame_sampling] = torch.cat([sel_b, pad], dim=1)
 
-                # ---------- combined: residual + frame_sampling 一起推理（有 out） ----------
+
                 combined_mask = mask_residual | mask_frame_sampling
                 if combined_mask.any():
                     combined_idx = torch.nonzero(combined_mask, as_tuple=False).squeeze(1)
@@ -698,14 +651,13 @@ def main():
 
                     combined_head_output = combined_head_output.float()
 
-                # ---------- collage（后15%）: 从 head_input split 出帧，按 frame_sampling 策略抽帧并拼成 8行1列单张图，然后像 origin 一样单独推理 ----------
+
                 if mask_collage.any():
                     coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)
                     nC = coll_idx.numel()
                     SEQ = 8
                     FRAMES = 64  # assume fixed 64 frames for head_subset
 
-                    # 从 head_input 中选出需要做 collage 的样本，期望形状为 [nC, C, 64, H, W]
                     head_subset = head_input[coll_idx]  # [nC, C, 64, H, W] (must hold)
 
                     # 检查形状
@@ -718,26 +670,15 @@ def main():
                     Cf = head_subset.size(1)
                     Hf = head_subset.size(3)
                     Wf = head_subset.size(4)
-
-                    # 与 frame_sampling 一致的抽帧策略（在 64 帧上均匀分段后随机 offset）
                     avg = FRAMES // SEQ  # 8
                     base = torch.arange(SEQ, device=dev) * avg
                     offs = torch.randint(avg, (nC, SEQ), device=dev)
                     frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [nC, SEQ], 范围在 [0, 63]
-
-                    # 用 gather 从 head_subset 采样：gather 在 time 维 (dim=2)
-                    # 为 gather 准备索引形状 [nC, Cf, SEQ, Hf, Wf]
                     idx_expand = frames_idx.view(nC, 1, SEQ, 1, 1).expand(-1, Cf, -1, Hf, Wf).to(head_subset.device)
                     sel_frames = torch.gather(head_subset, 2, idx_expand)  # [nC, Cf, SEQ, Hf, Wf]
-
-                    # 为拼接方便，转为 [nC, SEQ, Cf, Hf, Wf]
                     sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [nC, SEQ, Cf, Hf, Wf]
-
-                    # 竖向拼接为 8 行 1 列图 -> [nC, Cf, Hf*SEQ, Wf]
                     grid_rows = [sel_frames[:, i, :, :, :] for i in range(SEQ)]
                     grid = torch.cat(grid_rows, dim=-2)  # [nC, Cf, Hf*SEQ, Wf]
-
-                    # 像 origin 一样单独推理（不传 out）
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                         collage_head_output = backbone_ddp_compiled(grid)
                     if hasattr(collage_head_output, "pooler_output"):
@@ -746,7 +687,6 @@ def main():
                         collage_head_output  = collage_head_output["head_output"]
                     collage_head_output = collage_head_output.float()
 
-                # ---------- 汇总 combined 与 collage 输出，按 batch 顺序放回 ----------
                 D = combined_head_output.size(1)
 
                 head_embedding_full = torch.zeros(bs, D, device=dev, dtype=torch.float32)
@@ -794,14 +734,10 @@ def main():
         scaled_loss = sum(list_loss) / args.backward_passes_per_step
 
         if is_accumulation_step:
-            # 中间累积步骤，避免DDP通信
             with backbone_ddp_compiled.no_sync():
                 scaled_loss.backward()
         else:
-            # 最后一步正常backward，会进行梯度同步
             scaled_loss.backward()
-
-            # 只在累积完成时执行梯度裁剪和优化器更新
             clip_grad_norm_(backbone_ddp_compiled.parameters(), max_norm=5, norm_type=2)
             for pfc in list_module_pfc:
                 clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
@@ -866,9 +802,6 @@ def main():
 
 
 def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
-    """
-    插值原始帧索引到目标帧数
-    """
     bs, seq_len = frame_indices.shape
     device = frame_indices.device
     total_frames_float = total_frames.float().view(bs, 1)
@@ -896,13 +829,13 @@ class BatchEndCallBack(object):
 
         self.num_head = len(self.list_head_names)
         self.time_start = time.time()
-        self.list_loss_metric = [ScalaMetric() for _ in self.list_head_names]  # 只保留一个loss
+        self.list_loss_metric = [ScalaMetric() for _ in self.list_head_names]
         self.init = False
         self.tic = 0
-        # 用于计算平均每步时间
+
         self.step_times = []
-        self.max_time_history = 100  # 保留最近100个step的时间来平均
-        # 累计样本数计数器
+        self.max_time_history = 100
+
         self.total_examples = 0
         # Create TensorBoard writer if rank 0
         if rank == 0:
@@ -915,9 +848,9 @@ class BatchEndCallBack(object):
         self,
         global_step: int,
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
-        list_loss_float: List[float],  # 只需要一个loss列表
+        list_loss_float: List[float],
         batch_size: int,
-        num_samples=None,  # 新增参数，用于记录每个batch实际处理的样本数
+        num_samples=None,
     ):
         for i in range(self.num_head):
             self.list_loss_metric[i].update(list_loss_float[i])
@@ -927,40 +860,31 @@ class BatchEndCallBack(object):
                 current_time = time.time()
                 time_elapsed = current_time - self.tic
                 self.tic = current_time
-
-                # 计算这个frequent间隔内每个step的平均时间
                 time_per_step = time_elapsed / self.frequent
 
-                # 保存到历史记录，用于平滑计算
                 self.step_times.append(time_per_step)
                 if len(self.step_times) > self.max_time_history:
                     self.step_times.pop(0)
 
-                # 计算平均每步时间（使用最近的记录）
                 avg_time_per_step = sum(self.step_times) / len(self.step_times)
 
-                # 计算剩余步数
                 remaining_steps = self.total_steps - global_step
-
-                # 计算预计剩余时间（小时）
                 remaining_time_hours = (avg_time_per_step * remaining_steps) / 3600
 
                 try:
-                    # 计算当前吞吐量
                     speed: float = self.frequent * batch_size / time_elapsed
                     speed_total = speed * world_size
                 except ZeroDivisionError:
                     speed = float("inf")
                     speed_total = float("inf")
 
-                # 使用f-string格式化输出信息
                 header = f"rank {speed:.2f} total {speed_total:.2f} its/s lr: {lr_scheduler.get_last_lr()[0]:.8f} "
                 progress = f"step: {global_step}/{self.total_steps} ({global_step/self.total_steps*100:.2f}%) "
                 time_info = f"remain: {remaining_time_hours:.2f} hours"
 
                 loss_str_format = ""
                 for head_id, name in enumerate(self.list_head_names):
-                    # Add to TensorBoard if rank 0
+
                     if rank == 0 and self.tb_writer:
                         self.tb_writer.add_scalar(
                             f"loss/{name}",
@@ -983,7 +907,6 @@ class BatchEndCallBack(object):
                     loss_str_format += f"{f'loss: {self.list_loss_metric[head_id].avg:.4f}':<20}"
                     self.list_loss_metric[head_id].reset()
 
-                # 添加样本数信息到日志
                 examples_info = f"samples: {num_samples}"
                 msg = f"{header}{progress}{time_info} {examples_info}{loss_str_format}"
 
@@ -1019,32 +942,22 @@ class ScalaMetric(object):
 
 
 def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, rank: int = 0):
-
-    """
-    打印并记录训练参数。
-    - logger: 你的 logger 实例（支持 .info）
-    - writer: TensorBoard SummaryWriter（可为 None）
-    - save_dir: 额外保存 JSON 的路径（可为 None）
-    - rank: 仅在 rank==0 执行（分布式时避免重复）
-    """
     if rank != 0:
         return
 
     args_dict: Dict[str, Any] = vars(args) if not isinstance(args, dict) else args
-    # 排序保证可重复
+
     sorted_items = sorted(args_dict.items(), key=lambda x: x[0])
 
-    # Megatron-LM 风格日志
     sep = "-" * 92
     logger.info(sep)
     logger.info("Training / Runtime Arguments")
     logger.info(sep)
-    # 你原本的格式是左对齐 30，这里模仿 Megatron 可右对齐或统一宽度
-    # 下面采用 name: value 风格，也可以改成两列对齐
+
     max_key_len = max(len(k) for k, _ in sorted_items) if sorted_items else 0
     col_width = max(20, max_key_len)
     for k, v in sorted_items:
-        # 避免太长的列表完全刷屏，可以截断（可选）
+
         vs = str(v)
         if len(vs) > 300:
             vs = vs[:297] + "..."
@@ -1053,20 +966,7 @@ def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, r
 
     # ---------- TensorBoard 记录 ----------
     if writer is not None:
-        # 1) 作为 hparams（会出现在 HPARAMS 面板）
-        # 需要全部是 “简单” 类型；否则转换
-        # hparam_dict = {}
-        # for k, v in sorted_items:
-        #     sv = _sanitize_for_json(v)
-        #     # hparams 里放的要是 int / float / str / bool，复杂的就转成 str
-        #     if isinstance(sv, (int, float, str, bool)) or sv is None:
-        #         hparam_dict[k] = sv
-        #     else:
-        #         hparam_dict[k] = str(sv)
-        # # add_hparams 需要一个 metrics dict；没有真实指标时给个空或 dummy
-        # writer.add_hparams(hparam_dict, {"_dummy_metric": 0.0})
 
-        # 2) 作为 Markdown 表格（TEXT 面板）
         md_lines = ["| Argument | Value |", "|----------|-------|"]
         for k, v in sorted_items:
             vs = str(v).replace("|", "\\|")
@@ -1074,16 +974,6 @@ def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, r
                 vs = vs[:497] + "..."
             md_lines.append(f"| {k} | {vs} |")
         writer.add_text("markdown_table", "\n".join(md_lines), global_step=0)
-
-        # 3) 纯文本 JSON（TEXT 面板）
-        # json_blob = json.dumps({k: _sanitize_for_json(v) for k, v in sorted_items},
-        #                        indent=2, ensure_ascii=False)
-        # writer.add_text("args/json_full", f"```\n{json_blob}\n```", global_step=0)
-
-
-    # 可选：记录一个时间戳
-    # if writer is not None:
-    #     writer.add_text("args/run_timestamp", datetime.utcnow().isoformat(), global_step=0)
 
 if __name__ == "__main__":
     main()
