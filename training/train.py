@@ -643,10 +643,10 @@ def main():
                         num_unique = unique_values.numel()
                         if num_unique >= SEQ:
                             residual_frames[i] = unique_values[:SEQ]
-                        else:
+                        elif num_unique > 0:
                             residual_frames[i, :num_unique] = unique_values
-                            if num_unique > 0:
-                                residual_frames[i, num_unique:] = unique_values[-1]
+                            residual_frames[i, num_unique:] = unique_values[-1]
+                        # If num_unique == 0, residual_frames[i] stays at zeros (frame 0)
                     selected_frames_all[mask_residual] = residual_frames
 
 
