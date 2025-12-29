@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tubelet_size", type=int, default=1)
     parser.add_argument("--embedding_size", type=int, default=768)
     parser.add_argument("--num_classes", type=int, default=0)
-    # ===> 新增：目标帧数参数 <===
+    # ===> New: target frame number parameter <===
     parser.add_argument("--target_frames", type=int, default=64,
                         help="Target number of frames to interpolate to (default: 64)")
 
@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     # Dataloader
     parser.add_argument("--dali_num_threads", type=int, default=2)
     parser.add_argument("--dali_py_num_workers", type=int, default=4)
-    # ===> 新增 decord 线程数参数 <===
+    # ===> New: decord thread number parameter <===
     parser.add_argument("--decord_num_threads", type=int, default=2,
                         help="Number of threads for decord video reader.")
     parser.add_argument("--short_side_size", type=int, default=256)
@@ -73,13 +73,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--save_report", default="fewshot_video_report/ActionRecognition")
 
-    # 分布式相关参数
+    # Distributed training parameters
     parser.add_argument("--rank", type=int, default=0)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--world_size", type=int, default=1)
     parser.add_argument("--global_rank", type=int, default=0)
 
-    # 新增：时序空间crop参数（默认与dali默认一致）
+    # New: temporal and spatial crop parameters (defaults match DALI defaults)
     parser.add_argument("--num_temporal_crops", type=int, default=1, help="Number of temporal crops for evaluation")
     parser.add_argument("--num_spatial_crops", type=int, default=1, help="Number of spatial crops for evaluation")
 
@@ -90,32 +90,32 @@ def parse_args() -> argparse.Namespace:
 
 def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
     """
-    将帧索引从原始视频帧数插值到目标帧数
+    Interpolate frame indices from original video frame count to target frame count
 
     Args:
-        frame_indices: [B, seq_len] 原始帧索引
-        total_frames: [B] 每个视频的总帧数
-        target_frames: 目标帧数 (默认 64)
+        frame_indices: [B, seq_len] original frame indices
+        total_frames: [B] total frames per video
+        target_frames: target frame count (default 64)
 
     Returns:
-        interpolated_indices: [B, seq_len] 插值后的帧索引，范围在 [0, target_frames-1]
+        interpolated_indices: [B, seq_len] interpolated frame indices, range [0, target_frames-1]
     """
     bs, seq_len = frame_indices.shape
     device = frame_indices.device
 
-    # 将 total_frames 转换为浮点数以进行插值计算
+    # Convert total_frames to float for interpolation calculation
     total_frames_float = total_frames.float().view(bs, 1)  # [B, 1]
     frame_indices_float = frame_indices.float()  # [B, seq_len]
 
-    # 插值公式: new_idx = (old_idx / (total_frames - 1)) * (target_frames - 1)
-    # 处理 total_frames = 1 的情况files.trimTrailingWhitespace: truefiles.trimTrailingWhitespace: tru
+    # Interpolation formula: new_idx = (old_idx / (total_frames - 1)) * (target_frames - 1)
+    # Handle total_frames = 1 case
     total_frames_safe = torch.clamp(total_frames_float - 1, min=1.0)
     interpolated_indices = (frame_indices_float / total_frames_safe) * (target_frames - 1)
 
-    # 四舍五入并转换为整数
+    # Round and convert to integer
     interpolated_indices = torch.round(interpolated_indices).long()
 
-    # 确保索引在有效范围内
+    # Ensure indices are in valid range
     interpolated_indices = torch.clamp(interpolated_indices, 0, target_frames - 1)
 
     return interpolated_indices
@@ -130,19 +130,19 @@ def get_feature(
     is_training: bool = False
 ) -> torch.Tensor:
     """
-    获取特征，支持视频及图片输入。
+    Extract features, supporting both video and image input.
 
     Args:
-        args: 参数配置
-        videos: 视频数据 [B, C, T, H, W] 或图片数据 [B, C, H, W]
-        model: 模型
-        frame_indices: 视频帧索引 [B, seq_len]，用于 ov_encoder_large sampling
-        total_frames: 每个视频的总帧数 [B]
-        is_training: 是否为训练模式
+        args: argument configuration
+        videos: video data [B, C, T, H, W] or image data [B, C, H, W]
+        model: model
+        frame_indices: video frame indices [B, seq_len], used for ov_encoder_large sampling
+        total_frames: total frames per video [B]
+        is_training: whether in training mode
     """
     def video_to_images(videos: torch.Tensor) -> torch.Tensor:
         """
-        将视频 [B, C, T, H, W] 展开为图片序列 [B*T, C, H, W]
+        Unfold video [B, C, T, H, W] into image sequence [B*T, C, H, W]
         """
         B, C, T, H, W = videos.shape
         images = videos.permute(0, 2, 1, 3, 4).reshape(-1, C, H, W)  # [B*T, C, H, W]
@@ -159,25 +159,25 @@ def get_feature(
         "aimv2"
     ]
     if args.model_family in list_vit_single_image:
-        # ===> 专门图片分支 <===
+        # ===> Image-specific branch <===
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
-                # 如果是视频输入，将其转化为图片
+                # If video input, convert to images
                 B, C, T, H, W = videos.shape
-                if videos.dim() == 5:  # 视频分支 [B, C, T, H, W]
+                if videos.dim() == 5:  # Video branch [B, C, T, H, W]
                     videos = video_to_images(videos)
 
-                if videos.dim() == 4:  # 检测为图片分支 [B, C, H, W]
+                if videos.dim() == 4:  # Detected as image branch [B, C, H, W]
                     hidden_states = model(videos)
                     if isinstance(hidden_states, dict) and "visible_embeddings" in hidden_states:
                         hidden_states = hidden_states["visible_embeddings"]
 
                     # hidden_states = hidden_states.view(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
                     hidden_states = hidden_states.reshape(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
-                    # ===> 新增：sin/cos 时间位置编码（2行代码）<===
+                    # ===> New: sin/cos temporal positional encoding (2 lines of code) <===
                     pos = torch.arange(T, device=videos.device).unsqueeze(1) * torch.exp(torch.arange(0, args.embedding_size, 2, device=videos.device) * (-math.log(10000.0) / args.embedding_size))  # [T, D/2]
                     temporal_pos = torch.stack([torch.sin(pos), torch.cos(pos)], dim=2).flatten(1)[:, :args.embedding_size]  # [T, D]
-                    hidden_states = hidden_states.view(B, T, -1, args.embedding_size) + temporal_pos.unsqueeze(0).unsqueeze(2)  # 加到每帧的 tokens 上
+                    hidden_states = hidden_states.view(B, T, -1, args.embedding_size) + temporal_pos.unsqueeze(0).unsqueeze(2)  # Add to tokens of each frame
                     hidden_states = hidden_states.view(B, -1, args.embedding_size)  # [B, T*tokens_per_frame, D]
                     return hidden_states
                 else:
@@ -188,17 +188,17 @@ def get_feature(
             with torch.no_grad():
                 bs, C, T, H, W = videos.shape
                 device = videos.device
-                frame_tokens = args.frames_token_num  # 每帧的 token 数量
-                target_frames = args.target_frames  # 目标帧数，默认 64
+                frame_tokens = args.frames_token_num  # Number of tokens per frame
+                target_frames = args.target_frames  # Target frame count, default 64
 
                 if frame_indices is not None and total_frames is not None:
-                    # ===> 插值帧索引到 target_frames <===
+                    # ===> Interpolate frame indices to target_frames <===
                     interpolated_indices = interpolate_frame_indices(
                         frame_indices,
                         total_frames.view(-1),
                         target_frames
                     )
-                    # ===> 计算 visible_index (基于 target_frames) <===
+                    # ===> Calculate visible_index (based on target_frames) <===
                     per = torch.arange(frame_tokens, device=device)
                     visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
@@ -277,7 +277,7 @@ def train_one_experiment(
         head.train()
         train_metrics.reset()
         for i, batch in enumerate(loader_train):
-            # ===> 从字典中解包数据（包括 total_frames） <===
+            # ===> Unpack data from batch dictionary (including total_frames) <===
             videos = batch["videos"].to(device, non_blocking=True)
             labels = batch["labels"].view(-1).to(device, non_blocking=True)
             indices = batch["indices"].to(device, non_blocking=True)  # [B, seq_len]
@@ -363,9 +363,9 @@ def evaluate(
         total_frames = batch["total_frames"].to(device, non_blocking=True)
 
         B = videos.shape[0] // num_crops
-        # reshape为 [B, num_crops, ...]
+        # Reshape to [B, num_crops, ...]
         videos = videos.view(B, num_crops, *videos.shape[1:])
-        labels = labels.view(B, num_crops)[:, 0]   # [B]，同一个视频的labels一样
+        labels = labels.view(B, num_crops)[:, 0]   # [B], labels are the same for the same video
         indices = indices.view(B, num_crops, *indices.shape[1:])
         total_frames = total_frames.view(B, num_crops)[:, 0]
 
@@ -377,9 +377,9 @@ def evaluate(
                 logits_per_crop.append(logits)
         # [num_crops, B, num_classes] -> [B, num_crops, num_classes]
         logits_all = torch.stack(logits_per_crop, dim=1)
-        # 对 crop 维求平均（可 softmax 再平均/直接logit平均）
+        # Average over crop dimension (can use softmax then average / directly average logits)
         logits_mean = logits_all.mean(dim=1)   # [B, num_classes]
-        # 收集
+        # Collect results
         all_logits.append(logits_mean)
         all_targets.append(labels)
 
@@ -501,7 +501,7 @@ def main() -> None:
         dali_py_num_workers=args.dali_py_num_workers,
         decord_num_threads=args.decord_num_threads,
         seed=args.seed
-        # 训练不需要传入 num_temporal_crops/num_spatial_crops（仅eval使用）
+        # Training does not need num_temporal_crops/num_spatial_crops (only used for evaluation)
     )
     val_loader = get_dali_dataloader(
         data_root_path=args.val_data_root_path,
@@ -517,8 +517,8 @@ def main() -> None:
         dali_py_num_workers=args.dali_py_num_workers,
         decord_num_threads=args.decord_num_threads,
         seed=1024,
-        # num_temporal_crops=args.num_temporal_crops,   # 新增！
-        # num_spatial_crops=args.num_spatial_crops     # 新增！
+        # num_temporal_crops=args.num_temporal_crops,   # New!
+        # num_spatial_crops=args.num_spatial_crops     # New!
     )
     if args.rank == 0:
         print("Data loaders ready.")
