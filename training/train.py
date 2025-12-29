@@ -584,11 +584,11 @@ def main():
                 list_batch_sizes.append(head_input.size(0))
                 visible_indices = list_data_batch[head_id]["video_visible_indices"].long()
 
-                bs, dev = visible_indices.shape[0], visible_indices.device
+                bs = visible_indices.shape[0]
                 out = visible_indices[:, :args.target_num].clone()
                 n1, n2 = int(bs * 0.5), int(bs * 0.875)
 
-                idx_range = torch.arange(bs, device=dev)
+                idx_range = torch.arange(bs).cuda()
                 mask_residual = idx_range < n1
                 mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)
                 mask_collage = idx_range >= n2
@@ -604,8 +604,8 @@ def main():
                 FRAMES = 64
                 if mask_frame_sampling.any():
                     nB = mask_frame_sampling.sum().item()
-                    frames = torch.arange(args.actual_num_frames, device=dev) * (FRAMES // args.actual_num_frames) + torch.randint(FRAMES // args.actual_num_frames, (nB, args.actual_num_frames), device=dev)
-                    sel_b = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame, device=dev)).reshape(nB, -1)
+                    frames = torch.arange(args.actual_num_frames).cuda() * (FRAMES // args.actual_num_frames) + torch.randint(FRAMES // args.actual_num_frames, (nB, args.actual_num_frames)).cuda()
+                    sel_b = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)
                     if sel_b.size(1) > args.target_num:
                         sel_b = sel_b[:, :args.target_num]
                     elif sel_b.size(1) < args.target_num:
@@ -662,10 +662,10 @@ def main():
                     Hf = head_subset.size(3)
                     Wf = head_subset.size(4)
                     avg = FRAMES // args.actual_num_frames  # 8
-                    base = torch.arange(args.actual_num_frames, device=dev) * avg
-                    offs = torch.randint(avg, (nC, args.actual_num_frames), device=dev)
+                    base = torch.arange(args.actual_num_frames).cuda() * avg
+                    offs = torch.randint(avg, (nC, args.actual_num_frames)).cuda()
                     frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [nC, actual_num_frames], 范围在 [0, 63]
-                    idx_expand = frames_idx.view(nC, 1, args.actual_num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf).to(head_subset.device)
+                    idx_expand = frames_idx.view(nC, 1, args.actual_num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf)
                     sel_frames = torch.gather(head_subset, 2, idx_expand)  # [nC, Cf, actual_num_frames, Hf, Wf]
                     sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [nC, actual_num_frames, Cf, Hf, Wf]
                     grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.actual_num_frames)]
@@ -680,7 +680,7 @@ def main():
 
                 D = combined_head_output.size(1)
 
-                head_embedding_full = torch.zeros(bs, D, device=dev, dtype=torch.float32)
+                head_embedding_full = torch.zeros(bs, D, dtype=torch.float32).cuda()
                 if combined_mask.any():
                     head_embedding_full[combined_idx] = combined_head_output
                 if mask_collage.any():
