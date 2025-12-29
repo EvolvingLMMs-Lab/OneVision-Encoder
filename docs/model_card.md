@@ -14,7 +14,7 @@
 | **Intermediate Size** | 4096 |
 | **Number of Layers** | 24 |
 | **Number of Attention Heads** | 16 |
-| **Patch Size** | 16 |
+| **Patch Size** | 14 |
 | **Image Resolution** | 448×448 (pre-trained) |
 | **Video Resolution** | 224×224 with 256 tokens per frame |
 | **Positional Encoding** | 3D RoPE (4:6:6 split for T:H:W) |
@@ -42,12 +42,12 @@ For single image input, the ViT processes data in the standard 4D tensor format 
 ```
 Input: [B, C, H, W] → e.g., [1, 3, 448, 448]
                            ↓
-                   Patch Embedding (Conv2d with kernel=16, stride=16)
+                   Patch Embedding (Conv2d with kernel=14, stride=14)
                            ↓
               Flatten: [B, num_patches, hidden_size]
-                       e.g., [1, 784, 1024] for 448×448 image
+                       e.g., [1, 1024, 1024] for 448×448 image
                            ↓
-                   3D RoPE Position Encoding (T=1, H=28, W=28)
+                   3D RoPE Position Encoding (T=1, H=32, W=32)
                            ↓
                    Transformer Encoder (24 layers)
                            ↓
@@ -69,7 +69,7 @@ Input: [B, C, T, H, W] → e.g., [1, 3, 16, 224, 224]
                     Patch Embedding (per-frame Conv2d)
                              ↓
                Flatten: [B, T × H_patches × W_patches, hidden_size]
-                        e.g., [1, 16 × 14 × 14, 1024] = [1, 3136, 1024]
+                        e.g., [1, 16 × 16 × 16, 1024] = [1, 4096, 1024]
                              ↓
                     Build visible_indices for temporal mapping
                              ↓
@@ -87,7 +87,7 @@ The `visible_indices` tensor maps actual frame positions to a virtual temporal g
 ```python
 # Example: 16 frames sampled from a video, mapped to 64 virtual frame positions
 num_frames = 16          # Actual number of sampled frames
-frame_tokens = 256       # Patches per frame (16×16 for 256×256 with patch_size=16)
+frame_tokens = 256       # Patches per frame (16×16 for 224×224 with patch_size=14)
 target_frames = 64       # Virtual temporal grid size (model's RoPE temporal dimension)
 
 # Map 16 actual frames to positions in the 64-frame virtual grid
@@ -162,7 +162,7 @@ visible_indices = compute_codec_visible_indices(
     video_path,
     K=K_keep,
     mv_compensate="similarity",  # Camera motion compensation
-    patch_size=16
+    patch_size=14
 )
 
 # Process with the model
@@ -174,8 +174,8 @@ outputs = model(video, visible_indices=visible_indices)
 
 | Mode | Input Shape | visible_indices | Output Shape | Use Case |
 |------|-------------|-----------------|--------------|----------|
-| **Image** | `[B, 3, H, W]` | All patches | `[B, (H/16)×(W/16), 1024]` | Single image understanding |
-| **Video Chunk** | `[B, 3, T, H, W]` | Frame-mapped | `[B, T×(H/16)×(W/16), 1024]` | Uniform temporal sampling |
+| **Image** | `[B, 3, H, W]` | All patches | `[B, (H/14)×(W/14), 1024]` | Single image understanding |
+| **Video Chunk** | `[B, 3, T, H, W]` | Frame-mapped | `[B, T×(H/14)×(W/14), 1024]` | Uniform temporal sampling |
 | **Codec-Style** | `[B, 3, T, H, W]` | Top-K salient | `[B, K, 1024]` | Efficient dense temporal |
 
 ### 3D RoPE Position Encoding
