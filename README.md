@@ -35,7 +35,7 @@
 
 ## 🔍 Introduction
 
-Video understanding models face a fundamental trade-off: incorporating more frames enables richer temporal reasoning but increases computational cost quadratically. 
+Video understanding models face a fundamental trade-off: incorporating more frames enables richer temporal reasoning but increases computational cost quadratically.
 Conventional approaches mitigate this by sparsely sampling frames, however, this strategy discards fine-grained motion dynamics and treats all spatial regions uniformly, resulting in wasted computation on static content.
 
 We introduce OneVision Encoder, a vision transformer that resolves this trade-off by drawing inspiration from HEVC (High-Efficiency Video Coding). Rather than densely processing all patches from a few frames, OneVision Encoder sparsely selects informative patches from many frames. This codec-inspired patch selection mechanism identifies temporally salient regions (e.g., motion, object interactions, and semantic changes) and allocates computation exclusively to these informative areas.
@@ -64,7 +64,7 @@ Coupled with global contrastive learning over a 2M-scale concept memory bank, On
 
 ### Video Processing Pipeline
 
-The visualization below illustrates four different video processing pipelines. 
+The visualization below illustrates four different video processing pipelines.
 (1) Original Video: a continuous 64-frame sequence that preserves the complete temporal context.
 (2) Uniform Frame Sampling: a conventional strategy that selects 4–8 evenly spaced frames; while simple and efficient, it is inherently lossy and fails to capture fine-grained inter-frame motion.
 (3) Temporal Saliency Detection: a global analysis of all 64 frames to identify regions rich in temporal information, including motion patterns, appearance variations, and semantic events.
@@ -208,14 +208,14 @@ More documentation will be added soon.
 
 
 ```bash
-docker build -t ov_encoder:25.12 .
+docker build -t onevision-encoder:2601 .
 ```
 
 ```bash
-docker run -it --gpus all --ipc host --net host --privileged \
+docker run -it --rm --gpus all --ipc host --net host --privileged \
     -v "$(pwd)":/workspace/OneVision-Encoder \
     -w /workspace/OneVision-Encoder \
-    ov_encoder:25.12 bash
+    onevision-encoder:2601 bash
 ```
 
 
