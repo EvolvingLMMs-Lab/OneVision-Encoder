@@ -25,11 +25,11 @@
 
 ## Key Features
 
+- **Unified Vision Foundation**: A single base model for consistent understanding of images, videos, and OCR.
 - **Codec-Style Patch Selection**: Instead of sampling sparse frames densely (all patches from few frames), OneVision Encoder samples dense frames sparsely (important patches from many frames).
 - **3D Rotary Position Embedding**: Uses a 4:6:6 split for temporal, height, and width dimensions to capture spatiotemporal relationships.
 - **Global Contrastive Learning**: Trained with a 2M concept bank for better-separated semantic clusters.
 - **Native Resolution Support**: Supports native resolution input without tiling or cropping.
-- **Flash Attention 2**: Efficient attention implementation for improved performance and memory efficiency.
 
 ## Unified Input Processing
 
