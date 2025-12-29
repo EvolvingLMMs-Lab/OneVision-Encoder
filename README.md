@@ -16,6 +16,7 @@
 🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
 🤗 **[Datasets](coming)** |
 📄 **[Tech Report (coming)]()** |
+📋 **[Model Card](docs/model_card.md)**
 
 </div>
 
@@ -229,6 +230,15 @@ bash shells/ov_encoder_base_stage1_si.sh
 ```
 
 ### Single Node Stage-2 Video Contine Pretraining
+
+Download the Stage-1 checkpoint from HuggingFace:
+
+```bash
+git clone https://huggingface.co/lmms-lab-encoder/onevision-encoder-large-si
+```
+
+Download the pretraining data and prepare the data directory as per the instructions in `data/README.md`.
+
 
 More documentation will be added soon.
 
