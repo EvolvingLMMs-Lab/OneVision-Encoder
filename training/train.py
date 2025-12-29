@@ -413,6 +413,15 @@ def main():
     backbone_ddp = wrap_ddp(backbone)
     backbone_ddp_compiled = torch.compile(backbone_ddp)
 
+    # Get patch_size from backbone config (outside of training loop for efficiency)
+    backbone_module = unwrap_module(backbone)
+    if hasattr(backbone_module, 'config'):
+        patch_size = backbone_module.config.patch_size
+    elif hasattr(backbone_module, 'embeddings') and hasattr(backbone_module.embeddings, 'patch_size'):
+        patch_size = backbone_module.embeddings.patch_size
+    else:
+        patch_size = 16  # default fallback
+
     list_dali_dataloader = []
     list_head_names = []
     for head_id, dataset_config in enumerate(args.list_datasets):
@@ -585,15 +594,6 @@ def main():
 
                 bs = visible_indices.shape[0]
                 dev = visible_indices.device
-
-                # Get patch_size from backbone config
-                backbone_module = unwrap_module(backbone)
-                if hasattr(backbone_module, 'config'):
-                    patch_size = backbone_module.config.patch_size
-                elif hasattr(backbone_module, 'embeddings') and hasattr(backbone_module.embeddings, 'patch_size'):
-                    patch_size = backbone_module.embeddings.patch_size
-                else:
-                    patch_size = 16  # default fallback
 
                 out = visible_indices[:, :args.target_num].clone()
                 n1 = int(bs * 0.5)
