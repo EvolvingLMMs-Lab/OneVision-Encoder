@@ -211,14 +211,10 @@ pip install -r requirements.txt
 
 ### Option 2 (Docker)
 
-More documentation will be added soon.
-
 
 ```bash
 docker build -t onevision-encoder:2601 .
-```
 
-```bash
 docker run -it --rm --gpus all --ipc host --net host --privileged \
     -v "$(pwd)":/workspace/OneVision-Encoder \
     -w /workspace/OneVision-Encoder \
