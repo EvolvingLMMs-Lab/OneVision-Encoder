@@ -580,113 +580,119 @@ def main():
                 list_embedding.append(head_embedding)
 
             elif dataset_config.dali_type in ["decord_residual"]:
-                head_input = list_data_batch[head_id]["videos"]  # [bs, C, 64, H, W]
+                # Example: bs=16, target_num=2048 (8*256), num_tokens_per_frame=256, H=W=224, patch_size=16
+                # Hp=Wp=14, patches_per_frame=196, T=64, total_patches=12544
+
+                head_input = list_data_batch[head_id]["videos"]  # [16, 3, 64, 224, 224]
                 list_batch_sizes.append(head_input.size(0))
-                visible_indices = list_data_batch[head_id]["video_visible_indices"].long()
+                visible_indices = list_data_batch[head_id]["video_visible_indices"].long()  # [16, >=2048]
 
-                bs = visible_indices.shape[0]
-                out = visible_indices[:, :args.target_num].clone()
-                n1, n2 = int(bs * 0.5), int(bs * 0.875)
+                bs = visible_indices.shape[0]  # 16
+                out = visible_indices[:, :args.target_num].clone()  # [16, 2048]
+                n1, n2 = int(bs * 0.5), int(bs * 0.875)  # n1=8, n2=14
 
-                idx_range = torch.arange(bs).cuda()
-                mask_residual = idx_range < n1
-                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)
-                mask_collage = idx_range >= n2
+                idx_range = torch.arange(bs).cuda()  # [16]
+                mask_residual = idx_range < n1  # [16], first 8 samples are True
+                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)  # [16], samples 8-13 are True
+                mask_collage = idx_range >= n2  # [16], samples 14-15 are True
 
                 # mask_residual: select first args.target_num patches
                 if mask_residual.any():
-                    sel_a = visible_indices[mask_residual, :args.target_num]
+                    sel_a = visible_indices[mask_residual, :args.target_num]  # [8, 2048]
                     if sel_a.size(1) < args.target_num:
-                        sel_a = torch.cat([sel_a, sel_a[:, -1:].expand(-1, args.target_num - sel_a.size(1))], dim=1)
-                    out[mask_residual] = sel_a
+                        sel_a = torch.cat([sel_a, sel_a[:, -1:].expand(-1, args.target_num - sel_a.size(1))], dim=1)  # [8, 2048]
+                    out[mask_residual] = sel_a  # out[0:8] = sel_a
 
                 # mask_frame_sampling: sample 8 frames from 64, get all patches per frame
                 FRAMES = 64
                 if mask_frame_sampling.any():
-                    nB = mask_frame_sampling.sum().item()
-                    frames = torch.arange(args.actual_num_frames).cuda() * (FRAMES // args.actual_num_frames) + torch.randint(FRAMES // args.actual_num_frames, (nB, args.actual_num_frames)).cuda()
-                    sel_b = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)
+                    nB = mask_frame_sampling.sum().item()  # 6
+                    # frames: sample 1 frame from each of 8 bins (each bin has 8 frames)
+                    frames = torch.arange(args.actual_num_frames).cuda() * (FRAMES // args.actual_num_frames) + torch.randint(FRAMES // args.actual_num_frames, (nB, args.actual_num_frames)).cuda()  # [6, 8], values in [0,7], [8,15], ..., [56,63]
+                    # sel_b: for each frame, get all 256 patches
+                    sel_b = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)  # [6, 8*256] = [6, 2048]
                     if sel_b.size(1) > args.target_num:
-                        sel_b = sel_b[:, :args.target_num]
+                        sel_b = sel_b[:, :args.target_num]  # [6, 2048]
                     elif sel_b.size(1) < args.target_num:
-                        sel_b = torch.cat([sel_b, sel_b[:, -1:].expand(-1, args.target_num - sel_b.size(1))], dim=1)
-                    out[mask_frame_sampling] = sel_b
+                        sel_b = torch.cat([sel_b, sel_b[:, -1:].expand(-1, args.target_num - sel_b.size(1))], dim=1)  # [6, 2048]
+                    out[mask_frame_sampling] = sel_b  # out[8:14] = sel_b
 
-                combined_mask = mask_residual | mask_frame_sampling
+                combined_mask = mask_residual | mask_frame_sampling  # [16], first 14 samples are True
                 if combined_mask.any():
-                    combined_idx = combined_mask.nonzero(as_tuple=False).squeeze(1)
-                    video = head_input[combined_idx]  # [n, C, T, H, W]
-                    vis_idx = out[combined_idx]       # [n, target_num]
+                    combined_idx = combined_mask.nonzero(as_tuple=False).squeeze(1)  # [14]
+                    video = head_input[combined_idx]  # [14, 3, 64, 224, 224]
+                    vis_idx = out[combined_idx]  # [14, 2048]
 
-                    n, C, T, H, W = video.shape
-                    Hp, Wp = H // patch_size, W // patch_size
+                    n, C, T, H, W = video.shape  # n=14, C=3, T=64, H=224, W=224
+                    Hp, Wp = H // patch_size, W // patch_size  # Hp=14, Wp=14
 
                     # Patchify: [n, C, T, H, W] -> [n, C, T*Hp*Wp, p, p]
-                    patches = video.view(n, C, T, Hp, patch_size, Wp, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T * Hp * Wp, patch_size, patch_size)
+                    # [14, 3, 64, 224, 224] -> [14, 3, 64, 14, 16, 14, 16] -> [14, 3, 64, 14, 14, 16, 16] -> [14, 3, 12544, 16, 16]
+                    patches = video.view(n, C, T, Hp, patch_size, Wp, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T * Hp * Wp, patch_size, patch_size)  # [14, 3, 12544, 16, 16]
 
                     # Select patches by vis_idx
-                    idx = vis_idx[:, None, :, None, None].expand(-1, C, -1, patch_size, patch_size)
-                    selected = torch.gather(patches, 2, idx)  # [n, C, target_num, p, p]
+                    idx = vis_idx[:, None, :, None, None].expand(-1, C, -1, patch_size, patch_size)  # [14, 3, 2048, 16, 16]
+                    selected = torch.gather(patches, 2, idx)  # [14, 3, 2048, 16, 16]
 
                     # Unpatchify: [n, C, target_num, p, p] -> [n, C, T', H, W]
-                    T_new = args.target_num // (Hp * Wp)
+                    T_new = args.target_num // (Hp * Wp)  # 2048 // 196 = 10
                     if T_new == 0:
                         T_new = 1
-                    num_patches = T_new * Hp * Wp
+                    num_patches = T_new * Hp * Wp  # 10 * 196 = 1960
                     if selected.size(2) > num_patches:
-                        selected = selected[:, :, :num_patches]
+                        selected = selected[:, :, :num_patches]  # [14, 3, 1960, 16, 16]
                     elif selected.size(2) < num_patches:
-                        selected = torch.cat([selected, selected[:, :, -1:].expand(-1, -1, num_patches - selected.size(2), -1, -1)], dim=2)
-                    combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)
+                        selected = torch.cat([selected, selected[:, :, -1:].expand(-1, -1, num_patches - selected.size(2), -1, -1)], dim=2)  # [14, 3, 1960, 16, 16]
+                    # [14, 3, 1960, 16, 16] -> [14, 3, 10, 14, 14, 16, 16] -> [14, 3, 10, 14, 16, 14, 16] -> [14, 3, 10, 224, 224]
+                    combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)  # [14, 3, 10, 224, 224]
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        combined_head_output = backbone_ddp_compiled(combined_head_input, vis_idx)
-                    combined_head_output = (combined_head_output.pooler_output if hasattr(combined_head_output, "pooler_output") else combined_head_output["head_output"]).float()
+                        combined_head_output = backbone_ddp_compiled(combined_head_input, vis_idx)  # input: [14, 3, 10, 224, 224], vis_idx: [14, 2048]
+                    combined_head_output = (combined_head_output.pooler_output if hasattr(combined_head_output, "pooler_output") else combined_head_output["head_output"]).float()  # [14, D]
 
 
                 if mask_collage.any():
-                    coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)
-                    nC = coll_idx.numel()
-                    FRAMES = 64  # assume fixed 64 frames for head_subset
+                    coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)  # [2]
+                    nC = coll_idx.numel()  # 2
+                    FRAMES = 64
 
-                    head_subset = head_input[coll_idx]  # [nC, C, 64, H, W] (must hold)
+                    head_subset = head_input[coll_idx]  # [2, 3, 64, 224, 224]
 
-                    # 检查形状
                     if head_subset.dim() != 5 or head_subset.size(2) != FRAMES:
                         raise RuntimeError(
                             f"collage branch expects head_subset shape [nC, C, {FRAMES}, H, W], got {tuple(head_subset.shape)}"
                         )
 
-                    nC = head_subset.size(0)
-                    Cf = head_subset.size(1)
-                    Hf = head_subset.size(3)
-                    Wf = head_subset.size(4)
-                    avg = FRAMES // args.actual_num_frames  # 8
-                    base = torch.arange(args.actual_num_frames).cuda() * avg
-                    offs = torch.randint(avg, (nC, args.actual_num_frames)).cuda()
-                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [nC, actual_num_frames], 范围在 [0, 63]
-                    idx_expand = frames_idx.view(nC, 1, args.actual_num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf)
-                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [nC, Cf, actual_num_frames, Hf, Wf]
-                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [nC, actual_num_frames, Cf, Hf, Wf]
-                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.actual_num_frames)]
-                    grid = torch.cat(grid_rows, dim=-2)  # [nC, Cf, Hf*args.actual_num_frames, Wf]
+                    nC = head_subset.size(0)  # 2
+                    Cf = head_subset.size(1)  # 3
+                    Hf = head_subset.size(3)  # 224
+                    Wf = head_subset.size(4)  # 224
+                    avg = FRAMES // args.actual_num_frames  # 64 // 8 = 8
+                    base = torch.arange(args.actual_num_frames).cuda() * avg  # [0, 8, 16, 24, 32, 40, 48, 56]
+                    offs = torch.randint(avg, (nC, args.actual_num_frames)).cuda()  # [2, 8], values in [0, 7]
+                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [2, 8], values in [0, 63]
+                    idx_expand = frames_idx.view(nC, 1, args.actual_num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf)  # [2, 3, 8, 224, 224]
+                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [2, 3, 8, 224, 224]
+                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [2, 8, 3, 224, 224]
+                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.actual_num_frames)]  # 8 x [2, 3, 224, 224]
+                    grid = torch.cat(grid_rows, dim=-2)  # [2, 3, 1792, 224] (1792 = 224 * 8)
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        collage_head_output = backbone_ddp_compiled(grid)
+                        collage_head_output = backbone_ddp_compiled(grid)  # input: [2, 3, 1792, 224]
                     if hasattr(collage_head_output, "pooler_output"):
                         collage_head_output = collage_head_output.pooler_output
                     else:
                         collage_head_output  = collage_head_output["head_output"]
-                    collage_head_output = collage_head_output.float()
+                    collage_head_output = collage_head_output.float()  # [2, D]
 
-                D = combined_head_output.size(1)
+                D = combined_head_output.size(1)  # embedding dimension
 
-                head_embedding_full = torch.zeros(bs, D, dtype=torch.float32).cuda()
+                head_embedding_full = torch.zeros(bs, D, dtype=torch.float32).cuda()  # [16, D]
                 if combined_mask.any():
-                    head_embedding_full[combined_idx] = combined_head_output
+                    head_embedding_full[combined_idx] = combined_head_output  # head_embedding_full[0:14] = [14, D]
                 if mask_collage.any():
-                    head_embedding_full[coll_idx] = collage_head_output
+                    head_embedding_full[coll_idx] = collage_head_output  # head_embedding_full[14:16] = [2, D]
 
-                list_embedding.append(head_embedding_full)
+                list_embedding.append(head_embedding_full)  # [16, D]
 
             elif dataset_config.dali_type in ["origin", "ocr"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
