@@ -214,24 +214,6 @@ def main():
     if len(args.image_size_video) == 1:
         args.image_size_video = args.image_size_video * 2
 
-    if args.enable_multi_frame:
-        num_frame_options = len(args.multi_frame_list)
-        frame_index = rank % num_frame_options
-        args.actual_num_frames = args.multi_frame_list[frame_index]
-        if args.base_num_frames % args.actual_num_frames != 0:
-            raise ValueError(
-                f"base_num_frames ({args.base_num_frames}) must be divisible by "
-                f"actual_num_frames ({args.actual_num_frames}). "
-                f"Please adjust multi_frame_list or base_num_frames."
-            )
-        frame_scale_factor = args.base_num_frames // args.actual_num_frames
-        logger.info(f"[Multi-frame] rank={rank}, frame_index={frame_index}, "
-                    f"actual_num_frames={args.actual_num_frames}, "
-                    f"frame_scale_factor={frame_scale_factor}")
-    else:
-        args.actual_num_frames = args.num_frames
-        frame_scale_factor = 1
-        logger.info(f"[Single-frame] Using fixed num_frames={args.actual_num_frames}")
 
     args.list_datasets = [DATASET_REGISTRY.get(x)() for x in args.list_datasets]
     args.num_heads = len(args.list_datasets)
@@ -430,12 +412,12 @@ def main():
                 decord_num_threads=frame_scale_factor,
                 batch_size=args.list_batch_sizes_adjusted[head_id],
                 input_size=args.image_size_video[0],
-                sequence_length=args.actual_num_frames,
+                sequence_length=args.num_frames,
                 seed=0+rank,
                 shard_id=dataset_config.shard_id,
                 num_shards=dataset_config.num_shards)
             logger.info(f"[head_id={head_id}] Video dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, "
-                        f"num_frames={args.actual_num_frames}")
+                        f"num_frames={args.num_frames}")
 
         elif dataset_config.dali_type == "decord_residual":
             from dataloader.data_decord_llava_vit import get_dali_dataloader
@@ -605,7 +587,7 @@ def main():
                 if mask_frame_sampling.any():
                     nB = mask_frame_sampling.sum().item()  # 6
                     # frames: sample 1 frame from each of 8 bins (each bin has 8 frames)
-                    frames = torch.arange(args.actual_num_frames).cuda() * (FRAMES // args.actual_num_frames) + torch.randint(FRAMES // args.actual_num_frames, (nB, args.actual_num_frames)).cuda()  # [6, 8], values in [0,7], [8,15], ..., [56,63]
+                    frames = torch.arange(args.num_frames).cuda() * (FRAMES // args.num_frames) + torch.randint(FRAMES // args.num_frames, (nB, args.num_frames)).cuda()  # [6, 8], values in [0,7], [8,15], ..., [56,63]
                     # sel_b: for each frame, get all 256 patches
                     out[mask_frame_sampling] = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)  # [6, 8*256] = [6, 2048]
 
@@ -659,14 +641,14 @@ def main():
                     Cf = head_subset.size(1)  # 3
                     Hf = head_subset.size(3)  # 224
                     Wf = head_subset.size(4)  # 224
-                    avg = FRAMES // args.actual_num_frames  # 64 // 8 = 8
-                    base = torch.arange(args.actual_num_frames).cuda() * avg  # [0, 8, 16, 24, 32, 40, 48, 56]
-                    offs = torch.randint(avg, (nC, args.actual_num_frames)).cuda()  # [2, 8], values in [0, 7]
+                    avg = FRAMES // args.num_frames  # 64 // 8 = 8
+                    base = torch.arange(args.num_frames).cuda() * avg  # [0, 8, 16, 24, 32, 40, 48, 56]
+                    offs = torch.randint(avg, (nC, args.num_frames)).cuda()  # [2, 8], values in [0, 7]
                     frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [2, 8], values in [0, 63]
-                    idx_expand = frames_idx.view(nC, 1, args.actual_num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf)  # [2, 3, 8, 224, 224]
+                    idx_expand = frames_idx.view(nC, 1, args.num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf)  # [2, 3, 8, 224, 224]
                     sel_frames = torch.gather(head_subset, 2, idx_expand)  # [2, 3, 8, 224, 224]
                     sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [2, 8, 3, 224, 224]
-                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.actual_num_frames)]  # 8 x [2, 3, 224, 224]
+                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.num_frames)]  # 8 x [2, 3, 224, 224]
                     grid = torch.cat(grid_rows, dim=-2)  # [2, 3, 1792, 224] (1792 = 224 * 8)
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                         collage_head_output = backbone_ddp_compiled(grid)  # input: [2, 3, 1792, 224]
