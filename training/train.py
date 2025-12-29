@@ -598,10 +598,7 @@ def main():
 
                 # mask_residual: select first args.target_num patches
                 if mask_residual.any():
-                    sel_a = visible_indices[mask_residual, :args.target_num]  # [8, 2048]
-                    if sel_a.size(1) < args.target_num:
-                        sel_a = torch.cat([sel_a, sel_a[:, -1:].expand(-1, args.target_num - sel_a.size(1))], dim=1)  # [8, 2048]
-                    out[mask_residual] = sel_a  # out[0:8] = sel_a
+                    out[mask_residual] = visible_indices[mask_residual, :args.target_num]  # [8, 2048]
 
                 # mask_frame_sampling: sample 8 frames from 64, get all patches per frame
                 FRAMES = 64
@@ -610,12 +607,7 @@ def main():
                     # frames: sample 1 frame from each of 8 bins (each bin has 8 frames)
                     frames = torch.arange(args.actual_num_frames).cuda() * (FRAMES // args.actual_num_frames) + torch.randint(FRAMES // args.actual_num_frames, (nB, args.actual_num_frames)).cuda()  # [6, 8], values in [0,7], [8,15], ..., [56,63]
                     # sel_b: for each frame, get all 256 patches
-                    sel_b = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)  # [6, 8*256] = [6, 2048]
-                    if sel_b.size(1) > args.target_num:
-                        sel_b = sel_b[:, :args.target_num]  # [6, 2048]
-                    elif sel_b.size(1) < args.target_num:
-                        sel_b = torch.cat([sel_b, sel_b[:, -1:].expand(-1, args.target_num - sel_b.size(1))], dim=1)  # [6, 2048]
-                    out[mask_frame_sampling] = sel_b  # out[8:14] = sel_b
+                    out[mask_frame_sampling] = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)  # [6, 8*256] = [6, 2048]
 
                 combined_mask = mask_residual | mask_frame_sampling  # [16], first 14 samples are True
                 if combined_mask.any():
