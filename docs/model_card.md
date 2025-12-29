@@ -294,3 +294,175 @@ Training on a mixed dataset of 740K samples from LLaVA-OneVision and 800K sample
 ## Contact
 
 For questions and issues, please open an issue on the [GitHub repository](https://github.com/Evolvinglmms-lab/OneVision-Encoder).
+
+## Multi-Modal Training Strategy
+
+OneVision Encoder uses a unified training approach that simultaneously processes images, video codec-style patches, video frame sampling, and video collage within the same batch. This multi-modal training enables the model to learn robust representations across different input modalities.
+
+### Training Batch Composition
+
+Within each training batch, samples are divided into different processing modes:
+
+```
+                           Training Batch (bs=16)
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                                                                     │
+    │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐     │
+    │  │   Image Head    │  │   Video Head    │  │   OCR Head      │     │
+    │  │   (origin)      │  │ (decord_residual│  │   (ocr)         │     │
+    │  │                 │  │                 │  │                 │     │
+    │  │  [B, 3, H, W]   │  │ Split by mode:  │  │  [B, 3, H, W]   │     │
+    │  │                 │  │  • Codec 50%    │  │                 │     │
+    │  │                 │  │  • Sampling 37.5│  │                 │     │
+    │  │                 │  │  • Collage 12.5%│  │                 │     │
+    │  └─────────────────┘  └─────────────────┘  └─────────────────┘     │
+    │                                                                     │
+    └─────────────────────────────────────────────────────────────────────┘
+```
+
+### Video Processing Modes
+
+For video inputs, the batch is further split into three processing modes:
+
+| Mode | Batch % | Description | Input → Output |
+|------|---------|-------------|----------------|
+| **Codec-Style** | 50% | Select top-K salient patches based on HEVC residual | `[n, 3, 64, 224, 224]` → `[n, 3, 8, 224, 224]` |
+| **Frame Sampling** | 37.5% | Uniform temporal sampling, 1 frame per bin | `[n, 3, 64, 224, 224]` → `[n, 3, 8, 224, 224]` |
+| **Collage** | 12.5% | 8 frames concatenated into tall image | `[n, 3, 64, 224, 224]` → `[n, 3, 1792, 224]` |
+
+### Processing Pipeline
+
+```
+                        Video Input: [bs, 3, 64, 224, 224]
+                                       │
+                    ┌──────────────────┼──────────────────┐
+                    │                  │                  │
+                    ▼                  ▼                  ▼
+           ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+           │  Codec-Style  │  │Frame Sampling │  │   Collage     │
+           │   (50%)       │  │   (37.5%)     │  │   (12.5%)     │
+           └───────┬───────┘  └───────┬───────┘  └───────┬───────┘
+                   │                  │                  │
+                   ▼                  ▼                  ▼
+           ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+           │ Patchify      │  │ Sample frames │  │ Sample frames │
+           │ [n,3,16384,p²]│  │ from 8 bins   │  │ from 8 bins   │
+           └───────┬───────┘  └───────┬───────┘  └───────┬───────┘
+                   │                  │                  │
+                   ▼                  ▼                  ▼
+           ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+           │ Select top-K  │  │ Build indices │  │ Concat frames │
+           │ by vis_idx    │  │ for 8 frames  │  │ vertically    │
+           └───────┬───────┘  └───────┬───────┘  └───────┬───────┘
+                   │                  │                  │
+                   ▼                  ▼                  ▼
+           ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+           │ Unpatchify    │  │               │  │               │
+           │[n,3,8,224,224]│  │[n,3,8,224,224]│  │[n,3,1792,224] │
+           └───────┬───────┘  └───────┬───────┘  └───────┬───────┘
+                   │                  │                  │
+                   └──────────────────┼──────────────────┘
+                                      │
+                                      ▼
+                              ┌───────────────┐
+                              │  ViT Backbone │
+                              │  with RoPE    │
+                              └───────┬───────┘
+                                      │
+                                      ▼
+                              [bs, hidden_size]
+```
+
+### 1. Codec-Style Processing (50% of batch)
+
+This mode uses HEVC-extracted saliency information to select the most informative patches:
+
+```python
+# Example: bs=16, first 8 samples use codec-style
+# visible_indices contains pre-computed salient patch indices from HEVC analysis
+
+# Step 1: Use pre-computed visible_indices (sorted by saliency)
+out[mask_residual] = visible_indices[mask_residual, :target_num]  # [8, 2048]
+
+# Step 2: Patchify full video
+# [8, 3, 64, 224, 224] → [8, 3, 16384, 14, 14] (64 frames × 256 patches/frame)
+patches = video.view(n, C, T, Hp, patch_size, Wp, patch_size)
+                .permute(0, 1, 2, 3, 5, 4, 6)
+                .reshape(n, C, T * Hp * Wp, patch_size, patch_size)
+
+# Step 3: Select top-K patches by visible_indices
+selected = torch.gather(patches, 2, idx)  # [8, 3, 2048, 14, 14]
+
+# Step 4: Unpatchify back to video format
+# 2048 patches = 8 frames × 256 patches/frame
+combined_head_input = selected.view(n, C, 8, Hp, Wp, patch_size, patch_size)
+                              .permute(0, 1, 2, 3, 5, 4, 6)
+                              .reshape(n, C, 8, H, W)  # [8, 3, 8, 224, 224]
+```
+
+### 2. Frame Sampling Processing (37.5% of batch)
+
+This mode uniformly samples frames from temporal bins:
+
+```python
+# Example: samples 8-13 in batch use frame sampling
+# Divide 64 frames into 8 bins of 8 frames each, sample 1 from each bin
+
+# Step 1: Sample frame indices
+# bins: [0-7], [8-15], [16-23], [24-31], [32-39], [40-47], [48-55], [56-63]
+frames = torch.arange(8) * 8 + torch.randint(8, (nB, 8))  # [6, 8]
+
+# Step 2: Build patch indices for all patches in selected frames
+# Each frame has 256 patches
+out[mask_frame_sampling] = (frames.unsqueeze(-1) * 256 + 
+                            torch.arange(256)).reshape(nB, -1)  # [6, 2048]
+
+# Step 3: Same patchify → select → unpatchify as codec-style
+# Result: [6, 3, 8, 224, 224]
+```
+
+### 3. Collage Processing (12.5% of batch)
+
+This mode concatenates sampled frames into a single tall image:
+
+```python
+# Example: samples 14-15 in batch use collage
+# Sample 8 frames and concatenate vertically
+
+# Step 1: Sample 8 frames (same bin-based sampling)
+frames_idx = base + offsets  # [2, 8], values in [0, 63]
+
+# Step 2: Gather selected frames
+sel_frames = torch.gather(video, 2, idx_expand)  # [2, 3, 8, 224, 224]
+
+# Step 3: Concatenate frames vertically
+sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [2, 8, 3, 224, 224]
+grid = torch.cat([sel_frames[:, i] for i in range(8)], dim=-2)  # [2, 3, 1792, 224]
+
+# Result: Processed as a tall image (1792 = 224 × 8)
+```
+
+### Benefits of Multi-Modal Training
+
+1. **Unified Architecture**: Same ViT backbone handles all modalities through different input preprocessing
+2. **Complementary Learning**:
+   - Codec-style: Learns to focus on temporally salient regions
+   - Frame sampling: Learns uniform temporal understanding
+   - Collage: Learns spatial arrangement of temporal information
+3. **Robust Representations**: Exposure to diverse input formats improves generalization
+4. **Efficient Training**: Single forward pass processes all modalities together
+
+### Position Encoding Consistency
+
+All video modes use the same 3D RoPE position encoding:
+
+```python
+# visible_indices maps selected patches to positions in a 64-frame virtual grid
+# This enables consistent temporal position encoding across all modes
+
+# Codec-style: patches scattered across 64 frames
+# Frame sampling: 8 complete frames with gaps
+# Collage: treated as single image (T=1)
+
+# The model learns to handle all patterns through the unified RoPE mechanism
+```
