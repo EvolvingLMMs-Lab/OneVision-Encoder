@@ -245,9 +245,9 @@ def main():
     for head_id, dataset_config in enumerate(args.list_datasets):
         base_bs = args.list_batch_sizes[head_id]
         if dataset_config.dali_type == "decord":
-            adjusted_bs = base_bs * frame_scale_factor
+            adjusted_bs = base_bs * 1
             logger.info(f"[head_id={head_id}] Video branch: base_bs={base_bs}, "
-                        f"adjusted_bs={adjusted_bs} (scale={frame_scale_factor}x)")
+                        f"adjusted_bs={adjusted_bs} (scale={1}x)")
         else:
             adjusted_bs = base_bs
             logger.info(f"[head_id={head_id}] Image branch: bs={adjusted_bs}")
@@ -408,8 +408,8 @@ def main():
                 data_csv_path=dataset_config.prefixes[0],
                 mode="train",
                 dali_num_threads=2,
-                dali_py_num_workers=4 // frame_scale_factor,
-                decord_num_threads=frame_scale_factor,
+                dali_py_num_workers=4 // 1,
+                decord_num_threads=1,
                 batch_size=args.list_batch_sizes_adjusted[head_id],
                 input_size=args.image_size_video[0],
                 sequence_length=args.num_frames,
@@ -427,8 +427,8 @@ def main():
                 data_csv_path=dataset_config.prefixes[0],
                 mode="train",
                 dali_num_threads=2,
-                dali_py_num_workers=4 // frame_scale_factor,
-                decord_num_threads=frame_scale_factor,
+                dali_py_num_workers=4 // 1,
+                decord_num_threads=1,
                 batch_size=args.list_batch_sizes_adjusted[head_id],
                 input_size=args.image_size_video[0],
                 sequence_length=64,
@@ -610,14 +610,7 @@ def main():
 
                     # Unpatchify: [n, C, target_num, p, p] -> [n, C, T', H, W]
                     T_new = args.target_num // (Hp * Wp)  # 2048 // 256 = 8
-                    if T_new == 0:
-                        T_new = 1
                     num_patches = T_new * Hp * Wp  # 8 * 256 = 2048
-                    if selected.size(2) > num_patches:
-                        selected = selected[:, :, :num_patches]  # [14, 3, 2048, 14, 14]
-                    elif selected.size(2) < num_patches:
-                        selected = torch.cat([selected, selected[:, :, -1:].expand(-1, -1, num_patches - selected.size(2), -1, -1)], dim=2)  # [14, 3, 2048, 14, 14]
-                    # [14, 3, 2048, 14, 14] -> [14, 3, 8, 16, 16, 14, 14] -> [14, 3, 8, 16, 14, 16, 14] -> [14, 3, 8, 224, 224]
                     combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)  # [14, 3, 8, 224, 224]
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
