@@ -578,13 +578,22 @@ def main():
                 list_embedding.append(head_embedding)
 
             elif dataset_config.dali_type in ["decord_residual"]:
-                head_input = list_data_batch[head_id]["videos"]
+                head_input = list_data_batch[head_id]["videos"]  # [bs, C, 64, H, W]
                 list_batch_sizes.append(head_input.size(0))
-                visible_indices = list_data_batch[head_id]["video_visible_indices"]  # [bs, ?]，需要至少 args.total_indices 合法列
+                visible_indices = list_data_batch[head_id]["video_visible_indices"]  # [bs, ?]
                 visible_indices = visible_indices.long()
 
                 bs = visible_indices.shape[0]
                 dev = visible_indices.device
+
+                # Get patch_size from backbone config
+                backbone_module = unwrap_module(backbone)
+                if hasattr(backbone_module, 'config'):
+                    patch_size = backbone_module.config.patch_size
+                elif hasattr(backbone_module, 'embeddings') and hasattr(backbone_module.embeddings, 'patch_size'):
+                    patch_size = backbone_module.embeddings.patch_size
+                else:
+                    patch_size = 16  # default fallback
 
                 out = visible_indices[:, :args.target_num].clone()
                 n1 = int(bs * 0.5)
@@ -595,61 +604,17 @@ def main():
                 mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)   # idx in [n1, n2)
                 mask_collage = idx_range >= n2                               # idx in [n2, bs)
 
-                # Storage for selected frames per sample
-                SEQ = 8
-                FRAMES = 64
-                selected_frames_all = torch.zeros(bs, SEQ, device=dev, dtype=torch.long)
-
+                # For mask_residual: directly select first args.target_num patches
                 if mask_residual.any():
-                    vis_a = visible_indices[mask_residual, :args.total_indices]
-                    must = vis_a[:, :args.must_num]
-                    candidates = vis_a[:, args.must_num:args.total_indices]
-                    k = max(0, args.target_num - args.must_num)
-                    k = min(k, candidates.size(1))
-                    if k > 0:
-                        scores = torch.rand(vis_a.size(0), candidates.size(1), device=dev)
-                        idx = scores.topk(k, dim=1).indices
-                        sampled = torch.gather(candidates, 1, idx)
-                        sel_a = torch.cat([must, sampled], dim=1)
-                    else:
-                        sel_a = must
+                    sel_a = visible_indices[mask_residual, :args.target_num]
                     if sel_a.size(1) < args.target_num:
                         pad = sel_a[:, -1:].repeat(1, args.target_num - sel_a.size(1))
                         sel_a = torch.cat([sel_a, pad], dim=1)
                     out[mask_residual] = sel_a
 
-                    # Extract frame indices from sel_a for residual branch
-                    # sel_a contains patch indices, convert to frame indices
-                    nA = sel_a.size(0)
-                    # Get frame index for each patch
-                    frame_indices_per_patch = sel_a // args.num_tokens_per_frame  # [nA, target_num]
-
-                    # For each sample, get unique sorted frame indices
-                    # We need exactly SEQ frames
-                    # Vectorized approach: sort and take unique by checking consecutive differences
-                    sorted_frames, _ = torch.sort(frame_indices_per_patch, dim=1)  # [nA, target_num]
-
-                    # Find where consecutive values differ (mark the first of each unique value)
-                    diff_mask = torch.cat([
-                        torch.ones(nA, 1, device=dev, dtype=torch.bool),
-                        sorted_frames[:, 1:] != sorted_frames[:, :-1]
-                    ], dim=1)  # [nA, target_num]
-
-                    # For each sample, collect the first SEQ unique frames
-                    residual_frames = torch.zeros(nA, SEQ, device=dev, dtype=torch.long)
-                    for i in range(nA):
-                        unique_positions = diff_mask[i].nonzero(as_tuple=True)[0]
-                        unique_values = sorted_frames[i, unique_positions]
-                        num_unique = unique_values.numel()
-                        if num_unique >= SEQ:
-                            residual_frames[i] = unique_values[:SEQ]
-                        elif num_unique > 0:
-                            residual_frames[i, :num_unique] = unique_values
-                            residual_frames[i, num_unique:] = unique_values[-1]
-                        # If num_unique == 0, residual_frames[i] stays at zeros (frame 0)
-                    selected_frames_all[mask_residual] = residual_frames
-
-
+                # For mask_frame_sampling: compute patch indices based on frame sampling
+                SEQ = 8
+                FRAMES = 64
                 if mask_frame_sampling.any():
                     nB = visible_indices[mask_frame_sampling].size(0)
                     avg = FRAMES // SEQ
@@ -669,35 +634,69 @@ def main():
                         pad = sel_b[:, -1:].repeat(1, args.target_num - sel_b.size(1))
                         out[mask_frame_sampling] = torch.cat([sel_b, pad], dim=1)
 
-                    # Store frame indices for frame_sampling branch
-                    selected_frames_all[mask_frame_sampling] = frames
-
-
                 combined_mask = mask_residual | mask_frame_sampling
                 if combined_mask.any():
                     combined_idx = torch.nonzero(combined_mask, as_tuple=False).squeeze(1)
-                    combined_head_input_full = head_input[combined_idx]  # [n, C, 64, H, W]
-                    combined_out = out[combined_idx]
-                    combined_frames = selected_frames_all[combined_idx]  # [n, SEQ]
+                    combined_video = head_input[combined_idx]  # [n, C, 64, H, W]
+                    combined_out = out[combined_idx]  # [n, target_num]
 
-                    # Select frames from the video based on selected_frames
-                    # combined_head_input_full: [n, C, 64, H, W]
-                    # combined_frames: [n, SEQ]
-                    nComb = combined_head_input_full.size(0)
-                    Cf = combined_head_input_full.size(1)
-                    Hf = combined_head_input_full.size(3)
-                    Wf = combined_head_input_full.size(4)
+                    n_comb, C_vid, T_vid, H_vid, W_vid = combined_video.shape
+                    Hp = H_vid // patch_size  # patches per row
+                    Wp = W_vid // patch_size  # patches per col
+                    patches_per_frame = Hp * Wp
+                    total_patches = T_vid * patches_per_frame
 
-                    # Expand frame indices for gather: [n, 1, SEQ, 1, 1] -> [n, C, SEQ, H, W]
-                    frame_idx_expand = combined_frames.view(nComb, 1, SEQ, 1, 1).expand(-1, Cf, -1, Hf, Wf)
-                    combined_head_input = torch.gather(combined_head_input_full, 2, frame_idx_expand)  # [n, C, SEQ, H, W]
+                    # Convert video to patches: [n, C, T*Hp*Wp, patch_size, patch_size]
+                    # First reshape to [n, C, T, Hp, patch_size, Wp, patch_size]
+                    video_reshaped = combined_video.view(n_comb, C_vid, T_vid, Hp, patch_size, Wp, patch_size)
+                    # Permute to [n, C, T, Hp, Wp, patch_size, patch_size]
+                    video_reshaped = video_reshaped.permute(0, 1, 2, 3, 5, 4, 6)
+                    # Reshape to [n, C, T*Hp*Wp, patch_size, patch_size]
+                    video_patches = video_reshaped.reshape(n_comb, C_vid, total_patches, patch_size, patch_size)
+
+                    # Select patches using combined_out (visible_indices): [n, target_num]
+                    # Expand combined_out for gathering: [n, target_num, 1, 1] -> [n, C, target_num, patch_size, patch_size]
+                    idx_expand = combined_out.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)  # [n, 1, target_num, 1, 1]
+                    idx_expand = idx_expand.expand(-1, C_vid, -1, patch_size, patch_size)  # [n, C, target_num, patch_size, patch_size]
+                    selected_patches = torch.gather(video_patches, 2, idx_expand)  # [n, C, target_num, patch_size, patch_size]
+
+                    # Reshape selected patches back to video format [n, C, T', H', W']
+                    # We have target_num patches, need to figure out T', Hp', Wp'
+                    # For simplicity: T' = target_num // patches_per_frame, and use original Hp, Wp
+                    T_new = args.target_num // patches_per_frame
+                    expected_patches = T_new * patches_per_frame
+
+                    # Handle case when target_num is not divisible by patches_per_frame
+                    if expected_patches != args.target_num:
+                        T_new = max(1, T_new)
+                        expected_patches = T_new * patches_per_frame
+                        # Truncate or pad selected_patches to match expected_patches
+                        if args.target_num > expected_patches:
+                            selected_patches = selected_patches[:, :, :expected_patches, :, :]
+                        else:
+                            # Pad with the last patch repeated
+                            pad_size = expected_patches - args.target_num
+                            pad_patches = selected_patches[:, :, -1:, :, :].repeat(1, 1, pad_size, 1, 1)
+                            selected_patches = torch.cat([selected_patches, pad_patches], dim=2)
+
+                    # Reshape: [n, C, expected_patches, patch_size, patch_size] -> [n, C, T_new, Hp, Wp, patch_size, patch_size]
+                    # Then -> [n, C, T_new, Hp*patch_size, Wp*patch_size] = [n, C, T_new, H, W]
+                    H_new = Hp * patch_size
+                    W_new = Wp * patch_size
+
+                    # First reshape to [n, C, T_new, Hp, Wp, patch_size, patch_size]
+                    selected_reshaped = selected_patches.view(n_comb, C_vid, T_new, Hp, Wp, patch_size, patch_size)
+                    # Permute to [n, C, T_new, Hp, patch_size, Wp, patch_size]
+                    selected_reshaped = selected_reshaped.permute(0, 1, 2, 3, 5, 4, 6)
+                    # Reshape to [n, C, T_new, H_new, W_new]
+                    combined_head_input = selected_reshaped.reshape(n_comb, C_vid, T_new, H_new, W_new)
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                         combined_head_output = backbone_ddp_compiled(combined_head_input, combined_out)
                     if hasattr(combined_head_output, "pooler_output"):
                         combined_head_output = combined_head_output.pooler_output
                     else:
-                        combined_head_output  = combined_head_output["head_output"]
+                        combined_head_output = combined_head_output["head_output"]
 
                     combined_head_output = combined_head_output.float()
 
