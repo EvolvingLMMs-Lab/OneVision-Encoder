@@ -304,14 +304,6 @@ def main():
 
     if args.finetune_backbone:
         backbone.requires_grad_(True)
-    else:
-        backbone.requires_grad_(False)
-        backbone_module = unwrap_module(backbone)
-        if hasattr(backbone_module, "head"):
-            for p in backbone_module.head.parameters():
-                p.requires_grad = True
-        else:
-            raise RuntimeError()
 
     backbone_parameters = filter(lambda p: p.requires_grad, backbone.parameters())
 
@@ -347,7 +339,7 @@ def main():
             )
 
         partial_fc.train().cuda()
-        # list_module_pfc.append(torch.compile(partial_fc))
+
         list_module_pfc.append(partial_fc)
         dict_pfc_modules[head_name] = partial_fc
 
@@ -481,6 +473,7 @@ def main():
                     shard_id=dataset_config.shard_id,
                     num_shards=dataset_config.num_shards
         )
+
         elif dataset_config.dali_type == "ocr":
             if args.debug:
                 from dataloader.data_v2_ocr import SyntheticDataIter
@@ -495,8 +488,8 @@ def main():
                     image_size=args.image_size,
                     workers=args.workers,
                     shard_id=dataset_config.shard_id,
-                    num_shards=dataset_config.num_shards
-        )
+                    num_shards=dataset_config.num_shards)
+
         else:
             raise ValueError(
                 f"dataset_config.dali_type {dataset_config.dali_type} not support!"
@@ -608,10 +601,10 @@ def main():
                     out[mask_residual] = sel_a
 
                 # mask_frame_sampling: sample 8 frames from 64, get all patches per frame
-                SEQ, FRAMES = 8, 64
+                FRAMES = 64
                 if mask_frame_sampling.any():
                     nB = mask_frame_sampling.sum().item()
-                    frames = torch.arange(SEQ, device=dev) * (FRAMES // SEQ) + torch.randint(FRAMES // SEQ, (nB, SEQ), device=dev)
+                    frames = torch.arange(args.actual_num_frames, device=dev) * (FRAMES // args.actual_num_frames) + torch.randint(FRAMES // args.actual_num_frames, (nB, args.actual_num_frames), device=dev)
                     sel_b = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame, device=dev)).reshape(nB, -1)
                     if sel_b.size(1) > args.target_num:
                         sel_b = sel_b[:, :args.target_num]
@@ -654,7 +647,6 @@ def main():
                 if mask_collage.any():
                     coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)
                     nC = coll_idx.numel()
-                    SEQ = 8
                     FRAMES = 64  # assume fixed 64 frames for head_subset
 
                     head_subset = head_input[coll_idx]  # [nC, C, 64, H, W] (must hold)
@@ -669,15 +661,15 @@ def main():
                     Cf = head_subset.size(1)
                     Hf = head_subset.size(3)
                     Wf = head_subset.size(4)
-                    avg = FRAMES // SEQ  # 8
-                    base = torch.arange(SEQ, device=dev) * avg
-                    offs = torch.randint(avg, (nC, SEQ), device=dev)
-                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [nC, SEQ], 范围在 [0, 63]
-                    idx_expand = frames_idx.view(nC, 1, SEQ, 1, 1).expand(-1, Cf, -1, Hf, Wf).to(head_subset.device)
-                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [nC, Cf, SEQ, Hf, Wf]
-                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [nC, SEQ, Cf, Hf, Wf]
-                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(SEQ)]
-                    grid = torch.cat(grid_rows, dim=-2)  # [nC, Cf, Hf*SEQ, Wf]
+                    avg = FRAMES // args.actual_num_frames  # 8
+                    base = torch.arange(args.actual_num_frames, device=dev) * avg
+                    offs = torch.randint(avg, (nC, args.actual_num_frames), device=dev)
+                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [nC, actual_num_frames], 范围在 [0, 63]
+                    idx_expand = frames_idx.view(nC, 1, args.actual_num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf).to(head_subset.device)
+                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [nC, Cf, actual_num_frames, Hf, Wf]
+                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [nC, actual_num_frames, Cf, Hf, Wf]
+                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.actual_num_frames)]
+                    grid = torch.cat(grid_rows, dim=-2)  # [nC, Cf, Hf*args.actual_num_frames, Wf]
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                         collage_head_output = backbone_ddp_compiled(grid)
                     if hasattr(collage_head_output, "pooler_output"):
