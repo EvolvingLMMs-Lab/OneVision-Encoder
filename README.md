@@ -50,6 +50,7 @@ Coupled with global contrastive learning over a 2M-scale concept memory bank, On
 - **3D Rotary Position Embedding**: Uses a 4:6:6 split for temporal, height, and width dimensions to capture spatiotemporal relationships.
 - **Global Contrastive Learning**: Trained with a 2M concept bank for better-separated semantic clusters.
 - **Native Resolution Support**: Supports native resolution input without tiling or cropping.
+- **Open Training Data & Pipeline**: In addition to the model and code, we will open-source the curated training dataset and the full data processing pipeline.
 
 ### Method Overview
 
