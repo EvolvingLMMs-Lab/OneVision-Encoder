@@ -74,12 +74,12 @@ The visualization below illustrates four different video processing pipelines.
 <table>
   <tr>
     <td align="center">
-      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case4.gif" alt="Case 4 Demonstration" width="800"><br>
+      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case5.gif" alt="Case 5 Demonstration" width="800"><br>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case5.gif" alt="Case 5 Demonstration" width="800"><br>
+      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case8.gif" alt="Case 4 Demonstration" width="800"><br>
     </td>
   </tr>
 </table>
