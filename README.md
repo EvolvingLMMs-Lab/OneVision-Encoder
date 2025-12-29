@@ -16,6 +16,7 @@
 🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
 🤗 **[Datasets](coming)** |
 📄 **[Tech Report (coming)]()** |
+📋 **[Model Card](docs/model_card.md)**
 
 </div>
 
