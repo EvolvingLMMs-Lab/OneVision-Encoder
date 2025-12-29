@@ -64,22 +64,29 @@ Coupled with global contrastive learning over a 2M-scale concept memory bank, On
 
 ### Video Processing Pipeline
 
-The visualization below illustrates four different video processing pipelines.
-(1) Original Video: a continuous 64-frame sequence that preserves the complete temporal context.
-(2) Uniform Frame Sampling: a conventional strategy that selects 4–8 evenly spaced frames; while simple and efficient, it is inherently lossy and fails to capture fine-grained inter-frame motion.
-(3) Temporal Saliency Detection: a global analysis of all 64 frames to identify regions rich in temporal information, including motion patterns, appearance variations, and semantic events.
-(4) Codec-Style Patch Extraction: selective extraction of the temporally salient patches in a zigzag order, achieving 75–98% compression while retaining critical temporal dynamics.
+The visualization below illustrates four different video processing pipelines.  
+(1) **Original Video**: a continuous 64-frame sequence that preserves the complete temporal context.  
+(2) **Uniform Frame Sampling**: a conventional strategy that selects 4–8 evenly spaced frames; while simple and efficient, it is inherently lossy and fails to capture fine-grained inter-frame motion.  
+(3) **Temporal Saliency Detection**: a global analysis of all 64 frames to identify regions rich in temporal information, including motion patterns, appearance variations, and semantic events.  
+(4) **Codec-Style Patch Extraction**: selective extraction of the temporally salient patches in a zigzag order, achieving 75–98% compression while retaining critical temporal dynamics.  
 
 <div align="center">
-<table>
+<table style="width: 100%; max-width: 1200px; table-layout: fixed;">
   <tr>
-    <td align="center">
-      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case5.gif" alt="Case 5 Demonstration" width="800"><br>
+    <th style="width: 25%;">(1) </th>
+    <th style="width: 25%;">(2) </th>
+    <th style="width: 25%;">(3) </th>
+    <th style="width: 25%;">(4) </th>
+  </tr>
+
+  <tr>
+    <td colspan="4" align="center">
+      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/gifs/case4.gif" alt="Case 4 Demonstration" width="800"><br>
     </td>
   </tr>
   <tr>
-    <td align="center">
-      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/case8.gif" alt="Case 4 Demonstration" width="800"><br>
+    <td colspan="4" align="center">
+      <img src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/gifs/case6.gif" alt="Case 6 Demonstration" width="800"><br>
     </td>
   </tr>
 </table>
@@ -204,14 +211,10 @@ pip install -r requirements.txt
 
 ### Option 2 (Docker)
 
-More documentation will be added soon.
-
 
 ```bash
 docker build -t onevision-encoder:2601 .
-```
 
-```bash
 docker run -it --rm --gpus all --ipc host --net host --privileged \
     -v "$(pwd)":/workspace/OneVision-Encoder \
     -w /workspace/OneVision-Encoder \
