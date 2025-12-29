@@ -595,6 +595,11 @@ def main():
                 mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)   # idx in [n1, n2)
                 mask_collage = idx_range >= n2                               # idx in [n2, bs)
 
+                # Storage for selected frames per sample
+                SEQ = 8
+                FRAMES = 64
+                selected_frames_all = torch.zeros(bs, SEQ, device=dev, dtype=torch.long)
+
                 if mask_residual.any():
                     vis_a = visible_indices[mask_residual, :args.total_indices]
                     must = vis_a[:, :args.must_num]
@@ -613,18 +618,47 @@ def main():
                         sel_a = torch.cat([sel_a, pad], dim=1)
                     out[mask_residual] = sel_a
 
+                    # Extract frame indices from sel_a for residual branch
+                    # sel_a contains patch indices, convert to frame indices
+                    nA = sel_a.size(0)
+                    # Get frame index for each patch
+                    frame_indices_per_patch = sel_a // args.num_tokens_per_frame  # [nA, target_num]
+
+                    # For each sample, get unique sorted frame indices
+                    # We need exactly SEQ frames
+                    # Vectorized approach: sort and take unique by checking consecutive differences
+                    sorted_frames, _ = torch.sort(frame_indices_per_patch, dim=1)  # [nA, target_num]
+
+                    # Find where consecutive values differ (mark the first of each unique value)
+                    diff_mask = torch.cat([
+                        torch.ones(nA, 1, device=dev, dtype=torch.bool),
+                        sorted_frames[:, 1:] != sorted_frames[:, :-1]
+                    ], dim=1)  # [nA, target_num]
+
+                    # For each sample, collect the first SEQ unique frames
+                    residual_frames = torch.zeros(nA, SEQ, device=dev, dtype=torch.long)
+                    for i in range(nA):
+                        unique_positions = diff_mask[i].nonzero(as_tuple=True)[0]
+                        unique_values = sorted_frames[i, unique_positions]
+                        num_unique = unique_values.numel()
+                        if num_unique >= SEQ:
+                            residual_frames[i] = unique_values[:SEQ]
+                        else:
+                            residual_frames[i, :num_unique] = unique_values
+                            if num_unique > 0:
+                                residual_frames[i, num_unique:] = unique_values[-1]
+                    selected_frames_all[mask_residual] = residual_frames
+
 
                 if mask_frame_sampling.any():
                     nB = visible_indices[mask_frame_sampling].size(0)
-                    SEQ = 8
-                    FRAMES = 64
                     avg = FRAMES // SEQ
                     base = torch.arange(SEQ, device=dev) * avg
                     offs = torch.randint(avg, (nB, SEQ), device=dev)
                     frames = base + offs  # [nB, 8]
 
-                    per = torch.arange(args.must_num, device=dev)
-                    pos = (frames.unsqueeze(-1) * args.must_num + per).reshape(nB, -1)  # [nB, 8*args.must_num]
+                    per = torch.arange(args.num_tokens_per_frame, device=dev)
+                    pos = (frames.unsqueeze(-1) * args.num_tokens_per_frame + per).reshape(nB, -1)  # [nB, 8*num_tokens_per_frame]
                     sel_b = pos.to(visible_indices.dtype)
 
                     if sel_b.size(1) == args.target_num:
@@ -635,12 +669,28 @@ def main():
                         pad = sel_b[:, -1:].repeat(1, args.target_num - sel_b.size(1))
                         out[mask_frame_sampling] = torch.cat([sel_b, pad], dim=1)
 
+                    # Store frame indices for frame_sampling branch
+                    selected_frames_all[mask_frame_sampling] = frames
+
 
                 combined_mask = mask_residual | mask_frame_sampling
                 if combined_mask.any():
                     combined_idx = torch.nonzero(combined_mask, as_tuple=False).squeeze(1)
-                    combined_head_input = head_input[combined_idx]  # 保持原样（可能为 [n, C, H, W] 或其他）
+                    combined_head_input_full = head_input[combined_idx]  # [n, C, 64, H, W]
                     combined_out = out[combined_idx]
+                    combined_frames = selected_frames_all[combined_idx]  # [n, SEQ]
+
+                    # Select frames from the video based on selected_frames
+                    # combined_head_input_full: [n, C, 64, H, W]
+                    # combined_frames: [n, SEQ]
+                    nComb = combined_head_input_full.size(0)
+                    Cf = combined_head_input_full.size(1)
+                    Hf = combined_head_input_full.size(3)
+                    Wf = combined_head_input_full.size(4)
+
+                    # Expand frame indices for gather: [n, 1, SEQ, 1, 1] -> [n, C, SEQ, H, W]
+                    frame_idx_expand = combined_frames.view(nComb, 1, SEQ, 1, 1).expand(-1, Cf, -1, Hf, Wf)
+                    combined_head_input = torch.gather(combined_head_input_full, 2, frame_idx_expand)  # [n, C, SEQ, H, W]
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                         combined_head_output = backbone_ddp_compiled(combined_head_input, combined_out)
