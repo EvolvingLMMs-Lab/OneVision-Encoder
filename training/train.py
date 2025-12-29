@@ -394,7 +394,7 @@ def main():
     elif hasattr(backbone_module, 'embeddings') and hasattr(backbone_module.embeddings, 'patch_size'):
         patch_size = backbone_module.embeddings.patch_size
     else:
-        patch_size = 16  # default fallback
+        patch_size = 14  # default fallback
 
     list_dali_dataloader = []
     list_head_names = []
