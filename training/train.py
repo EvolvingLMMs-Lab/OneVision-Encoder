@@ -562,8 +562,8 @@ def main():
                 list_embedding.append(head_embedding)
 
             elif dataset_config.dali_type in ["decord_residual"]:
-                # Example: bs=16, target_num=2048 (8*256), num_tokens_per_frame=256, H=W=224, patch_size=16
-                # Hp=Wp=14, patches_per_frame=196, T=64, total_patches=12544
+                # Example: bs=16, target_num=2048 (8 frames × 256 tokens/frame), num_tokens_per_frame=256
+                # H=W=224, patch_size=14, Hp=Wp=16, total_patches_per_frame=256, T=64 frames, total_patches=16384
 
                 head_input = list_data_batch[head_id]["videos"]  # [16, 3, 64, 224, 224]
                 list_batch_sizes.append(head_input.size(0))
@@ -598,30 +598,30 @@ def main():
                     vis_idx = out[combined_idx]  # [14, 2048]
 
                     n, C, T, H, W = video.shape  # n=14, C=3, T=64, H=224, W=224
-                    Hp, Wp = H // patch_size, W // patch_size  # Hp=14, Wp=14
+                    Hp, Wp = H // patch_size, W // patch_size  # Hp=16, Wp=16
 
                     # Patchify: [n, C, T, H, W] -> [n, C, T*Hp*Wp, p, p]
-                    # [14, 3, 64, 224, 224] -> [14, 3, 64, 14, 16, 14, 16] -> [14, 3, 64, 14, 14, 16, 16] -> [14, 3, 12544, 16, 16]
-                    patches = video.view(n, C, T, Hp, patch_size, Wp, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T * Hp * Wp, patch_size, patch_size)  # [14, 3, 12544, 16, 16]
+                    # [14, 3, 64, 224, 224] -> [14, 3, 64, 16, 14, 16, 14] -> [14, 3, 64, 16, 16, 14, 14] -> [14, 3, 16384, 14, 14]
+                    patches = video.view(n, C, T, Hp, patch_size, Wp, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T * Hp * Wp, patch_size, patch_size)  # [14, 3, 16384, 14, 14]
 
                     # Select patches by vis_idx
-                    idx = vis_idx[:, None, :, None, None].expand(-1, C, -1, patch_size, patch_size)  # [14, 3, 2048, 16, 16]
-                    selected = torch.gather(patches, 2, idx)  # [14, 3, 2048, 16, 16]
+                    idx = vis_idx[:, None, :, None, None].expand(-1, C, -1, patch_size, patch_size)  # [14, 3, 2048, 14, 14]
+                    selected = torch.gather(patches, 2, idx)  # [14, 3, 2048, 14, 14]
 
                     # Unpatchify: [n, C, target_num, p, p] -> [n, C, T', H, W]
-                    T_new = args.target_num // (Hp * Wp)  # 2048 // 196 = 10
+                    T_new = args.target_num // (Hp * Wp)  # 2048 // 256 = 8
                     if T_new == 0:
                         T_new = 1
-                    num_patches = T_new * Hp * Wp  # 10 * 196 = 1960
+                    num_patches = T_new * Hp * Wp  # 8 * 256 = 2048
                     if selected.size(2) > num_patches:
-                        selected = selected[:, :, :num_patches]  # [14, 3, 1960, 16, 16]
+                        selected = selected[:, :, :num_patches]  # [14, 3, 2048, 14, 14]
                     elif selected.size(2) < num_patches:
-                        selected = torch.cat([selected, selected[:, :, -1:].expand(-1, -1, num_patches - selected.size(2), -1, -1)], dim=2)  # [14, 3, 1960, 16, 16]
-                    # [14, 3, 1960, 16, 16] -> [14, 3, 10, 14, 14, 16, 16] -> [14, 3, 10, 14, 16, 14, 16] -> [14, 3, 10, 224, 224]
-                    combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)  # [14, 3, 10, 224, 224]
+                        selected = torch.cat([selected, selected[:, :, -1:].expand(-1, -1, num_patches - selected.size(2), -1, -1)], dim=2)  # [14, 3, 2048, 14, 14]
+                    # [14, 3, 2048, 14, 14] -> [14, 3, 8, 16, 16, 14, 14] -> [14, 3, 8, 16, 14, 16, 14] -> [14, 3, 8, 224, 224]
+                    combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)  # [14, 3, 8, 224, 224]
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        combined_head_output = backbone_ddp_compiled(combined_head_input, vis_idx)  # input: [14, 3, 10, 224, 224], vis_idx: [14, 2048]
+                        combined_head_output = backbone_ddp_compiled(combined_head_input, vis_idx)  # input: [14, 3, 8, 224, 224], vis_idx: [14, 2048]
                     combined_head_output = (combined_head_output.pooler_output if hasattr(combined_head_output, "pooler_output") else combined_head_output["head_output"]).float()  # [14, D]
 
 
