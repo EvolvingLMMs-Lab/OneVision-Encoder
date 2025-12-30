@@ -81,6 +81,7 @@ get_codec_params() {
 #   - EMBEDDING_SIZE: embedding dimension (optional, default 768)
 #   - INPUT_SIZE: input size (optional, not passed if unset)
 #   - NUM_FRAMES: number of frames (optional, not passed if unset)
+#   - K_keep: number of top-K patches to keep (optional, default 2048)
 #   - DATASETS: dataset array (optional, uses DEFAULT_DATASETS if unset/empty)
 #   - REPORT_DIR_SUFFIX: report directory suffix (optional, e.g. "_64frames_codec")
 # ============================================================================
@@ -89,6 +90,7 @@ run_attentive_probe_codec() {
     MODEL_WEIGHT="${MODEL_WEIGHT:-NULL}"
     FRAMES_TOKEN_NUM="${FRAMES_TOKEN_NUM:-196}"
     EMBEDDING_SIZE="${EMBEDDING_SIZE:-768}"
+    K_keep="${K_keep:-2048}"
     REPORT_DIR_SUFFIX="${REPORT_DIR_SUFFIX:-}"
 
     # Use custom datasets or default datasets
@@ -145,6 +147,7 @@ run_attentive_probe_codec() {
             --save_report "${SAVE_DIR}" \
             --frames_token_num ${FRAMES_TOKEN_NUM} \
             --embedding_size ${EMBEDDING_SIZE} \
+            --K_keep ${K_keep} \
             --mv_compensate ${CODEC_MV_COMPENSATE} \
             --static_abs_thresh ${CODEC_STATIC_ABS_THRESH} \
             --static_rel_thresh ${CODEC_STATIC_REL_THRESH} \
