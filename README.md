@@ -14,9 +14,9 @@
 
 📝 **[Homepage](https://www.lmms-lab.com/onevision-encoder/index.html)**
 🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
-🤗 **[Datasets](coming)** |
 📄 **[Tech Report (coming)]()** |
-📋 **[Model Card](docs/model_card.md)**
+📋 **[Model Card](docs/model_card.md)** |
+📊 **[Data Card](docs/data_card.md)**
 
 </div>
 
@@ -283,7 +283,7 @@ cd eval_encoder
 Then run the following command:
 
 ```bash
-bash eval_encoder/shells_eval_ap/eval_ov_encoder_large_16frames.sh
+bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 ```
 
 **Sampling-Specific Parameters:**
@@ -320,8 +320,8 @@ torchrun --nproc_per_node=8 --master_port=29512 attentive_probe_codec.py \
 
 **Codec-Specific Parameters:**
 - `K_keep`: Number of patches to keep.
-- `cache_dir`: Directory for cached codec patches. This is where the codec-selected patches will be stored/loaded.
 - `mv_compensate`: Motion vector compensation method (e.g., `median`).
+- `cache_dir` (optional): Directory for cached codec patches. Use this to specify where codec-selected patches are stored/loaded when you want to persist or reuse them.
 
 #### Shared Parameters
 
