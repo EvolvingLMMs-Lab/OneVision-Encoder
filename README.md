@@ -16,9 +16,7 @@
 🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
 📄 **[Tech Report (coming)]()** |
 📋 **[Model Card](docs/model_card.md)** |
-📊 **[Data Card](docs/datacard.md)**
-
-> **📦 Data Availability Notice:** The training data requires approximately **200TB** of storage. We are currently looking for suitable storage solutions. If you need access to the data immediately, please contact [anxiangsir@outlook.com](mailto:anxiangsir@outlook.com).
+📊 **[Data Card](docs/data_card.md)**
 
 </div>
 
@@ -357,7 +355,7 @@ This project is released under the Apache 2.0 License.
 ## 📚 Documentation
 
 - [Model Card](docs/model_card.md) - Detailed documentation for OneVision Encoder Large model
-- [Data Card](docs/datacard.md) - Training dataset information and statistics
+- [Data Card](docs/data_card.md) - Training dataset information and statistics
 
 ## 🔗 Related Projects
 
