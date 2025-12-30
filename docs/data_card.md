@@ -89,19 +89,6 @@ This document describes the datasets used for training OneVision Encoder. The tr
 
 ---
 
-## Data Processing
-
-### Image Processing
-- Native resolution support up to 448×448
-- CLIP-style preprocessing
-- No tiling or cropping for native resolution matching
-
-### Video Processing
-- Frame sampling with temporal saliency detection
-- Codec-style patch extraction for efficient processing
-- Support for dense temporal sampling (up to 64 frames)
-
----
 
 ## Data Licensing
 
