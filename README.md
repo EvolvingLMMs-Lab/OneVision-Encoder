@@ -14,9 +14,11 @@
 
 📝 **[Homepage](https://www.lmms-lab.com/onevision-encoder/index.html)**
 🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
-🤗 **[Datasets](coming)** |
 📄 **[Tech Report (coming)]()** |
-📋 **[Model Card](docs/model_card.md)**
+📋 **[Model Card](docs/model_card.md)** |
+📊 **[Data Card](docs/datacard.md)**
+
+> **📦 Data Availability Notice:** The training data requires approximately **200TB** of storage. We are currently looking for suitable storage solutions. If you need access to the data immediately, please contact [anxiangsir@outlook.com](mailto:anxiangsir@outlook.com).
 
 </div>
 
