@@ -498,3 +498,10 @@ cache/
 list_*
 tmp
 *.jsonmodel_factory/vit_aim_v2_packing_hf_old.py
+
+
+ckpts/
+ckpts/**
+ckpts
+.gitginore
+
