@@ -64,11 +64,15 @@ Coupled with global contrastive learning over a 2M-scale concept memory bank, On
 
 ### Video Processing Pipeline
 
-The visualization below illustrates four different video processing pipelines.  
-(1) **Original Video**: a continuous 64-frame sequence that preserves the complete temporal context.  
-(2) **Uniform Frame Sampling**: a conventional strategy that selects 4–8 evenly spaced frames; while simple and efficient, it is inherently lossy and fails to capture fine-grained inter-frame motion.  
-(3) **Temporal Saliency Detection**: a global analysis of all 64 frames to identify regions rich in temporal information, including motion patterns, appearance variations, and semantic events.  
-(4) **Codec-Style Patch Extraction**: selective extraction of the temporally salient patches in a zigzag order, achieving 75–98% compression while retaining critical temporal dynamics.  
+The visualization below illustrates four different video processing pipelines.
+
+**1. Original Video**: a continuous 64-frame sequence that preserves the complete temporal context.
+
+**2. Uniform Frame Sampling**: a conventional strategy that selects 4–8 evenly spaced frames; while simple and efficient, it is inherently lossy and fails to capture fine-grained inter-frame motion.
+
+**3. Temporal Saliency Detection**: a global analysis of all 64 frames to identify regions rich in temporal information, including motion patterns, appearance variations, and semantic events.
+
+**4. Codec-Style Patch Extraction**: selective extraction of the temporally salient patches in a zigzag order, achieving 75–98% compression while retaining critical temporal dynamics.
 
 <div align="center">
 <table style="width: 100%; max-width: 1200px; table-layout: fixed;">
@@ -272,25 +276,14 @@ Training configurations and hyperparameters will be documented soon. For now, pl
 To evaluate the encoder with uniform frame sampling, first navigate to the evaluation directory:
 
 ```bash
+pip install -e .
 cd eval_encoder
 ```
 
 Then run the following command:
 
 ```bash
-torchrun --nproc_per_node=8 --master_port=29507 attentive_probe.py \
-  --eval_freq 1 \
-  --default_lr_list 0.0001 \
-  --batch_size 32 \
-  --default_weight_decay 0 \
-  --dali_py_num_workers 8 \
-  --model_family llava_vit_sampling \
-  --dataset diving48 \
-  --num_frames 8 \
-  --model_weight lmms-lab-encoder/onevision-encoder-large \
-  --model_name hf_llava_vit_large_ln \
-  --embedding_size 1024 \
-  --frames_token_num 256
+bash eval_encoder/shells_eval_ap/eval_ov_encoder_large_16frames.sh
 ```
 
 **Sampling-Specific Parameters:**
@@ -313,22 +306,21 @@ torchrun --nproc_per_node=8 --master_port=29512 attentive_probe_codec.py \
   --batch_size 4 \
   --default_weight_decay 0 \
   --dali_py_num_workers 8 \
-  --model_family llava_vit_codec \
+  --model_family ov_encoder_codec \
   --dataset diving48 \
-  --num_frames 64 \
-  --model_weight lmms-lab/onevision-encoder-large \
-  --model_name hf_llava_vit_large_ln \
+  --model_weight lmms-lab-encoder/onevision-encoder-large \
+  --model_name ov_encoder_large \
   --embedding_size 1024 \
   --default_epoch 30 \
-  --data_root /path/to/your/data_attentive_probe/ \
-  --cache_dir /path/to/your/cache_residuals/ \
   --K_keep 2048 \
+  --num_frames 64 \
   --mv_compensate median
+
 ```
 
 **Codec-Specific Parameters:**
+- `K_keep`: Number of patches to keep.
 - `cache_dir`: Directory for cached codec patches. This is where the codec-selected patches will be stored/loaded.
-- `K_keep`: Number of patches to keep. For example, 256 patches per frame × 8 frames = 2048 total patches. Adjust based on your frame count and desired compression ratio.
 - `mv_compensate`: Motion vector compensation method (e.g., `median`).
 
 #### Shared Parameters

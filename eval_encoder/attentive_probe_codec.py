@@ -36,9 +36,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="diving48")
 
     # Model
-    parser.add_argument("--model_family", default="llava_vit_codec")
-    parser.add_argument("--model_name", default="llava_vit_base_ln")
-    parser.add_argument("--model_weight", default="NULL")
+    parser.add_argument("--model_family", default="ov_encoder_codec")
+    parser.add_argument("--model_name", default="ov_encoder_large")
+    parser.add_argument("--model_weight", default="lmms-lab-encoder/onevision-encoder-large")
     parser.add_argument("--num_frames", type=int, default=64)
     parser.add_argument("--num_tokens", type=int, default=256)
     parser.add_argument("--input_size", type=int, default=224)
@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--K_keep", type=int, default=2048, help="Number of top-K patches to keep as visible (default: 2048)")
     parser.add_argument("--mv_compensate", type=str, default="similarity", choices=["none", "median", "similarity"],
                         help="MV global compensation for tracking shots: none|median|mean (default: similarity)")
-    parser.add_argument("--embedding_size", type=int, default=768, help="Embedding size of the transformer backbone (default: 768)")
+    parser.add_argument("--embedding_size", type=int, default=1024, help="Embedding size of the transformer backbone (default: 768)")
     parser.add_argument("--num_classes", type=int, default=0, help="Number of classes for classification head (default: 0 for no head / feature extraction)")
     parser.add_argument("--target_frames", type=int, default=64, help="Target number of frames to interpolate to (default: 64)")
     # Train
@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--decord_num_threads", type=int, default=2,
                         help="Number of threads for decord video reader.")
     parser.add_argument("--short_side_size", type=int, default=256)
-    
+
     # Motion vector and residual processing parameters
     parser.add_argument("--mv_use_inconsistency", action="store_true",
                         help="Use MV local variance (inconsistency) instead of raw magnitude (default: False)")
@@ -164,7 +164,7 @@ def get_feature(
         args: argument configuration
         videos: video data [B, C, T, H, W] or image data [B, C, H, W]
         model: model
-        frame_indices: video frame indices [B, seq_len], used for llava_vit_sampling
+        frame_indices: video frame indices [B, seq_len], used for chunk_wise_sampling
         total_frames: total frames per video [B]
         is_training: whether in training mode
     """
@@ -183,7 +183,6 @@ def get_feature(
         "dinov2",
         "dinov3",
         "metaclip",
-        "llava_vit_si",
         "aimv2"
     ]
     if args.model_family in list_vit_single_image:
@@ -210,7 +209,7 @@ def get_feature(
                 else:
                     raise ValueError("SigLIP2 only supports image input with 4 dimensions [B, C, H, W].")
 
-    elif args.model_family == "llava_vit_sampling":
+    elif args.model_family == "chunk_wise_sampling":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
                 bs, C, T, H, W = videos.shape
@@ -253,26 +252,26 @@ def get_feature(
 
                 return outputs
 
-    elif args.model_family == "llava_vit_codec":
+    elif args.model_family == "ov_encoder_codec":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
                 bs, C, T, H, W = videos.shape
                 assert T == 64, "Requires 64 frames input, please check"
                 device = videos.device
-                
+
                 # Calculate patch parameters
                 patch_size = args.patch_size  # 14
                 patches_per_side = H // patch_size  # 224 // 14 = 16
                 patches_per_frame = patches_per_side * patches_per_side  # 16 * 16 = 256
-                
+
                 group_size = args.K_keep // patches_per_frame
                 assert T % group_size == 0, "Frame count must be divisible by 8"
-                
+
                 # Extract patches based on visible_indices
                 # visible_indices: [bs, K], each element is the global patch index (0 to T*patches_per_frame-1)
                 if visible_indices is not None:
                     K = visible_indices.shape[1]
-                    
+
                     # Convert video to patches: [bs, C, T, H, W] -> [bs, T, patches_per_side, patches_per_side, C, patch_size, patch_size]
                     videos_patches = videos.unfold(3, patch_size, patch_size).unfold(4, patch_size, patch_size)
                     # [bs, C, T, num_patches_h, num_patches_w, patch_size, patch_size]
@@ -280,20 +279,20 @@ def get_feature(
                     # [bs, T, num_patches_h, num_patches_w, C, patch_size, patch_size]
                     videos_patches = videos_patches.view(bs, T * patches_per_frame, C, patch_size, patch_size)
                     # [bs, T*patches_per_frame, C, patch_size, patch_size]
-                    
+
                     # Select patches based on visible_indices (using batch index optimization)
                     # Select corresponding patches for each batch
                     batch_indices = torch.arange(bs, device=device).view(bs, 1).expand(bs, K)
                     selected_patches = videos_patches[batch_indices, visible_indices]  # [bs, K, C, patch_size, patch_size]
-                    
+
                     # Reorganize into 8-frame images
                     # Assume K patches need to be reorganized into 8 frames, each frame has K/8 patches
                     assert K % group_size == 0, f"K={K} must be divisible by group_size={group_size}"
                     patches_per_group = K // group_size
-                    
+
                     # Reshape to [bs, group_size, patches_per_group, C, patch_size, patch_size]
                     selected_patches = selected_patches.view(bs, group_size, patches_per_group, C, patch_size, patch_size)
-                    
+
                     # Calculate patch arrangement for each group (assume square arrangement)
                     patches_h = int(math.sqrt(patches_per_group))
                     patches_w = patches_per_group // patches_h
@@ -301,18 +300,18 @@ def get_feature(
                         # If not perfectly square, adjust to near-square
                         patches_h = int(math.ceil(math.sqrt(patches_per_group)))
                         patches_w = int(math.ceil(patches_per_group / patches_h))
-                    
+
                     # Pre-allocate target tensor and fill (avoid concat operations)
                     if patches_h * patches_w > patches_per_group:
                         # Need padding
-                        target_patches = torch.zeros(bs, group_size, patches_h * patches_w, C, patch_size, patch_size, 
+                        target_patches = torch.zeros(bs, group_size, patches_h * patches_w, C, patch_size, patch_size,
                                                     device=device, dtype=videos.dtype)
                         target_patches[:, :, :patches_per_group, :, :, :] = selected_patches
                         selected_patches = target_patches
                         selected_patches = selected_patches.view(bs, group_size, patches_h, patches_w, C, patch_size, patch_size)
                     else:
                         selected_patches = selected_patches.view(bs, group_size, patches_h, patches_w, C, patch_size, patch_size)
-                    
+
                     # Reorganize into images: [bs, group_size, C, H_new, W_new]
                     # H_new = patches_h * patch_size, W_new = patches_w * patch_size
                     selected_patches = selected_patches.permute(0, 1, 4, 2, 5, 3, 6).contiguous()
@@ -321,7 +320,7 @@ def get_feature(
                     W_new = patches_w * patch_size
                     images8 = selected_patches.view(bs, group_size, C, H_new, W_new).permute(0, 2, 1, 3, 4)
                     # [bs, group_size, C, H_new, W_new]
-                    
+
                     # Don't concatenate batch dimension, keep [bs, 8, C, H, W] format
                     # visible_indices keeps original [bs, K] format and passes directly
                     enc_out = model(images8, visible_indices)
@@ -333,7 +332,7 @@ def get_feature(
                     videos_grouped = videos_grouped.permute(0, 1, 2, 4, 3, 5).contiguous()
                     bs, num_groups, C, H, group_size, W = videos_grouped.shape
                     images8 = videos_grouped.view(bs * num_groups, C, H, group_size * W)
-                    
+
                     enc_out = model(images8, None)
 
                 if hasattr(enc_out, "last_hidden_state"):
@@ -342,7 +341,7 @@ def get_feature(
                     outputs = enc_out["visible_embeddings"]
 
                 return outputs
-            
+
     raise ValueError(f"Unsupported model_family: {args.model_family}")
 
 
@@ -350,8 +349,8 @@ class ClassificationHead(nn.Module):
     def __init__(self, hidden_dim: int, num_classes: int, init_scale: float = 1e-3, probe_size=1) -> None:
         super().__init__()
         self.pool = Siglip2MultiheadAttentionPoolingHead(
-            hidden_size=hidden_dim, 
-            num_attention_heads=max(1, hidden_dim // 64), 
+            hidden_size=hidden_dim,
+            num_attention_heads=max(1, hidden_dim // 64),
             intermediate_size=hidden_dim * 4,
             )
 
@@ -389,7 +388,7 @@ def train_one_experiment(
     head.to(device)
     head = torch.nn.parallel.DistributedDataParallel(head, device_ids=[args.local_rank])
     optimizer = torch.optim.AdamW(head.parameters(), lr=lr, eps=1e-8, betas=(0.9, 0.999), weight_decay=args.default_weight_decay)
-    
+
     # Resume from checkpoint if specified
     if args.resume_checkpoint is not None and os.path.exists(args.resume_checkpoint):
         if args.rank == 0:
@@ -403,7 +402,7 @@ def train_one_experiment(
             print(f"Resumed from epoch {start_epoch}, best acc1: {best['acc1']:.4f}")
     else:
         best = {"acc1": 0.0, "acc5": 0.0}
-    
+
     steps_per_epoch = len(loader_train)
     total_iters = steps_per_epoch * args.default_epoch
     if total_iters <= 0:
@@ -429,7 +428,7 @@ def train_one_experiment(
             total_frames = batch["total_frames"].to(device, non_blocking=True)  # [B, 1]
 
             visible_indices = None
-            if args.model_family == "llava_vit_codec":
+            if args.model_family == "ov_encoder_codec":
                 visible_indices = batch["visible_indices"].to(device, non_blocking=True)
 
             with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -479,7 +478,7 @@ def train_one_experiment(
             stats = evaluate(args, head, device, base_model, loader_val, epoch=epoch)
             if hasattr(loader_val, "reset"):
                 loader_val.reset()
-            
+
             # Save checkpoint if this is the best model
             if stats["acc1"] > best["acc1"]:
                 best = stats
@@ -489,7 +488,7 @@ def train_one_experiment(
                         f"best_checkpoint_{args.dataset}_{os.path.basename(args.model_weight)}_K{args.K_keep}.pth"
                     )
                     os.makedirs(args.checkpoint_dir, exist_ok=True)
-                    
+
                     checkpoint = {
                         'epoch': epoch,
                         'head_state_dict': head.module.state_dict(),
@@ -500,10 +499,10 @@ def train_one_experiment(
                     }
                     torch.save(checkpoint, checkpoint_path)
                     print(f"Saved best checkpoint to {checkpoint_path} (acc1: {best['acc1']:.4f})")
-            
+
             if args.rank == 0:
                 print(f"[Val][Epoch {epoch}] acc1={stats['acc1']:.4f} acc5={stats['acc5']:.4f} | Best acc1={best['acc1']:.4f}")
-    
+
     # Save final checkpoint
     if args.rank == 0:
         final_checkpoint_path = os.path.join(
@@ -511,7 +510,7 @@ def train_one_experiment(
             f"final_checkpoint_{args.dataset}_{os.path.basename(args.model_weight)}_K{args.K_keep}.pth"
         )
         os.makedirs(args.checkpoint_dir, exist_ok=True)
-        
+
         final_checkpoint = {
             'epoch': args.default_epoch - 1,
             'head_state_dict': head.module.state_dict(),
@@ -544,9 +543,9 @@ def evaluate(
     num_crops = args.num_temporal_crops * args.num_spatial_crops
 
     all_logits, all_targets = [], []
-    
+
     steps_val = len(loader_val)
-    
+
     for i, batch in enumerate(loader_val):
         videos = batch["videos"].to(device, non_blocking=True)    # [B*N, C, T, H, W]
         labels = batch["labels"].view(-1).to(device, non_blocking=True)  # [B*N]
@@ -554,7 +553,7 @@ def evaluate(
         total_frames = batch["total_frames"].to(device, non_blocking=True)
 
         visible_indices = None
-        if args.model_family == "llava_vit_codec":
+        if args.model_family == "ov_encoder_codec":
             visible_indices = batch["visible_indices"].to(device, non_blocking=True)
 
         B = videos.shape[0] // num_crops
@@ -563,7 +562,7 @@ def evaluate(
         labels = labels.view(B, num_crops)[:, 0]   # [B], labels are the same for the same video
         indices = indices.view(B, num_crops, *indices.shape[1:])
         total_frames = total_frames.view(B, num_crops)[:, 0]
-        
+
         # Prepare visible_indices for all crops
         if visible_indices is not None:
             visible_indices_reshaped = visible_indices.view(B, num_crops, *visible_indices.shape[1:])
@@ -582,7 +581,7 @@ def evaluate(
         logits_all = torch.stack(logits_per_crop, dim=1)
         # Average over crop dimension (can use softmax then average / directly average logits)
         logits_mean = logits_all.mean(dim=1)   # [B, num_classes]
-        
+
         # Collect results
         all_logits.append(logits_mean)
         all_targets.append(labels)
@@ -600,21 +599,21 @@ def evaluate(
             f"* Final Acc@1: {computed_metrics['acc1'] * 100:.1f} "
             f"| Final Acc@5: {computed_metrics['acc5'] * 100:.1f}"
         )
-    
+
     return {k: v.item() * 100 for k, v in computed_metrics.items()}
 
 
 def get_model(args: argparse.Namespace) -> nn.Module:
 
-    if args.model_name == "hf_llava_vit_large_ln":
+    if args.model_name == "ov_encoder_large":
         model = AutoModel.from_pretrained(
-            args.model_weight, 
-            trust_remote_code=True, 
+            args.model_weight,
+            trust_remote_code=True,
             attn_implementation="flash_attention_2")
         return model
 
     model = create_model(args.model_name, pretrained=False)
-    if args.model_family in ["llava_vit_sampling", "llava_vit_codec"]:
+    if args.model_family in ["chunk_wise_sampling", "ov_encoder_codec"]:
         state_dict = torch.load(args.model_weight, map_location="cpu")
         state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=True)
@@ -666,16 +665,6 @@ def main() -> None:
         args.val_data_root_path = os.path.join(args.data_root, "k400_hevc")
         args.train_data_csv_path = "train_new.csv"
         args.val_data_csv_path = "val_new.csv"
-    if args.dataset == "COIN":
-        args.train_data_root_path = args.data_root
-        args.val_data_root_path = args.data_root
-        args.train_data_csv_path = "/video_vit/LLaVA-ViT/eval_encoder/annotations/train_new.csv"
-        args.val_data_csv_path = "/video_vit/LLaVA-ViT/eval_encoder/annotations/val_new.csv"
-    if args.dataset == "jester":
-        args.train_data_root_path = os.path.join(args.data_root, "jester_hevc")
-        args.val_data_root_path = os.path.join(args.data_root, "jester_hevc")
-        args.train_data_csv_path = "jester_train_new.csv"
-        args.val_data_csv_path = "jester_val_new.csv"
     try:
         args.rank = int(os.environ["RANK"])
         args.local_rank = int(os.environ["LOCAL_RANK"])
@@ -718,7 +707,7 @@ def main() -> None:
         "decord_num_threads": args.decord_num_threads,
         "seed": 1024,
     }
-    
+
     test_common_params = {
         "data_root_path": args.val_data_root_path,
         "data_csv_path": os.path.join(args.val_data_root_path, args.val_data_csv_path) if not os.path.isabs(args.val_data_csv_path) else args.val_data_csv_path,
@@ -735,7 +724,7 @@ def main() -> None:
         "seed": 1024,
     }
 
-    if args.model_family == "llava_vit_codec":
+    if args.model_family == "ov_encoder_codec":
         # Add codec-specific parameters
         codec_params = {
             "patch_size": args.patch_size,
@@ -754,7 +743,7 @@ def main() -> None:
         }
         train_dataloader_params = {**common_params, **codec_params}
         test_dataloader_params = {**test_common_params, **codec_params}
-        
+
         train_loader = get_dali_dataloader_codec(**train_dataloader_params)
         val_loader = get_dali_dataloader_codec(**test_dataloader_params)
 

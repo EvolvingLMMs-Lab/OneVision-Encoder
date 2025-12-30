@@ -6,7 +6,7 @@ source "${SCRIPT_DIR}/common.sh"
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 # Model configuration
-MODEL_FAMILY="llava_vit_sampling"
+MODEL_FAMILY="chunk_wise_sampling"
 MODEL_NAME="ov_encoder_large"
 MODEL_WEIGHT=$1
 FRAMES_TOKEN_NUM=256

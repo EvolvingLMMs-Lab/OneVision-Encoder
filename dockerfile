@@ -1,9 +1,16 @@
-FROM pytorch/pytorch:2.7.0-cuda11.8-cudnn9-runtime
+FROM nvcr.io/nvidia/pytorch:25.04-py3
 
 # Set up environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
+
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 
 # Install system dependencies and ffmpeg in one layer
 RUN set -eux; \
