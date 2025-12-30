@@ -60,7 +60,7 @@ get_codec_params() {
     local dataset="$1"
     if [[ "$dataset" == "diving48" || "$dataset" == "perception_test" ]]; then
         # Parameters for diving48 and perception_test
-        CODEC_MV_COMPENSATE="median"
+        CODEC_MV_COMPENSATE="similarity"
         CODEC_STATIC_ABS_THRESH="126"
         CODEC_STATIC_REL_THRESH="0.38"
     else
