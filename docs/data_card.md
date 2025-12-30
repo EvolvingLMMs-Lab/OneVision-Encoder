@@ -1,8 +1,11 @@
 # Data Card: OneVision Encoder Training Data
 
+> **📦 Data Availability Notice:** The training data requires approximately **200TB** of storage. We are currently looking for suitable storage solutions. If you need access to the data immediately, please contact [anxiangsir@outlook.com](mailto:anxiangsir@outlook.com).
+
+
 ## Overview
 
-This document describes the datasets used for training OneVision Encoder. The training data consists of both image and video datasets, totaling approximately 754 million samples.
+This document describes the datasets used for training OneVision Encoder. The training data consists of both image and video datasets.
 
 ## Dataset Summary
 
