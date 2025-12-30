@@ -14,7 +14,6 @@ EMBEDDING_SIZE=1024
 NUM_FRAMES=64
 REPORT_DIR_SUFFIX="_64frames_codec"
 
-
 DEFAULT_DATASETS=(
     "ssv2"
     "diving48"
