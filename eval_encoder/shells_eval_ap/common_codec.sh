@@ -131,9 +131,6 @@ run_attentive_probe_codec() {
         if [[ -n "${NUM_FRAMES}" ]]; then
             EXTRA_ARGS="${EXTRA_ARGS} --num_frames ${NUM_FRAMES}"
         fi
-        if [[ -n "${K_keep}" ]]; then
-            EXTRA_ARGS="${EXTRA_ARGS} --K_keep ${K_keep}"
-        fi
 
         torchrun --nproc_per_node 8 --master_port 15555 \
             attentive_probe_codec.py \
@@ -150,6 +147,7 @@ run_attentive_probe_codec() {
             --save_report "${SAVE_DIR}" \
             --frames_token_num ${FRAMES_TOKEN_NUM} \
             --embedding_size ${EMBEDDING_SIZE} \
+            --K_keep ${K_keep} \
             --mv_compensate ${CODEC_MV_COMPENSATE} \
             --static_abs_thresh ${CODEC_STATIC_ABS_THRESH} \
             --static_rel_thresh ${CODEC_STATIC_REL_THRESH} \
