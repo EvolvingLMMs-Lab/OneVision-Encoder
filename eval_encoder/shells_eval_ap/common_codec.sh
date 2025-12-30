@@ -81,6 +81,7 @@ get_codec_params() {
 #   - EMBEDDING_SIZE: embedding dimension (optional, default 768)
 #   - INPUT_SIZE: input size (optional, not passed if unset)
 #   - NUM_FRAMES: number of frames (optional, not passed if unset)
+#   - K_keep: number of top-K patches to keep (optional, default 2048)
 #   - DATASETS: dataset array (optional, uses DEFAULT_DATASETS if unset/empty)
 #   - REPORT_DIR_SUFFIX: report directory suffix (optional, e.g. "_64frames_codec")
 # ============================================================================
@@ -89,6 +90,7 @@ run_attentive_probe_codec() {
     MODEL_WEIGHT="${MODEL_WEIGHT:-NULL}"
     FRAMES_TOKEN_NUM="${FRAMES_TOKEN_NUM:-196}"
     EMBEDDING_SIZE="${EMBEDDING_SIZE:-768}"
+    K_keep="${K_keep:-2048}"
     REPORT_DIR_SUFFIX="${REPORT_DIR_SUFFIX:-}"
 
     # Use custom datasets or default datasets
@@ -128,6 +130,9 @@ run_attentive_probe_codec() {
         fi
         if [[ -n "${NUM_FRAMES}" ]]; then
             EXTRA_ARGS="${EXTRA_ARGS} --num_frames ${NUM_FRAMES}"
+        fi
+        if [[ -n "${K_keep}" ]]; then
+            EXTRA_ARGS="${EXTRA_ARGS} --K_keep ${K_keep}"
         fi
 
         torchrun --nproc_per_node 8 --master_port 15555 \
