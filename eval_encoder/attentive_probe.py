@@ -8,7 +8,6 @@ from typing import Dict
 import torch
 import torch.nn.functional as F
 import torchmetrics
-from dataloader.ap_dataloader_dali import get_dali_dataloader
 from timm.loss import LabelSmoothingCrossEntropy
 from timm.models import create_model
 from timm.models.layers import trunc_normal_
@@ -19,7 +18,9 @@ from transformers import AutoModel
 
 # Ensure custom models and layers are registered
 import model_factory
-from model_factory.layers import Siglip2MultiheadAttentionPoolingHead, Siglip2TransformerAttentionPoolingHead
+from dataloader.ap_dataloader_dali import get_dali_dataloader
+from model_factory.layers import (Siglip2MultiheadAttentionPoolingHead,
+                                  Siglip2TransformerAttentionPoolingHead)
 
 warnings.filterwarnings("ignore")
 
@@ -33,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="ssv2")
 
     # Model
-    parser.add_argument("--model_family", default="llava_vit_sampling")
+    parser.add_argument("--model_family", default="chunk_wise_sampling")
     parser.add_argument("--model_name", default="ov_encoder_large")
     parser.add_argument("--model_weight", default="NULL")
     parser.add_argument("--num_frames", type=int, default=8)
@@ -42,7 +43,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tubelet_size", type=int, default=1)
     parser.add_argument("--embedding_size", type=int, default=768)
     parser.add_argument("--num_classes", type=int, default=0)
-    # ===> New: target frame number parameter <===
     parser.add_argument("--target_frames", type=int, default=64,
                         help="Target number of frames to interpolate to (default: 64)")
 
@@ -155,7 +155,6 @@ def get_feature(
         "dinov2",
         "dinov3",
         "metaclip",
-        "llava_vit_si",
         "aimv2"
     ]
     if args.model_family in list_vit_single_image:
@@ -183,7 +182,7 @@ def get_feature(
                 else:
                     raise ValueError("SigLIP2 only supports image input with 4 dimensions [B, C, H, W].")
 
-    elif args.model_family == "llava_vit_sampling":
+    elif args.model_family == "chunk_wise_sampling":
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
                 bs, C, T, H, W = videos.shape
@@ -410,7 +409,7 @@ def get_model(args: argparse.Namespace) -> nn.Module:
         return model
 
     model = create_model(args.model_name, pretrained=False)
-    if args.model_family in ["llava_vit_sampling"]:
+    if args.model_family in ["chunk_wise_sampling"]:
         state_dict = torch.load(args.model_weight, map_location="cpu")
         state_dict = {k.replace("_orig_mod.", "").replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=True)
