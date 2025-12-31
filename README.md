@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>HEVC-style vision transformer with codec-style patch selection</strong>
+  <strong>The first HEVC style Vision Transformer with advanced multimodal capabilities</strong>
 </p>
 
 <div align="center">
