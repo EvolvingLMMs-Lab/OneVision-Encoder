@@ -1060,8 +1060,8 @@ def get_dali_dataloader_codec(
     center_prior: float = 0.3,
     center_sigma: float = 0.35,
     static_fallback: bool = False,
-    static_abs_thresh: float = 116.0,
-    static_rel_thresh: float = 0.55,
+    static_abs_thresh: float = 126.0,
+    static_rel_thresh: float = 0.38,
     static_uniform_frames: int = 4,
 ) -> DALIWarper:
     """
