@@ -307,6 +307,59 @@ class TestPreprocessingConsistency:
         except Exception as e:
             pytest.skip(f"Could not load AutoImageProcessor: {e}")
 
+    @pytest.mark.skipif(
+        True,  # Skip by default since network may not be available
+        reason="Network access required for HuggingFace model download"
+    )
+    def test_preprocessing_consistency_with_clip_processor(self, sample_image):
+        """Test consistency between CLIP Processor and AutoImageProcessor.
+
+        This test compares the output of CLIP CLIPImageProcessor with
+        the AutoImageProcessor from HuggingFace onevision-encoder-large
+        to ensure they produce identical results.
+        """
+        try:
+            from transformers import AutoImageProcessor, CLIPImageProcessor
+
+            # Load the AutoImageProcessor from HuggingFace onevision-encoder-large
+            auto_preprocessor = AutoImageProcessor.from_pretrained(
+                "lmms-lab-encoder/onevision-encoder-large",
+                trust_remote_code=True
+            )
+
+            # Load the CLIP CLIPImageProcessor with same parameters
+            clip_preprocessor = CLIPImageProcessor.from_pretrained(
+                "lmms-lab-encoder/onevision-encoder-large",
+                trust_remote_code=True
+            )
+
+            # Process with AutoImageProcessor
+            auto_output = auto_preprocessor(images=sample_image, return_tensors="pt")
+            auto_tensor = auto_output["pixel_values"]
+
+            # Process with CLIP CLIPImageProcessor
+            clip_output = clip_preprocessor(images=sample_image, return_tensors="pt")
+            clip_tensor = clip_output["pixel_values"]
+
+            # Compare outputs
+            assert auto_tensor.shape == clip_tensor.shape, (
+                f"Shape mismatch: auto={auto_tensor.shape}, clip={clip_tensor.shape}"
+            )
+
+            # Check if values are close (allowing for small floating point differences)
+            is_close = torch.allclose(auto_tensor, clip_tensor, rtol=1e-4, atol=1e-4)
+            if not is_close:
+                max_diff = (auto_tensor - clip_tensor).abs().max().item()
+                pytest.fail(
+                    f"Preprocessing outputs differ between AutoImageProcessor and CLIPImageProcessor!\n"
+                    f"Max difference: {max_diff}\n"
+                    f"Auto tensor stats: min={auto_tensor.min()}, max={auto_tensor.max()}\n"
+                    f"CLIP tensor stats: min={clip_tensor.min()}, max={clip_tensor.max()}"
+                )
+
+        except Exception as e:
+            pytest.skip(f"Could not load processors: {e}")
+
     def test_grayscale_image_conversion(self):
         """Test that grayscale images are converted to RGB."""
         # Create a grayscale image
