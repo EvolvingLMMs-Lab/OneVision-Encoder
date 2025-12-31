@@ -111,10 +111,7 @@ class TestCodeConsistency:
         """Compute SHA256 hash of file content."""
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    @pytest.mark.skipif(
-        True,  # Skip by default since network may not be available
-        reason="Network access required for HuggingFace download"
-    )
+
     def test_modeling_file_consistency(self, local_modeling_path):
         """Test consistency between local and remote modeling file.
 
@@ -143,10 +140,7 @@ class TestCodeConsistency:
         except Exception as e:
             pytest.skip(f"Could not download from HuggingFace: {e}")
 
-    @pytest.mark.skipif(
-        True,  # Skip by default since network may not be available
-        reason="Network access required for HuggingFace download"
-    )
+
     def test_config_file_consistency(self, local_config_path):
         """Test consistency between local and remote configuration file.
 
@@ -261,10 +255,7 @@ class TestPreprocessingConsistency:
         assert not torch.isnan(tensor).any(), "Tensor contains NaN values"
         assert not torch.isinf(tensor).any(), "Tensor contains Inf values"
 
-    @pytest.mark.skipif(
-        True,  # Skip by default since network may not be available
-        reason="Network access required for HuggingFace model download"
-    )
+
     def test_preprocessing_consistency_with_auto_processor(self, sample_image):
         """Test consistency between manual preprocessing and AutoImageProcessor.
 
@@ -307,10 +298,7 @@ class TestPreprocessingConsistency:
         except Exception as e:
             pytest.skip(f"Could not load AutoImageProcessor: {e}")
 
-    @pytest.mark.skipif(
-        True,  # Skip by default since network may not be available
-        reason="Network access required for HuggingFace model download"
-    )
+
     def test_preprocessing_consistency_with_clip_processor(self, sample_image):
         """Test consistency between CLIP Processor and AutoImageProcessor.
 
