@@ -1,9 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="asset/logo_dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="asset/logo_light.png">
-    <img alt="OneVision Encoder" src="output/logo.png" width="600" style="max-width: 100%;">
-  </picture>
+  <img alt="OneVision Encoder" src="asset/onevision_encoder.png" width="1200" style="max-width: 100%;">
 </p>
 
 <p align="center">
