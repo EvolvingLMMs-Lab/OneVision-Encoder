@@ -21,7 +21,12 @@ DEFAULT_IMAGE_SIZE = 448
 def manual_center_crop_preprocess(image: Image.Image, size: int = DEFAULT_IMAGE_SIZE,
                                   mean: list = None, std: list = None) -> torch.Tensor:
     """
-    Manual center-crop preprocessing for images.
+    Manual center-crop preprocessing for images (CLIP-style).
+
+    This follows the standard CLIP preprocessing pipeline:
+    1. Resize the shorter edge to target size (preserving aspect ratio)
+    2. Center crop to target size x target size
+    3. Normalize with mean and std
 
     Args:
         image: PIL Image to preprocess
@@ -41,20 +46,24 @@ def manual_center_crop_preprocess(image: Image.Image, size: int = DEFAULT_IMAGE_
     if image.mode != "RGB":
         image = image.convert("RGB")
 
-    # Center crop
+    # Step 1: Resize shorter edge to target size (CLIP-style)
     width, height = image.size
-    min_dim = min(width, height)
+    if width < height:
+        new_width = size
+        new_height = int(height * size / width)
+    else:
+        new_height = size
+        new_width = int(width * size / height)
 
-    # Calculate crop box for center crop
-    left = (width - min_dim) // 2
-    top = (height - min_dim) // 2
-    right = left + min_dim
-    bottom = top + min_dim
+    image = image.resize((new_width, new_height), Image.Resampling.BICUBIC)
+
+    # Step 2: Center crop to target size
+    left = (new_width - size) // 2
+    top = (new_height - size) // 2
+    right = left + size
+    bottom = top + size
 
     image = image.crop((left, top, right, bottom))
-
-    # Resize to target size
-    image = image.resize((size, size), Image.Resampling.BICUBIC)
 
     # Convert to numpy array and normalize to [0, 1]
     img_array = np.array(image).astype(np.float32) / 255.0
