@@ -52,26 +52,6 @@ get_epochs() {
 }
 
 # ============================================================================
-# Get codec parameters based on dataset name
-# Args: $1 - dataset name
-# Returns: Sets CODEC_MV_COMPENSATE, CODEC_STATIC_ABS_THRESH, CODEC_STATIC_REL_THRESH
-# ============================================================================
-get_codec_params() {
-    local dataset="$1"
-    if [[ "$dataset" == "diving48" || "$dataset" == "perception_test" ]]; then
-        # Parameters for diving48 and perception_test
-        CODEC_MV_COMPENSATE="similarity"
-        CODEC_STATIC_ABS_THRESH="126"
-        CODEC_STATIC_REL_THRESH="0.38"
-    else
-        # Parameters for other datasets
-        CODEC_MV_COMPENSATE="similarity"
-        CODEC_STATIC_ABS_THRESH="116"
-        CODEC_STATIC_REL_THRESH="0.55"
-    fi
-}
-
-# ============================================================================
 # Run attentive_probe_codec evaluation
 # Required variables to set before calling:
 #   - MODEL_FAMILY: model family (required)
@@ -81,16 +61,14 @@ get_codec_params() {
 #   - EMBEDDING_SIZE: embedding dimension (optional, default 768)
 #   - INPUT_SIZE: input size (optional, not passed if unset)
 #   - NUM_FRAMES: number of frames (optional, not passed if unset)
-#   - K_keep: number of top-K patches to keep (optional, default 2048)
 #   - DATASETS: dataset array (optional, uses DEFAULT_DATASETS if unset/empty)
-#   - REPORT_DIR_SUFFIX: report directory suffix (optional, e.g. "_64frames_codec")
+#   - REPORT_DIR_SUFFIX: report directory suffix (optional, e.g. "_16frames")
 # ============================================================================
 run_attentive_probe_codec() {
     # Set default values
     MODEL_WEIGHT="${MODEL_WEIGHT:-NULL}"
     FRAMES_TOKEN_NUM="${FRAMES_TOKEN_NUM:-196}"
     EMBEDDING_SIZE="${EMBEDDING_SIZE:-768}"
-    K_keep="${K_keep:-2048}"
     REPORT_DIR_SUFFIX="${REPORT_DIR_SUFFIX:-}"
 
     # Use custom datasets or default datasets
@@ -99,18 +77,14 @@ run_attentive_probe_codec() {
     fi
 
     # Build report directory
-    BASE_REPORT_DIR="result_attentive_probe/${MODEL_FAMILY}/${MODEL_NAME}${REPORT_DIR_SUFFIX}"
+    BASE_REPORT_DIR="result_attentive_probe_codec/${MODEL_FAMILY}/${MODEL_NAME}${REPORT_DIR_SUFFIX}"
 
     # Loop through each dataset for testing
     for DATASET in "${DATASETS[@]}"; do
         BATCH_SIZE=$(get_batch_size "$DATASET")
         EPOCHS=$(get_epochs "$DATASET")
-        
-        # Get codec-specific parameters for this dataset
-        get_codec_params "$DATASET"
 
         echo "DATASET=$DATASET, BATCH_SIZE=$BATCH_SIZE"
-        echo "Codec params: mv_compensate=${CODEC_MV_COMPENSATE}, static_abs_thresh=${CODEC_STATIC_ABS_THRESH}, static_rel_thresh=${CODEC_STATIC_REL_THRESH}"
 
         echo "========================================================"
         echo "Start testing dataset: ${DATASET}"
@@ -132,6 +106,11 @@ run_attentive_probe_codec() {
             EXTRA_ARGS="${EXTRA_ARGS} --num_frames ${NUM_FRAMES}"
         fi
 
+        # Add --mv_use_inconsistency for all datasets except diving48
+        if [[ "$DATASET" != "diving48" ]]; then
+            EXTRA_ARGS="${EXTRA_ARGS} --mv_use_inconsistency"
+        fi
+
         torchrun --nproc_per_node 8 --master_port 15555 \
             attentive_probe_codec.py \
             --eval_freq 1 \
@@ -147,11 +126,6 @@ run_attentive_probe_codec() {
             --save_report "${SAVE_DIR}" \
             --frames_token_num ${FRAMES_TOKEN_NUM} \
             --embedding_size ${EMBEDDING_SIZE} \
-            --K_keep ${K_keep} \
-            --mv_compensate ${CODEC_MV_COMPENSATE} \
-            --static_abs_thresh ${CODEC_STATIC_ABS_THRESH} \
-            --static_rel_thresh ${CODEC_STATIC_REL_THRESH} \
-            --static_fallback 1 \
             ${EXTRA_ARGS}
 
         echo "Finished testing ${DATASET}"
