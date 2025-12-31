@@ -1,6 +1,11 @@
-<p align="center">
+<!-- <p align="center">
   <img alt="OneVision Encoder" src="asset/onevision_encoder.png" width="1200" style="max-width: 100%;">
-</p>
+</p> -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="asset/logo_dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="asset/logo_light.png">
+  <img alt="OneVision Encoder" src="output/logo.png" width="1200" style="max-width: 100%;">
+</picture>
 
 <p align="center">
   <strong>The first HEVC style Vision Transformer with advanced multimodal capabilities</strong>
