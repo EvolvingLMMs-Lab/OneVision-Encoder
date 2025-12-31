@@ -77,17 +77,17 @@ def parse_args() -> argparse.Namespace:
                         help="Neighborhood size (odd >=3) for MV inconsistency (default: 3)")
     parser.add_argument("--res_use_grad", action="store_true",
                         help="Use gradient-based residual energy instead of |res-128| (default: False)")
-    parser.add_argument("--center_prior", type=float, default=0.0,
-                        help="Center Gaussian prior strength applied to fused energy map before top-k (0 disables) (default: 0.0)")
+    parser.add_argument("--center_prior", type=float, default=0.3,
+                        help="Center Gaussian prior strength applied to fused energy map before top-k (0 disables) (default: 0.3)")
     parser.add_argument("--center_sigma", type=float, default=0.35,
                         help="Center Gaussian sigma as a fraction of min(H,W) (default: 0.35)")
     # Static / low-motion fallback (hybrid: uniform few frames + remaining top-k)
     parser.add_argument("--static_fallback", type=int, default=1,
                         help="Enable static-video hybrid fallback (1 enables, 0 disables) (default: 1)")
-    parser.add_argument("--static_abs_thresh", type=float, default=2.0,
-                        help="Absolute low-energy threshold on patch mean intensity (~0..255) (default: 2.0)")
-    parser.add_argument("--static_rel_thresh", type=float, default=0.15,
-                        help="Relative contrast threshold (0..1), smaller means flatter distribution (default: 0.15)")
+    parser.add_argument("--static_abs_thresh", type=float, default=126,
+                        help="Absolute low-energy threshold on patch mean intensity (~0..255) (default: 126)")
+    parser.add_argument("--static_rel_thresh", type=float, default=0.38,
+                        help="Relative contrast threshold (0..1), smaller means flatter distribution (default: 0.38)")
     parser.add_argument("--static_uniform_frames", type=int, default=4,
                         help="Number of uniformly-picked frames used in hybrid fallback (default: 4)")
 
