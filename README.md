@@ -142,11 +142,20 @@ We compare the performance of different vision encoders using the Attentive Prob
 
 ## ⚡ Quick Start
 
+> [!IMPORTANT]
+> **Transformers Version Compatibility:**
+> - ✅ **`transformers==4.53.1`** (Recommended): Works with `AutoModel.from_pretrained()` 
+> - ⚠️ **`transformers>=5.0.0`**: Use source code installation (see [Loading from Source Code](#loading-from-source-code))
+>
+> The `attn_implementation` parameter handling changed in transformers 5.0.0, which may cause issues with `AutoModel`. For best compatibility, use `transformers==4.53.1` or load the model directly from source code.
+
 > **Note:** This model supports native resolution input. For optimal performance:
 > - **Image**: 448×448 resolution (pre-trained)
 > - **Video**: 224×224 resolution with 256 tokens per frame (pre-trained)
 >
 > Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large).
+
+### Using AutoModel (Recommended: transformers==4.53.1)
 
 ```python
 from transformers import AutoModel, AutoImageProcessor
@@ -190,6 +199,60 @@ visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_t
 #   Frame 2 (pos=8):  indices [2048, 2049, 2050, ..., 2303]
 #   ...
 #   Frame 15 (pos=63): indices [16128, 16129, ..., 16383]
+
+with torch.no_grad():
+    outputs = model(video, visible_indices=visible_indices)
+```
+
+### Loading from Source Code
+
+For `transformers>=5.0.0` or if you encounter issues with `AutoModel`, use the source code directly:
+
+```bash
+# Clone the repository
+git clone https://github.com/EvolvingLMMs-Lab/OneVision-Encoder.git
+cd OneVision-Encoder
+
+# Install the package
+pip install -e .
+```
+
+```python
+from onevision_encoder import OneVisionEncoderModel, OneVisionEncoderConfig
+from transformers import AutoImageProcessor
+from PIL import Image
+import torch
+
+# Load model directly from the source code class
+model = OneVisionEncoderModel.from_pretrained(
+    "lmms-lab-encoder/onevision-encoder-large",
+    trust_remote_code=True,
+    attn_implementation="flash_attention_2"
+).to("cuda").eval()
+
+# Load preprocessor
+preprocessor = AutoImageProcessor.from_pretrained(
+    "lmms-lab-encoder/onevision-encoder-large",
+    trust_remote_code=True
+)
+
+# Image inference
+image = Image.open("path/to/your/image.jpg")
+pixel_values = preprocessor(images=image, return_tensors="pt")["pixel_values"].to("cuda")
+
+with torch.no_grad():
+    outputs = model(pixel_values)
+    # outputs.last_hidden_state: [B, num_patches, hidden_size]
+    # outputs.pooler_output: [B, hidden_size]
+
+# Video inference: [B, C, T, H, W] with visible_indices
+num_frames, frame_tokens, target_frames = 16, 256, 64
+frames = [Image.open(f"path/to/frame_{i}.jpg") for i in range(num_frames)]
+video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_values"]
+video = video_pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4).to("cuda")
+
+frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
+visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_tokens).cuda()).reshape(1, -1)
 
 with torch.no_grad():
     outputs = model(video, visible_indices=visible_indices)
