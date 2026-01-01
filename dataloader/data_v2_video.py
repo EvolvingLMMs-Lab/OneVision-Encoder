@@ -1,8 +1,8 @@
-# 标准库导入
+# Standard library imports
 import os
 import random
 
-# 第三方库导入
+# Third-party library imports
 import torch
 import nvidia.dali
 import nvidia.dali.fn as fn
@@ -196,8 +196,8 @@ def dali_dataloader(
         device_id=local_rank % 8,
         prefetch_queue_depth=3,
         seed=seed,
-        exec_async=False,  # 同步执行，可能更稳定但较慢
-        exec_pipelined=False  # 禁用流水线执行
+        exec_async=False,  # Synchronous execution, may be more stable but slower
+        exec_pipelined=False  # Disable pipelined execution
     )
 
     with pipe:

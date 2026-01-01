@@ -12,7 +12,7 @@ from nvidia.dali.plugin.pytorch import DALIGenericIterator
 logger = logging.getLogger(__file__)
 
 # ----------------------------------------------------------------------------
-# 1. DALI Iterator Wrapper (已修改 - 返回 indices, total_frames 和 video_visible_indices)
+# 1. DALI Iterator Wrapper (modified - returns indices, total_frames and video_visible_indices)
 # ----------------------------------------------------------------------------
 class DALIWarper:
     def __init__(self, dali_iter: DALIGenericIterator, steps_per_epoch: int):
@@ -39,7 +39,7 @@ class DALIWarper:
         self.iter.reset()
 
 # ----------------------------------------------------------------------------
-# 2. DALI External Source for Video Data (已修改 - 返回 indices, total_frames 和 video_visible_indices)
+# 2. DALI External Source for Video Data (modified - returns indices, total_frames and video_visible_indices)
 # ----------------------------------------------------------------------------
 class VideoExternalSource:
     def __init__(self, mode: str, source_params: dict):
@@ -55,13 +55,13 @@ class VideoExternalSource:
 
         self.shard_size = len(self.file_list) // self.num_shards
         self.shard_offset = self.shard_size * self.shard_id
-        # 【删除】 self.full_iterations 不再需要用于抛出异常
+        # [REMOVED] self.full_iterations no longer needed for throwing exceptions
         # self.full_iterations = self.shard_size // self.batch_size
 
         self.perm = None
         self.last_seen_epoch = -1
 
-        # 只用标准logger，不加file handler
+        # Only use standard logger, no file handler
         self.logger = logging.getLogger(__file__)
 
     def _get_frame_indices(self, num_frames: int) -> list:
@@ -86,7 +86,7 @@ class VideoExternalSource:
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
     def _get_valid_sample(self, sample_idx: int, depth=0) -> tuple:
-        if depth > 3:  # 防止极端递归
+        if depth > 3:  # Prevent extreme recursion
             self.logger.info("Too many attempts, fallback to first sample.")
             sample_line = self.file_list[0]
         else:
@@ -119,7 +119,7 @@ class VideoExternalSource:
         return self._get_valid_sample(sample_idx, depth=0)
 
 # ----------------------------------------------------------------------------
-# 3. DALI Pipeline Definition (已修改 - 处理 indices, total_frames 和 video_visible_indices)
+# 3. DALI Pipeline Definition (modified - handles indices, total_frames and video_visible_indices)
 # ----------------------------------------------------------------------------
 @pipeline_def(enable_conditionals=True)
 def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
@@ -127,7 +127,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     mean = source_params["mean"]
     std = source_params["std"]
 
-    # ===> 现在返回 5 个输出: videos, labels, indices, total_frames, video_visible_indices <===
+    # ===> Now returns 5 outputs: videos, labels, indices, total_frames, video_visible_indices <===
     videos, labels, indices, total_frames, video_visible_indices = fn.external_source(
         source=VideoExternalSource(mode, source_params),
         num_outputs=5,
@@ -143,11 +143,11 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     total_frames = total_frames.gpu()
     video_visible_indices = video_visible_indices.gpu()
 
-    # 直接resize到input_size，因为视频已经是256x256的正方形
+    # Directly resize to input_size, since video is already 256x256 square
     videos = fn.resize(videos, resize_x=input_size, resize_y=input_size, antialias=True, interp_type=types.INTERP_CUBIC)
 
     if mode == "train":
-        # 亮度/对比度
+        # Brightness/contrast
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
             videos = fn.brightness_contrast(
                 videos,
@@ -155,14 +155,14 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
                 brightness=fn.random.uniform(range=(-0.125, 0.125)),
                 device="gpu",
             )
-        # 饱和度
+        # Saturation
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
             videos = fn.saturation(
                 videos,
                 saturation=fn.random.uniform(range=[0.6, 1.4]),
                 device="gpu",
             )
-        # 色相
+        # Hue
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
             videos = fn.hue(
                 videos,
@@ -170,7 +170,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
                 device="gpu",
             )
 
-        # 色彩空间转换
+        # Color space conversion
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.1):
             videos = fn.color_space_conversion(
                 videos,
@@ -183,7 +183,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     return videos, labels, indices, total_frames, video_visible_indices
 
 # ----------------------------------------------------------------------------
-# 4. Main Dataloader Function (已修改 - output_map 增加 indices, total_frames 和 video_visible_indices)
+# 4. Main Dataloader Function (modified - output_map adds indices, total_frames and video_visible_indices)
 # ----------------------------------------------------------------------------
 def get_dali_dataloader(
     data_root_path: str,
@@ -208,7 +208,7 @@ def get_dali_dataloader(
     try:
         with open(data_csv_path, "r") as f:
             for line in f:
-                file_list.append(line.rstrip("\n"))  # 每行原始内容，无分割处理
+                file_list.append(line.rstrip("\n"))  # Raw content of each line, no split processing
     except FileNotFoundError:
         raise FileNotFoundError(f"Data list file not found at: {data_csv_path}")
     if not file_list:

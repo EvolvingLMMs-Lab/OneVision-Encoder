@@ -426,11 +426,11 @@ def main(args):
         print("=" * 60)
 
     if rank == world_size - 1:
-        # 计算需要删除的 padding 数量（使用之前的 remainder）
+        # Calculate the number of padding to remove (using previous remainder)
         divisor = world_size * args.batch_size if world_size > 1 else args.batch_size
-        pad_count = (divisor - remainder) % divisor  # 正确的 padding 数量
+        pad_count = (divisor - remainder) % divisor  # Correct padding count
 
-        # 找到最后一个 .npy 文件
+        # Find the last .npy file
         npy_files = sorted(list(output_dir.glob("*.npy")))
         if npy_files and pad_count > 0:
             last_npy_path = npy_files[-1]
@@ -445,11 +445,11 @@ def main(args):
                 print(f"Removed {pad_count} padding features from the last file")
                 print(f"Final feature shape: {cleaned_features.shape}")
             elif pad_count == features_per_file:
-                # 整个最后一个文件都是 padding，直接删掉文件更合理
+                # The entire last file is padding, it is more reasonable to delete it directly
                 last_npy_path.unlink()
                 print(f"Removed entire last file since it was all padding ({pad_count} rows).")
             else:
-                # 需要继续往前删前一个文件，当前代码未实现，给出提示
+                # Need to continue deleting the previous file, not implemented in current code, giving a hint
                 print(f"Padding count ({pad_count}) exceeds rows in the last file ({features_per_file}). "
                       f"Please also trim previous file(s).")
 

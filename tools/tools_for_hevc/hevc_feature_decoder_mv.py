@@ -132,7 +132,7 @@ def _yuv_to_bgr_manual(buf: bytes, H: int, W: int, layout: str, matrix: str, rng
             G = 1.164383 * C - 0.213249 * Cb - 0.532909 * Cr
             B = 1.164383 * C + 2.112402 * Cb
         else: # full
-            # full-range近似（常用系数）
+            # full-range approximation (common coefficients)
             R = Yf + 1.5748 * Cr
             G = Yf - 0.1873 * Cb - 0.4681 * Cr
             B = Yf + 1.8556 * Cb
@@ -162,7 +162,7 @@ def _bgr_to_y_estimate(bgr: np.ndarray, matrix: str, rng: str):
     return np.clip(Y, 0, 255).astype(np.uint8)
 
 def _auto_pick_color(yuv_buf: bytes, H: int, W: int):
-    """ 穷举 {i420,yv12,nv12,nv21}×{bt601,bt709}×{tv,full}，选重建Y与原始Y最接近的组合 """
+    """ Exhaustively try {i420,yv12,nv12,nv21}×{bt601,bt709}×{tv,full}, select the combination where reconstructed Y is closest to original Y """
     layouts = ["i420", "yv12", "nv12", "nv21"]
     matrices = ["bt601", "bt709"]
     ranges = ["tv", "full"]
@@ -183,18 +183,18 @@ def _auto_pick_color(yuv_buf: bytes, H: int, W: int):
         except Exception:
             continue
     if best is None:
-        # 回退
+        # Fallback
         return "i420", "bt601", "tv", _yuv_to_bgr_manual(yuv_buf, H, W, "i420", "bt601", "tv")[0]
     return best[0], best[1], best[2], picked_bgr
 
 # ---------------- robust HEVC frame reader ----------------
 class RobustHevcStream:
     """
-    Decoder stdout layout (order固定, 尺寸可能不同):
+    Decoder stdout layout (fixed order, size may vary):
       YUV420 | MVX_L0 | MVY_L0 | MVX_L1 | MVY_L1 | REF_OFF_L0 | REF_OFF_L1 | SIZE | (padding) | META | YUV420_RES
-    自适应:
-      * MV元素字节: int16 vs int32
-      * SIZE长度: H/8*W/8 vs 与单个MV平面等长的字节数
+    Adaptive:
+      * MV element bytes: int16 vs int32
+      * SIZE length: H/8*W/8 vs bytes equal to single MV plane length
     """
     def __init__(self, video, parallel=1, hevc_bin=None):
         self.video = video
@@ -922,7 +922,7 @@ class HevcFeatureReader:
         Notes:
           - If `across_gops` is True (default), we take the first `gop_size` frames in decode order and IGNORE GOP boundaries.
             If False, we stop at the first frame whose `gop_id` changes from 0 (i.e., only the first GOP is considered).
-          - If `collect_mv_from_all` is True, we also collect MV/RES for frames marked as I-like; otherwise仅收集非 I 帧的 MV/RES。
+          - If `collect_mv_from_all` is True, we also collect MV/RES for frames marked as I-like; otherwiseonly collect MV/RES for non-I frames.
           - Frames beyond `gop_size` are ignored; decoding stops early for speed.
         # NOTE: single-ref stream; only L0 MV is used.
         """

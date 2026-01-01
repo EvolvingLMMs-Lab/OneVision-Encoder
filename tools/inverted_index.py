@@ -7,7 +7,7 @@ from multiprocessing import Pool
 
 def process_block(args):
     """
-    单个进程处理一部分 labels，返回部分倒排索引
+    Single process handles a portion of labels, returns partial inverted index
     """
     block_labels, block_start = args
     local_index = defaultdict(list)
@@ -21,7 +21,7 @@ def process_block(args):
 
 def merge_indices(indices_list):
     """
-    合并多个倒排索引
+    Merge multiple inverted indices
     """
     merged = defaultdict(list)
     for idx in indices_list:
@@ -32,19 +32,19 @@ def merge_indices(indices_list):
 def create_inverted_index_parallel(input_file, label_start=None, label_end=None, num_workers=16):
     try:
         labels = np.load(input_file)
-        print(f"成功加载文件 {input_file}，形状: {labels.shape}")
+        print(f"Successfully loaded file {input_file}, shape: {labels.shape}")
 
         if label_start is not None or label_end is not None:
             start_idx = 0 if label_start is None else label_start
             end_idx = labels.shape[1] if label_end is None else label_end
-            print(f"处理标签范围: [{start_idx}:{end_idx}]")
+            print(f"Processing label range: [{start_idx}:{end_idx}]")
             labels = labels[:, start_idx:end_idx]
-            print(f"选择后的形状: {labels.shape}")
+            print(f"Shape after selection: {labels.shape}")
 
         N = labels.shape[0]
-        block_size = (N + num_workers - 1) // num_workers  # 向上取整
+        block_size = (N + num_workers - 1) // num_workers  # Round up
 
-        # 准备分块
+        # Prepare blocks
         blocks = []
         for i in range(num_workers):
             s = i * block_size
@@ -52,42 +52,42 @@ def create_inverted_index_parallel(input_file, label_start=None, label_end=None,
             if s < e:
                 blocks.append((labels[s:e], s))
 
-        print(f"启动进程池，共 {num_workers} 块")
+        print(f"Starting process pool, total {num_workers} blocks")
         with Pool(num_workers) as pool:
             indices_list = list(pool.map(process_block, blocks))
 
-        print("合并结果中……")
+        print("Merging results...")
         final_index = merge_indices(indices_list)
         return final_index
 
     except Exception as e:
-        print(f"处理文件时出错: {e}")
+        print(f"Error processing file: {e}")
         return None
 
 def save_index(index, output_prefix):
     pickle_path = f"{output_prefix}.pkl"
     with open(pickle_path, 'wb') as f:
         pickle.dump(index, f)
-    print(f"倒排索引已保存为pickle格式: {pickle_path}")
+    print(f"Inverted index saved in pickle format: {pickle_path}")
 
-    # (可选) 保存为文本、JSON，可以解注释
+    # (Optional) Save as text or JSON, uncomment to use
     # txt_path = f"{output_prefix}.txt"
     # with open(txt_path, 'w', encoding='utf-8') as f:
     #     for label, rows in sorted(index.items()):
     #         f.write(f"{label}: {rows}\n")
-    # print(f"倒排索引已保存为文本格式: {txt_path}")
+    # print(f"Inverted index saved in text format: {txt_path}")
 
     # json_path = f"{output_prefix}.json"
     # with open(json_path, 'w', encoding='utf-8') as f:
     #     json.dump(index, f, ensure_ascii=False, indent=2)
-    # print(f"倒排索引已保存为JSON格式: {json_path}")
+    # print(f"Inverted index saved in JSON format: {json_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description='从npy文件创建倒排索引(16进程)')
-    parser.add_argument('input_file', help='输入的npy文件路径')
-    parser.add_argument('--output', '-o', default='inverted_index', help='输出文件前缀 (默认: inverted_index)')
-    parser.add_argument('--label-range', '-r', default=None, help='标签列的范围，格式"起始,结束"，例如"0,10"')
-    parser.add_argument('--workers', '-w', type=int, default=16, help='进程数 (默认16)')
+    parser = argparse.ArgumentParser(description='Create inverted index from npy file (16 processes)')
+    parser.add_argument('input_file', help='Input npy file path')
+    parser.add_argument('--output', '-o', default='inverted_index', help='Output file prefix (default: inverted_index)')
+    parser.add_argument('--label-range', '-r', default=None, help='Label column range, format "start,end", e.g. "0,10"')
+    parser.add_argument('--workers', '-w', type=int, default=16, help='Number of processes (default 16)')
     args = parser.parse_args()
 
     label_start = None
@@ -101,20 +101,20 @@ def main():
                 if parts[1]:
                     label_end = int(parts[1])
         except ValueError:
-            print(f"标签范围格式无效 '{args.label_range}'，使用全部标签")
+            print(f"Invalid label range format '{args.label_range}', using all labels")
 
     inverted_index = create_inverted_index_parallel(
         args.input_file, label_start, label_end, num_workers=args.workers
     )
 
     if inverted_index:
-        print(f"共找到 {len(inverted_index)} 个唯一标签")
+        print(f"Found {len(inverted_index)} unique labels")
         label_stats = [(label, len(rows)) for label, rows in inverted_index.items()]
         label_stats.sort(key=lambda x: x[1], reverse=True)
 
-        print("\n出现次数最多的10个标签:")
+        print("\nTop 10 most frequent labels:")
         for label, count in label_stats[:10]:
-            print(f"标签 {label}: 出现在 {count} 行")
+            print(f"Label {label}: appears in {count} rows")
 
         save_index(inverted_index, args.output)
 

@@ -195,7 +195,7 @@ def create_video_dataloader(
         prefetch_factor=2,
     )
     
-    # 如果需要，使用 DALIWarper 封装 DataLoader
+    # If needed, use DALIWarper to wrap DataLoader
     if use_dali_warper:
         step_data_num = len(dataloader)
         dataloader = DALIWarper(
