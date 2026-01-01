@@ -142,11 +142,19 @@ We compare the performance of different vision encoders using the Attentive Prob
 
 ## ⚡ Quick Start
 
+> [!IMPORTANT]
+> **Transformers Version Compatibility:**
+> - ✅ **`transformers==4.53.1`** (Recommended): Works with `AutoModel.from_pretrained()` 
+> - ⚠️ **`transformers>=5.0.0`**: Not currently supported. We are actively working on a fix.
+
+
 > **Note:** This model supports native resolution input. For optimal performance:
 > - **Image**: 448×448 resolution (pre-trained)
 > - **Video**: 224×224 resolution with 256 tokens per frame (pre-trained)
 >
 > Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large).
+
+### Using AutoModel (Recommended: transformers==4.53.1)
 
 ```python
 from transformers import AutoModel, AutoImageProcessor
@@ -193,6 +201,28 @@ visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_t
 
 with torch.no_grad():
     outputs = model(video, visible_indices=visible_indices)
+```
+
+### Loading from Source Code  
+
+```bash
+git clone https://github.com/EvolvingLMMs-Lab/OneVision-Encoder.git
+cd OneVision-Encoder
+pip install -e .
+```
+
+```python
+from onevision_encoder import OneVisionEncoderModel, OneVisionEncoderConfig
+from transformers import AutoImageProcessor
+model = OneVisionEncoderModel.from_pretrained(
+    "lmms-lab-encoder/onevision-encoder-large",
+    trust_remote_code=True,
+    attn_implementation="flash_attention_2"
+).to("cuda").eval()
+preprocessor = AutoImageProcessor.from_pretrained(
+    "lmms-lab-encoder/onevision-encoder-large",
+    trust_remote_code=True
+)
 ```
 
 ### Codec Input
