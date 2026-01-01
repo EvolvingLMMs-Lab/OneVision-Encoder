@@ -2,14 +2,59 @@
 license: apache-2.0
 ---
 
+### Model Card
 
-### ⚡ Quick Start
+| Property | Value |
+|----------|-------|
+| **Model Type** | Vision Transformer (ViT) |
+| **Architecture** | HEVC-Style Vision Transformer |
+| **Hidden Size** | 1024 |
+| **Intermediate Size** | 4096 |
+| **Number of Layers** | 24 |
+| **Number of Attention Heads** | 16 |
+| **Patch Size** | 16 |
+| **Image Resolution** | 448×448 (pre-trained) |
+| **Video Resolution** | 224×224 with 256 tokens per frame |
+| **Positional Encoding** | 3D RoPE (4:6:6 split for T:H:W) |
+| **Normalization** | Layer Normalization |
+| **Activation Function** | GELU |
+| **License** | Apache 2.0 |
+
+### Key Features
+
+- **Codec-Style Patch Selection**: Instead of sampling sparse frames densely (all patches from few frames), OneVision Encoder samples dense frames sparsely (important patches from many frames).
+- **3D Rotary Position Embedding**: Uses a 4:6:6 split for temporal, height, and width dimensions to capture spatiotemporal relationships.
+- **Native Resolution Support**: Supports native resolution input without tiling or cropping.
+- **Flash Attention 2**: Efficient attention implementation for improved performance and memory efficiency.
+
+### Intended Use
+
+#### Primary Use Cases
+
+- **Video Understanding**: Action recognition, video captioning, video question answering
+- **Image Understanding**: Document understanding (DocVQA), chart understanding (ChartQA), OCR tasks
+- **Vision-Language Models**: As the vision encoder backbone for multimodal large language models
+
+#### Downstream Tasks
+
+- Video benchmarks: MVBench, VideoMME, Perception Test
+- Image understanding: DocVQA, ChartQA, OCRBench
+- Action recognition: SSv2, UCF101, Kinetics
+
+
+### Quick Start
+
+
+> [!IMPORTANT]
+> **Transformers Version Compatibility:**
+> - ✅ **`transformers==4.53.1`** (Recommended): Works with `AutoModel.from_pretrained()` 
+> - ⚠️ **`transformers>=5.0.0`**: Use source code installation (see [Loading from Source Code](#loading-from-source-code))
+
 
 > **Note:** This model supports native resolution input. For optimal performance:
 > - **Image**: 448×448 resolution (pre-trained)
 > - **Video**: 224×224 resolution with 256 tokens per frame (pre-trained)
->
-> Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab/onevision-encoder-large).
+
 
 ```python
 from transformers import AutoModel, AutoImageProcessor
@@ -58,6 +103,27 @@ with torch.no_grad():
     outputs = model(video, visible_indices=visible_indices)
 ```
 
+### Loading from Source Code  
+
+```bash
+git clone https://github.com/EvolvingLMMs-Lab/OneVision-Encoder.git
+cd OneVision-Encoder
+pip install -e .
+```
+
+```python
+from onevision_encoder import OneVisionEncoderModel, OneVisionEncoderConfig
+from transformers import AutoImageProcessor
+model = OneVisionEncoderModel.from_pretrained(
+    "lmms-lab-encoder/onevision-encoder-large",
+    trust_remote_code=True,
+    attn_implementation="flash_attention_2"
+).to("cuda").eval()
+preprocessor = AutoImageProcessor.from_pretrained(
+    "lmms-lab-encoder/onevision-encoder-large",
+    trust_remote_code=True
+)
+```
 
 ### LMM Probe Results
 
