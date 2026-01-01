@@ -316,6 +316,315 @@ class TestAutoModelOutputConsistency:
         torch.cuda.empty_cache()
 
 
+class TestDirectClassInstantiation:
+    """
+    Tests for output consistency using direct class instantiation.
+    
+    These tests do NOT use AutoModel - they directly instantiate OneVisionEncoderModel
+    class to verify output consistency across different transformers versions.
+    """
+
+    @pytest.fixture
+    def test_image(self):
+        """Create a sample test image."""
+        return create_test_image()
+
+    @pytest.fixture
+    def model_name(self):
+        """Model name for loading from HuggingFace."""
+        return "lmms-lab-encoder/onevision-encoder-large"
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_direct_instantiation_flash_attention(self, test_image, model_name):
+        """
+        Test direct class instantiation with flash_attention_2.
+        
+        This test directly uses OneVisionEncoderModel.from_pretrained() 
+        without AutoModel to verify output consistency.
+        """
+        from transformers import AutoImageProcessor
+        from onevision_encoder import OneVisionEncoderModel
+
+        current_version = get_current_transformers_version()
+        print(f"\nRunning direct instantiation test with transformers version: {current_version}")
+
+        # Load model directly using OneVisionEncoderModel class
+        model = OneVisionEncoderModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+        ).to("cuda").eval()
+
+        # Load preprocessor
+        preprocessor = AutoImageProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True
+        )
+
+        # Preprocess image
+        inputs = preprocessor(images=test_image, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to("cuda")
+
+        # Run inference
+        with torch.no_grad():
+            with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                output = model(pixel_values)
+
+        # Verify output shape and values
+        assert output.last_hidden_state is not None, "last_hidden_state should not be None"
+        assert output.last_hidden_state.shape[0] == 1, "Batch size should be 1"
+        assert not torch.isnan(output.last_hidden_state).any(), "Output contains NaN values"
+        assert not torch.isinf(output.last_hidden_state).any(), "Output contains Inf values"
+
+        print(f"Output shape: {output.last_hidden_state.shape}")
+        print(f"Output stats: min={output.last_hidden_state.min().item():.4f}, "
+              f"max={output.last_hidden_state.max().item():.4f}, "
+              f"mean={output.last_hidden_state.mean().item():.4f}")
+
+        # Clean up
+        del model
+        torch.cuda.empty_cache()
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_direct_instantiation_eager_attention(self, test_image, model_name):
+        """
+        Test direct class instantiation with eager attention.
+        
+        This test directly uses OneVisionEncoderModel.from_pretrained() 
+        with eager attention implementation.
+        """
+        from transformers import AutoImageProcessor
+        from onevision_encoder import OneVisionEncoderModel
+
+        current_version = get_current_transformers_version()
+        print(f"\nRunning direct instantiation (eager) test with transformers version: {current_version}")
+
+        # Load model directly using OneVisionEncoderModel class with eager attention
+        model = OneVisionEncoderModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            attn_implementation="eager"
+        ).to("cuda").eval()
+
+        # Load preprocessor
+        preprocessor = AutoImageProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True
+        )
+
+        # Preprocess image
+        inputs = preprocessor(images=test_image, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to("cuda")
+
+        # Run inference
+        with torch.no_grad():
+            output = model(pixel_values)
+
+        # Verify output shape and values
+        assert output.last_hidden_state is not None, "last_hidden_state should not be None"
+        assert output.last_hidden_state.shape[0] == 1, "Batch size should be 1"
+        assert not torch.isnan(output.last_hidden_state).any(), "Output contains NaN values"
+        assert not torch.isinf(output.last_hidden_state).any(), "Output contains Inf values"
+
+        print(f"Output shape: {output.last_hidden_state.shape}")
+        print(f"Output stats: min={output.last_hidden_state.min().item():.4f}, "
+              f"max={output.last_hidden_state.max().item():.4f}, "
+              f"mean={output.last_hidden_state.mean().item():.4f}")
+
+        # Clean up
+        del model
+        torch.cuda.empty_cache()
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_direct_instantiation_flash_vs_eager_consistency(self, test_image, model_name):
+        """
+        Test output consistency between flash_attention_2 and eager attention.
+        
+        This test directly instantiates two models with different attention
+        implementations and compares their outputs to verify consistency.
+        """
+        from transformers import AutoImageProcessor
+        from onevision_encoder import OneVisionEncoderModel
+
+        current_version = get_current_transformers_version()
+        print(f"\nRunning flash vs eager consistency test with transformers version: {current_version}")
+
+        # Load model with flash_attention_2
+        model_flash = OneVisionEncoderModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+        ).to("cuda").eval()
+
+        # Load model with eager attention
+        model_eager = OneVisionEncoderModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            attn_implementation="eager"
+        ).to("cuda").eval()
+
+        # Load preprocessor
+        preprocessor = AutoImageProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True
+        )
+
+        # Preprocess image
+        inputs = preprocessor(images=test_image, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to("cuda")
+
+        # Run inference with both models
+        with torch.no_grad():
+            with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                output_flash = model_flash(pixel_values)
+                output_eager = model_eager(pixel_values)
+
+        # Compare shapes
+        assert output_flash.last_hidden_state.shape == output_eager.last_hidden_state.shape, (
+            f"Shape mismatch: flash={output_flash.last_hidden_state.shape}, "
+            f"eager={output_eager.last_hidden_state.shape}"
+        )
+
+        # Compare outputs (allow some tolerance due to different implementations)
+        max_diff = (output_flash.last_hidden_state - output_eager.last_hidden_state).abs().max().item()
+        mean_diff = (output_flash.last_hidden_state - output_eager.last_hidden_state).abs().mean().item()
+
+        print(f"Flash vs Eager comparison:")
+        print(f"  Max difference: {max_diff:.6f}")
+        print(f"  Mean difference: {mean_diff:.6f}")
+
+        # Flash and Eager attention produce similar but not identical results due to:
+        # 1. Different numerical algorithms (FlashAttention uses online softmax)
+        # 2. bfloat16 precision limitations with autocast
+        # 3. Different memory access patterns affecting floating point accumulation
+        # Tolerance of 1e-2 is appropriate for this comparison
+        FLASH_EAGER_RTOL = 1e-2
+        FLASH_EAGER_ATOL = 1e-2
+        is_close = torch.allclose(
+            output_flash.last_hidden_state,
+            output_eager.last_hidden_state,
+            rtol=FLASH_EAGER_RTOL,
+            atol=FLASH_EAGER_ATOL
+        )
+
+        if not is_close:
+            pytest.fail(
+                f"Output mismatch between flash_attention_2 and eager!\n"
+                f"Max difference: {max_diff}\n"
+                f"Mean difference: {mean_diff}\n"
+                f"Flash stats: min={output_flash.last_hidden_state.min()}, max={output_flash.last_hidden_state.max()}\n"
+                f"Eager stats: min={output_eager.last_hidden_state.min()}, max={output_eager.last_hidden_state.max()}"
+            )
+
+        # Clean up
+        del model_flash, model_eager
+        torch.cuda.empty_cache()
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_direct_instantiation_deterministic_output(self, test_image, model_name):
+        """
+        Test that direct class instantiation produces deterministic outputs.
+        
+        Running the same model twice with the same input should produce
+        identical outputs.
+        """
+        from transformers import AutoImageProcessor
+        from onevision_encoder import OneVisionEncoderModel
+
+        current_version = get_current_transformers_version()
+        print(f"\nRunning deterministic output test with transformers version: {current_version}")
+
+        # Load model
+        model = OneVisionEncoderModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+        ).to("cuda").eval()
+
+        # Load preprocessor
+        preprocessor = AutoImageProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True
+        )
+
+        # Preprocess image
+        inputs = preprocessor(images=test_image, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to("cuda")
+
+        # Run inference twice
+        # Note: Using autocast with bfloat16 during eval mode should be deterministic
+        # since dropout is disabled and no stochastic operations are performed
+        with torch.no_grad():
+            with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                output1 = model(pixel_values)
+                output2 = model(pixel_values)
+
+        # Outputs should be identical
+        is_identical = torch.equal(output1.last_hidden_state, output2.last_hidden_state)
+        
+        if not is_identical:
+            max_diff = (output1.last_hidden_state - output2.last_hidden_state).abs().max().item()
+            pytest.fail(
+                f"Non-deterministic output detected!\n"
+                f"Max difference between two runs: {max_diff}"
+            )
+
+        print("Deterministic output verified: two identical runs produce identical outputs")
+
+        # Clean up
+        del model
+        torch.cuda.empty_cache()
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_direct_instantiation_bfloat16(self, test_image, model_name):
+        """
+        Test direct class instantiation with bfloat16 dtype.
+        """
+        from transformers import AutoImageProcessor
+        from onevision_encoder import OneVisionEncoderModel
+
+        current_version = get_current_transformers_version()
+        print(f"\nRunning bfloat16 test with transformers version: {current_version}")
+
+        # Load model with bfloat16
+        model = OneVisionEncoderModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2",
+            torch_dtype=torch.bfloat16
+        ).to("cuda").eval()
+
+        # Load preprocessor
+        preprocessor = AutoImageProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True
+        )
+
+        # Preprocess image
+        inputs = preprocessor(images=test_image, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to("cuda", dtype=torch.bfloat16)
+
+        # Run inference
+        with torch.no_grad():
+            output = model(pixel_values)
+
+        # Verify dtype
+        assert output.last_hidden_state.dtype == torch.bfloat16, (
+            f"Expected bfloat16 output, got: {output.last_hidden_state.dtype}"
+        )
+
+        # Verify no NaN/Inf
+        assert not torch.isnan(output.last_hidden_state).any(), "Output contains NaN values"
+        assert not torch.isinf(output.last_hidden_state).any(), "Output contains Inf values"
+
+        print(f"bfloat16 output verified: dtype={output.last_hidden_state.dtype}")
+        print(f"Output shape: {output.last_hidden_state.shape}")
+
+        # Clean up
+        del model
+        torch.cuda.empty_cache()
+
+
 class TestTransformersVersionInfo:
     """Test class to document and verify transformers version information."""
 
