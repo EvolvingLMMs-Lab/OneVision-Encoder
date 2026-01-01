@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 from typing import List, Dict, Any
 
-MAX_CONCURRENCY = 32  # 任务并发上限（不超过 4）
+MAX_CONCURRENCY = 32  # Task concurrency limit (no more than 4)
 
 def read_paths(list_file: Path):
     with list_file.open('r', encoding='utf-8') as f:
@@ -21,8 +21,8 @@ def read_paths(list_file: Path):
 
 def make_tar(paths: List[str], tar_path: str, batch_idx: int) -> Dict[str, Any]:
     """
-    子进程执行：创建一个未压缩的 .tar 包。
-    返回运行统计信息，供主进程打印日志。
+    Subprocess execution: creates an uncompressed .tar archive.
+    Returns runtime statistics for the main process to log.
     """
     t0 = time.monotonic()
     out = Path(tar_path)
@@ -42,11 +42,11 @@ def make_tar(paths: List[str], tar_path: str, batch_idx: int) -> Dict[str, Any]:
                         try:
                             total_bytes += fp.stat().st_size
                         except Exception as se:
-                            # 统计大小失败不阻塞打包
-                            err_msgs.append(f"stat失败: {fp} -> {se}")
+                            # stat failure does not block archiving
+                            err_msgs.append(f"stat failed: {fp} -> {se}")
 
-                        # 使用绝对路径作为归档内路径（POSIX 形式）
-                        # 注意：某些解压工具可能会在解包时移除前导斜杠
+                        # Use absolute path as archive path (POSIX format)
+                        # Note: Some extraction tools may remove leading slashes when unpacking
                         abs_arcname = fp.resolve().as_posix()
 
                         tf.add(str(fp), arcname=abs_arcname, recursive=False)
@@ -55,14 +55,14 @@ def make_tar(paths: List[str], tar_path: str, batch_idx: int) -> Dict[str, Any]:
                         skipped += 1
                 except Exception as e:
                     skipped += 1
-                    err_msgs.append(f"加入失败: {fp} -> {e}")
+                    err_msgs.append(f"add failed: {fp} -> {e}")
     except Exception as e:
-        # 彻底失败
+        # Complete failure
         return {
             "ok": False,
             "batch_idx": batch_idx,
             "tar_path": str(out),
-            "error": f"创建tar失败: {e}",
+            "error": f"tar creation failed: {e}",
             "added": added,
             "skipped": skipped,
             "bytes": total_bytes,
@@ -92,14 +92,14 @@ def setup_logging(verbosity: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='按固定数量分批将视频列表打成 .tar 包（并发最多 4 个任务），带日志提示。'
+        description='Batch video list into .tar archives by fixed count (max 4 concurrent tasks), with logging.'
     )
-    parser.add_argument('list_file', type=Path, help='包含视频路径的文本文件（每行一个路径）')
-    parser.add_argument('out_dir', type=Path, help='输出目录')
-    parser.add_argument('-j', '--workers', type=int, default=4, help='并发任务数（最大 4，默认 4）')
-    parser.add_argument('-k', '--per_tar', type=int, default=100_000, help='每个 .tar 包包含的视频数量（默认 100000）')
-    parser.add_argument('-n', '--name_prefix', type=str, default='batch', help='输出 .tar 文件名前缀（默认 batch）')
-    parser.add_argument('-v', '--verbose', action='count', default=0, help='增加日志详细程度（可叠加）')
+    parser.add_argument('list_file', type=Path, help='Text file containing video paths (one path per line)')
+    parser.add_argument('out_dir', type=Path, help='Output directory')
+    parser.add_argument('-j', '--workers', type=int, default=4, help='Number of concurrent tasks (max 4, default 4)')
+    parser.add_argument('-k', '--per_tar', type=int, default=100_000, help='Number of videos per .tar archive (default 100000)')
+    parser.add_argument('-n', '--name_prefix', type=str, default='batch', help='Output .tar filename prefix (default batch)')
+    parser.add_argument('-v', '--verbose', action='count', default=0, help='Increase logging verbosity (stackable)')
 
     args = parser.parse_args()
 
@@ -113,7 +113,7 @@ def main():
     name_prefix: str = args.name_prefix
 
     if not list_file.is_file():
-        print('列表文件不存在', file=sys.stderr)
+        print('List file does not exist', file=sys.stderr)
         sys.exit(2)
 
     t_start = time.monotonic()
@@ -129,7 +129,7 @@ def main():
     total_skipped = 0
     total_bytes = 0
 
-    log.info("开始：list=%s 输出目录=%s 每包=%d 并发=%d 前缀=%s",
+    log.info("Starting: list=%s output_dir=%s per_tar=%d workers=%d prefix=%s",
              list_file, out_dir, per_tar, workers, name_prefix)
 
     def submit_batch(paths: List[str], batch_idx: int):
@@ -138,7 +138,7 @@ def main():
         fut = ex.submit(make_tar, paths, str(tar_path), batch_idx)
         futures[fut] = (batch_idx, str(tar_path), len(paths))
         submitted_batches += 1
-        log.info("提交批次 %06d -> %s (文件数=%d 活动任务=%d/%d)",
+        log.info("Submitted batch %06d -> %s (file_count=%d active_tasks=%d/%d)",
                  batch_idx, tar_path, len(paths), len(futures), workers)
 
     def consume_done(done_set):
@@ -151,12 +151,12 @@ def main():
                 res = fut.result()
             except Exception as e:
                 failed_batches += 1
-                log.error("完成批次 %06d 失败: %s", batch_idx, e)
+                log.error("Completed batch %06d failed: %s", batch_idx, e)
                 continue
 
             if not res.get("ok", False):
                 failed_batches += 1
-                log.error("完成批次 %06d 失败: %s", batch_idx, res.get("error"))
+                log.error("Completed batch %06d failed: %s", batch_idx, res.get("error"))
                 continue
 
             success_batches += 1
@@ -168,19 +168,19 @@ def main():
             total_skipped += skipped
             total_bytes += bytes_
 
-            msg = (f"完成批次 {batch_idx:06d}: OK -> {tar_path} | "
-                   f"加入={added} 跳过={skipped} 大小={bytes_/1_048_576:.2f} MiB "
-                   f"耗时={dur:.2f}s")
+            msg = (f"Completed batch {batch_idx:06d}: OK -> {tar_path} | "
+                   f"added={added} skipped={skipped} size={bytes_/1_048_576:.2f} MiB "
+                   f"duration={dur:.2f}s")
             log.info(msg)
 
             warn_count = int(res.get("warn_count", 0))
             warn_samples = res.get("warn_samples", [])
             if warn_count > 0:
-                log.warning("批次 %06d 有 %d 条警告（示例前 %d 条）：%s",
+                log.warning("Batch %06d has %d warnings (sample first %d): %s",
                             batch_idx, warn_count, len(warn_samples), "; ".join(warn_samples))
 
             if log.isEnabledFor(logging.DEBUG):
-                log.debug("进度：已完成=%d 已提交=%d 活动=%d",
+                log.debug("Progress: completed=%d submitted=%d active=%d",
                           completed_batches, submitted_batches, len(futures))
 
     with ProcessPoolExecutor(max_workers=workers) as ex:
@@ -206,7 +206,7 @@ def main():
             consume_done(done)
 
     elapsed = time.monotonic() - t_start
-    log.info("全部完成：批次 成功=%d 失败=%d 总数=%d | 文件 加入=%d 跳过=%d | 总大小=%.2f MiB | 总耗时=%.2fs",
+    log.info("All completed: batches success=%d failed=%d total=%d | files added=%d skipped=%d | total_size=%.2f MiB | total_time=%.2fs",
              success_batches, failed_batches, submitted_batches,
              total_added, total_skipped, total_bytes/1_048_576, elapsed)
 
