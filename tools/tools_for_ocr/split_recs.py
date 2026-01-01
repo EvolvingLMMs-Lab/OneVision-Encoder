@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-多进程把 MXNet .rec 按分辨率区间（基于长边）拆分为 IndexedRecord(.idx/.rec)。
+Multi-process split MXNet .rec by resolution range (based on longer side) into IndexedRecord(.idx/.rec).
 
-本版更改
-- 每个进程独立读取并写出自己的 part 文件（无集中写入进程）。
-- 文件命名改为：{prefix}_{bucket}_{part}.idx/.rec
-  示例：obelics_00000_00300_part_001.idx、obelics_00000_00300_part_001.rec
-- 不使用 PIL；直接解析 JPEG Header 获取宽高（零解码，快速）。
-- 仅支持 JPEG（SOI=FFD8），非 JPEG 的样本记为 non_jpeg 并跳过。
-- 分桶（基于长边 max(width, height)）：
+Changes in this version
+- Each process independently reads and writes its own part file (no centralized writing process).
+- File naming changed to: {prefix}_{bucket}_{part}.idx/.rec
+  Example: obelics_00000_00300_part_001.idx, obelics_00000_00300_part_001.rec
+- Does not use PIL; directly parse JPEG Header to get width and height (zero decoding, fast).
+- Only supports JPEG (SOI=FFD8), non-JPEG samples are marked as non_jpeg and skipped.
+- Bucket classification (based on longer side max(width, height)):
   - 00000_00300: size <= 300
   - 00300_00600: 300 < size <= 600
   - 00600_01000: 600 < size <= 1000
-  - 01000_10000: size > 1000（如需严格限制 <=10000，可在 classify 函数中加判断）
+  - 01000_10000: size > 1000 (if strict limit <=10000 is needed, add check in classify function)
 
-输出结构
+Output structure
   out_dir/
     obelics_00000_00300_part_001.idx
     obelics_00000_00300_part_001.rec
@@ -23,21 +23,21 @@
     ...
     obelics_01000_10000_part_00N.*
 
-读写约定
-- 读取：Record（封装 mxnet.recordio.MXRecordIO）
-- 写入：IndexedRecord（封装 mxnet.recordio.MXIndexedRecordIO）
+Read/Write conventions
+- Read: Record (wrapping mxnet.recordio.MXRecordIO)
+- Write: IndexedRecord (wrapping mxnet.recordio.MXIndexedRecordIO)
 
-依赖
+Dependencies
 - mxnet
 
-用法示例
+Usage example
   python split_rec_by_resolution.py \
     --input_list recs.txt \
     --out_dir ./out_rec \
     --processes 8 \
     --prefix obelics
 
-recs.txt 文件内容为绝对路径，一行一个 .rec
+recs.txt file contains absolute paths, one .rec per line
 """
 import numpy as np
 np.bool = np.bool_
@@ -52,13 +52,13 @@ from typing import List, Optional, Tuple, Dict
 from mxnet import recordio as mx_recordio
 
 
-# --------- 轻量封装，满足“用 Record 读，用 IndexedRecord 写”的命名要求 ---------
+# --------- Lightweight wrapper to satisfy "read with Record, write with IndexedRecord" naming requirements ---------
 class Record:
     def __init__(self, rec_path: str, flag: str = 'r'):
         self._rec = mx_recordio.MXRecordIO(rec_path, flag)
 
     def read(self) -> Optional[bytes]:
-        # 返回单条序列化 record（二进制字符串），到末尾返回 None
+        # Return single serialized record (binary string), return None at end
         return self._rec.read()
 
     def close(self):
@@ -100,19 +100,19 @@ def classify_bucket_by_longer_side(width: int, height: int) -> Optional[str]:
     elif size <= 1000:
         return "00600_01000"
     else:
-        # 名称为 01000_10000，但这里按 “>1000” 归入该桶；如果你要严格限制 <=10000，可在此加判断。
+        # Name is 01000_10000, but here ">1000" is classified into this bucket; add check here if strict <=10000 limit is needed.
         return "01000_10000"
 
 
-# --------- 快速解析 JPEG 宽高（零解码，仅扫描 Header） ---------
-# 参考 JPEG 规范：SOI (FFD8)，各段以 0xFF + marker 标识；SOF0/2 等段内包含高宽。
+# --------- Fast parse JPEG width/height (zero decoding, only scan Header) ---------
+# Reference JPEG spec: SOI (FFD8), each segment marked with 0xFF + marker; SOF0/2 etc. segments contain height/width.
 _SOF_MARKERS = {
     0xC0, 0xC1, 0xC2, 0xC3,
     0xC5, 0xC6, 0xC7,
     0xC9, 0xCA, 0xCB,
     0xCD, 0xCE, 0xCF
 }
-_NO_LENGTH_MARKERS = {  # 无长度字段的 marker
+_NO_LENGTH_MARKERS = {  # Markers without length field
     0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7,  # RST0-7
     0xD8,  # SOI
     0xD9,  # EOI
@@ -121,19 +121,19 @@ _NO_LENGTH_MARKERS = {  # 无长度字段的 marker
 
 
 def parse_jpeg_size(data: bytes) -> Optional[Tuple[int, int]]:
-    # 最少得有 SOI
+    # Must have at least SOI
     if len(data) < 4 or data[0] != 0xFF or data[1] != 0xD8:
         return None
 
     i = 2
     n = len(data)
-    # 扫描到第一个 SOF 段
+    # Scan to first SOF segment
     while i < n:
-        # 寻找下一个 0xFF
+        # Find next 0xFF
         if data[i] != 0xFF:
             i += 1
             continue
-        # 跳过可能的填充 0xFF
+        # Skip possible padding 0xFF
         while i < n and data[i] == 0xFF:
             i += 1
         if i >= n:
@@ -142,15 +142,15 @@ def parse_jpeg_size(data: bytes) -> Optional[Tuple[int, int]]:
         i += 1
 
         if marker in _NO_LENGTH_MARKERS:
-            # 无长度字段，继续
+            # No length field, continue
             continue
 
-        # 需要读取长度字段（2 字节，大端，含长度字段自身）
+        # Need to read length field (2 bytes, big-endian, includes length field itself)
         if i + 1 >= n:
             break
         seg_len = (data[i] << 8) | data[i + 1]
         if seg_len < 2:
-            # 畸形
+            # Malformed
             return None
         seg_start = i + 2
         seg_end = seg_start + (seg_len - 2)
@@ -158,18 +158,18 @@ def parse_jpeg_size(data: bytes) -> Optional[Tuple[int, int]]:
             break
 
         if marker in _SOF_MARKERS:
-            # SOF 段内：precision(1) + height(2) + width(2) + components(1) + ...
+            # Inside SOF segment: precision(1) + height(2) + width(2) + components(1) + ...
             if seg_len < 7:
                 return None
-            # 高在前，宽在后（大端）
+            # Height first, width second (big-endian)
             height = (data[seg_start + 1] << 8) | data[seg_start + 2]
             width = (data[seg_start + 3] << 8) | data[seg_start + 4]
-            # 规避异常
+            # Avoid exceptions
             if width <= 0 or height <= 0:
                 return None
             return (width, height)
 
-        # 前进到下一个段
+        # Advance to next segment
         i = seg_end
 
     return None
@@ -177,7 +177,7 @@ def parse_jpeg_size(data: bytes) -> Optional[Tuple[int, int]]:
 
 
 def open_writers_for_part(out_dir: str, prefix: str, part_name: str) -> Dict[str, IndexedRecord]:
-    """为该进程的 part 打开 4 个桶的 writer。文件名：{prefix}_{bucket}_{part}.idx/.rec"""
+    """Open 4 bucket writers for this process's part. Filename: {prefix}_{bucket}_{part}.idx/.rec"""
     writers: Dict[str, IndexedRecord] = {}
     for b in BUCKETS:
         idx_path = os.path.join(out_dir, f"{prefix}_{b}_{part_name}.idx")
@@ -201,7 +201,7 @@ def worker_proc(worker_id: int,
                 stats_q: Queue,
                 log_every: int = 2000):
     """
-    一个进程：顺序读取自己分到的 .rec 列表，并直接写入本进程的 part_* 文件中（每个桶一个文件）。
+    One process: sequentially read the assigned .rec list and write directly to this process's part_* files (one file per bucket).
     """
     logger = logging.getLogger(f"worker[{worker_id:02d}]")
     part_name = f"part_{worker_id:03d}"
@@ -211,14 +211,14 @@ def worker_proc(worker_id: int,
     non_jpeg = 0
     written_per_bucket = {b: 0 for b in BUCKETS}
 
-    # 打开 writers
+    # Open writers
     writers = open_writers_for_part(out_dir, prefix, part_name)
 
     for rec_path in rec_paths:
         try:
             r = Record(rec_path, 'r')
         except Exception as e:
-            logger.error(f"打开 rec 失败: {rec_path} err={e}")
+            logger.error(f"Failed to open rec: {rec_path} err={e}")
             continue
 
         idx_in_file = 0
@@ -246,7 +246,7 @@ def worker_proc(worker_id: int,
                 continue
 
             if total % log_every == 0:
-                logger.info(f"已处理 {total} 条，当前文件 {rec_path} 读到第 {idx_in_file} 条")
+                logger.info(f"Processed {total} records, current file {rec_path} read to record {idx_in_file}")
 
         r.close()
 
@@ -263,15 +263,15 @@ def worker_proc(worker_id: int,
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="多进程把 MXNet .rec 按分辨率拆分到 IndexedRecord 输出（每进程写 part_***，自定义前缀）")
+    ap = argparse.ArgumentParser(description="Multi-process split MXNet .rec by resolution into IndexedRecord output (each process writes part_***, custom prefix)")
     ap.add_argument("--input_list", type=str, required=True,
-                    help="包含绝对路径的 .rec 列表文件，每行一个")
+                    help="List file containing absolute paths to .rec files, one per line")
     ap.add_argument("--out_dir", type=str, required=True,
-                    help="输出目录，将生成 {prefix}_{bucket}_{part}.idx/.rec 文件")
+                    help="Output directory, will generate {prefix}_{bucket}_{part}.idx/.rec files")
     ap.add_argument("--processes", type=int, default=min(8, cpu_count()),
-                    help="进程数量，默认 min(8, cpu_count())")
+                    help="Number of processes, default min(8, cpu_count())")
     ap.add_argument("--prefix", type=str, default="obelics",
-                    help="输出文件前缀，默认 obelics。示例：obelics_00000_00300_part_001.idx")
+                    help="Output file prefix, default obelics. Example: obelics_00000_00300_part_001.idx")
     ap.add_argument("--log_level", type=str, default="INFO",
                     choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return ap.parse_args()
@@ -285,7 +285,7 @@ def load_rec_list(path: str) -> List[str]:
 
 def chunk_list(xs: List[str], n: int) -> List[List[str]]:
     n = max(1, n)
-    # 尽量平均切分
+    # Try to split evenly
     m = len(xs)
     base = m // n
     rem = m % n
@@ -309,16 +309,16 @@ def main():
 
     rec_list = load_rec_list(args.input_list)
     if not rec_list:
-        logging.error("输入列表为空")
+        logging.error("Input list is empty")
         sys.exit(1)
 
     for p in rec_list:
         if not os.path.isabs(p):
-            logging.warning(f"检测到非绝对路径，将按字面值处理: {p}")
+            logging.warning(f"Detected non-absolute path, will process literally: {p}")
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    # 切分任务
+    # Split tasks
     chunks = chunk_list(rec_list, args.processes)
 
     ctx = get_context("spawn")
@@ -330,11 +330,11 @@ def main():
         p.start()
         procs.append(p)
 
-    # 等待
+    # Wait
     for p in procs:
         p.join()
 
-    # 汇总
+    # Aggregate
     total = 0
     bad = 0
     non_jpeg = 0
@@ -354,14 +354,14 @@ def main():
         w = payload.get("written", {})
         for b in BUCKETS:
             written_agg[b] += w.get(b, 0)
-        logging.info(f"进程 {payload.get('worker_id'):02d} 完成，{payload.get('part')}, "
-                     f"总计={payload.get('total')}, bad={payload.get('bad')}, non_jpeg={payload.get('non_jpeg')}, "
-                     f"写入={payload.get('written')}")
+        logging.info(f"Process {payload.get('worker_id'):02d} completed, {payload.get('part')}, "
+                     f"total={payload.get('total')}, bad={payload.get('bad')}, non_jpeg={payload.get('non_jpeg')}, "
+                     f"written={payload.get('written')}")
 
-    logging.info("全部完成")
-    logging.info(f"读总计: {total}, 读失败(bad): {bad}, 非 JPEG: {non_jpeg}")
+    logging.info("All completed")
+    logging.info(f"Total read: {total}, read failed(bad): {bad}, non-JPEG: {non_jpeg}")
     for b in BUCKETS:
-        logging.info(f"{b}: 写入 {written_agg[b]} 条 -> 文件前缀 {args.prefix}, 输出目录 {args.out_dir}")
+        logging.info(f"{b}: written {written_agg[b]}  records -> file prefix {args.prefix}, output directory {args.out_dir}")
 
 if __name__ == "__main__":
     main()
