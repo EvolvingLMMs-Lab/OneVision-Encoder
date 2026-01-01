@@ -39,12 +39,11 @@ typedef struct HEVCPredContext {
                             const uint8_t *left, ptrdiff_t stride,
                             int c_idx, int mode);
 } HEVCPredContext;
-/* 从源代码中可以看出，HEVCPredContext中存储了4个汇编函数指针（数组）：
- * intra_pred[4]()：帧内预测的入口函数，该函数执行过程中调用了后面3个函数指针。数组中4个函数分别处理4x4，8x8，16x16，32x32几种块。
- * pred_planar[4]()：Planar预测模式函数。数组中4个函数分别处理4x4，8x8，16x16，32x32几种块。
- * pred_dc()：DC预测模式函数。
- * pred_angular[4]()：角度预测模式。数组中4个函数分别处理4x4，8x8，16x16，32x32几种块。
-
+/* From the source code, HEVCPredContext stores 4 assembly function pointers (arrays):
+ * intra_pred[4](): Entry function for intra prediction, which calls the following 3 function pointers during execution. The 4 functions in the array handle 4x4, 8x8, 16x16, 32x32 block sizes respectively.
+ * pred_planar[4](): Planar prediction mode function. The 4 functions in the array handle 4x4, 8x8, 16x16, 32x32 block sizes respectively.
+ * pred_dc(): DC prediction mode function.
+ * pred_angular[4](): Angular prediction mode. The 4 functions in the array handle 4x4, 8x8, 16x16, 32x32 block sizes respectively.
  * */
 
 

@@ -505,3 +505,4 @@ ckpts/**
 ckpts
 .gitginore
 
+_codeql*

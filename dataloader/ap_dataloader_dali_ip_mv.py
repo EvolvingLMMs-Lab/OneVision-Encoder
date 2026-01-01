@@ -122,8 +122,8 @@ class ExternalInputCallable:
 
     def get_frame_id_list(self, video_path, sequence_length,    
                           mv_unit_div: float = 4.0,   # quarter-pel -> pixel
-                          mv_pct: float = 95.0,       # MV 归一化分位数（传给 _mv_energy_norm）
-                          res_pct: float = 95.0,      # 残差归一化分位数（传给 _residual_energy_norm）
+                          mv_pct: float = 95.0,       # MV normalization percentile (passed to _mv_energy_norm)
+                          res_pct: float = 95.0,      # Residual normalization percentile (passed to _residual_energy_norm)
                           fuse_mode: str = "weighted",
                           w_mv: float = 1.0,
                           w_res: float = 1.0,):
@@ -133,7 +133,7 @@ class ExternalInputCallable:
 
         if self.mode in ["train", "val"]:
 
-            # 按照每一个seq进行分group
+            # Group by each sequence
             # average_duration = duration // sequence_length
             
             # if average_duration > 0:
@@ -153,24 +153,24 @@ class ExternalInputCallable:
                 elif hasattr(decord_vr, "get_keyframes"):
                     key_idx = decord_vr.get_keyframes()
                 if key_idx is not None:
-                    # key_idx 可能是 NDArray；转成 Python list 的整型帧号集合 只保留一帧为I帧
+                    # key_idx may be NDArray; convert to Python list of integer frame numbers, keep only one frame as I-frame
                     I_list = np.asarray(key_idx)
                     I_list = I_list.tolist()[0] if I_list.ndim > 1 else I_list.tolist()
                     I_list = [int(i) for i in I_list if int(i) in frame_id_list]
                     if len(I_list) >= self.tokeq_target_frames:
-                        # 如果 I 帧过多，优先保留前面的
+                        # If there are too many I-frames, prioritize keeping the earlier ones
                         I_list = I_list[:self.tokeq_target_frames]
                         P_list = []
                     else:
                         P_list = [i for i in range(len(frame_id_list)) if i not in I_list]
             except Exception:
-                # 保底处理：忽略异常，后续用默认策略
-                print("没有读取成功")
+                # Fallback: ignore exception, use default strategy later
+                print("Failed to read")
                 # gop = max(1,int(self.gop_size))
                 # I_list = [i for i, fid in enumerate(frame_id_list)if(int(fid)% gop)== 0]
-                # 第一帧为I帧
+                # First frame is I-frame
                 I_list = [0]
-                # 其余为 P 帧
+                # Rest are P-frames
                 P_list = [i for i in range(len(frame_id_list))if i not in I_list]
                 # Map absolute frame id -> position in the sampled sequence
                 frame_ids = frame_id_list
@@ -179,11 +179,11 @@ class ExternalInputCallable:
             frame_ids = frame_id_list
             pos_map = {fid: i for i, fid in enumerate(frame_ids)}
             
-            # 读取视频帧
+            # Read video frames
             decord_vr.seek(0)
             video_data = decord_vr.get_batch(frame_id_list).asnumpy()
 
-            # 转成 numpy array
+            # Convert to numpy array
             I_list = np.array(I_list, dtype=np.int64)
             P_list = np.array(P_list, dtype=np.int64)
             I_pos_set = set(I_list.tolist())
@@ -226,47 +226,47 @@ class ExternalInputCallable:
                                     residual,
                                 ) = frame_tuple
 
-                                # I 帧：直接置 0（与你 residual 逻辑一致）
+                                # I-frame: directly set to 0 (consistent with your residual logic)
                                 if pos in I_pos_set:
                                     if H0 is None:
-                                        # 用残差Y来确定输出尺寸/类型
+                                        # Use residual Y to determine output size/type
                                         y0 = residual if residual.ndim == 2 else cv2.cvtColor(residual, cv2.COLOR_BGR2YUV)[:, :, 0]
                                         y0 = np.asarray(y0)
                                         H0, W0, dtype0 = int(y0.shape[0]), int(y0.shape[1]), y0.dtype
                                     residuals_y[pos] = np.zeros((H0, W0), dtype=dtype0 or np.uint8)
 
                                 else:
-                                    # 1) 取 MV (L0) 并上采样到 H×W
+                                    # 1) Get MV (L0) and upsample to H×W
                                     mvx_hw = rdr._upsample_mv_to_hw(mv_x_L0.astype(np.float32))
                                     mvy_hw = rdr._upsample_mv_to_hw(mv_y_L0.astype(np.float32))
 
-                                    # 2) 取残差 Y
+                                    # 2) Get residual Y
                                     Y_res = residual if residual.ndim == 2 else cv2.cvtColor(residual, cv2.COLOR_BGR2YUV)[:, :, 0]
 
-                                    # 初始化输出尺寸/类型（只在第一次命中时做）
+                                    # Initialize output size/type (only done on first hit)
                                     if H0 is None:
                                         H0, W0, dtype0 = int(Y_res.shape[0]), int(Y_res.shape[1]), Y_res.dtype
 
-                                    # 若当前帧的尺寸与 H0×W0 不一致，做一次 resize 对齐（极少见，兜底）
+                                    # If current frame size does not match H0×W0, do a resize alignment (rare, fallback)
                                     if (Y_res.shape[0] != H0) or (Y_res.shape[1] != W0):
                                         Y_res = cv2.resize(Y_res, (W0, H0), interpolation=cv2.INTER_AREA)
                                     if (mvx_hw.shape[0] != H0) or (mvx_hw.shape[1] != W0):
                                         mvx_hw = cv2.resize(mvx_hw, (W0, H0), interpolation=cv2.INTER_NEAREST)
                                         mvy_hw = cv2.resize(mvy_hw, (W0, H0), interpolation=cv2.INTER_NEAREST)
 
-                                    # 3) 归一化到 [0,1]
-                                    #    下面这些超参请确保在外层有定义；如果没有，你也可以给个默认值：
+                                    # 3) Normalize to [0,1]
+                                    #    Make sure these hyperparameters are defined in outer scope; if not, you can give default values:
                                     #    mv_unit_div, mv_pct, res_pct, fuse_mode, w_mv, w_res
                                     mv_norm, _ = _mv_energy_norm(mvx_hw, mvy_hw, H0, W0, mv_unit_div=mv_unit_div, pct=mv_pct)
                                     res_norm, _ = _residual_energy_norm(Y_res, pct=res_pct)
 
-                                    # 4) 融合（weighted/sum/max/geomean 均可，默认 weighted）
+                                    # 4) Fusion (weighted/sum/max/geomean all work, default weighted)
                                     fused = _fuse_energy(mv_norm, res_norm, mode=fuse_mode, w_mv=w_mv, w_res=w_res)
 
-                                    # 写回你原来的容器（保持最小改动，用 uint8 存）
+                                    # Write back to your original container (minimal change, store as uint8)
                                     residuals_y[pos] = (np.clip(fused, 0.0, 1.0) * 255.0).astype(dtype0 or np.uint8)
 
-                                # 结束条件
+                                # End condition
                                 if all(x is not None for x in residuals_y):
                                     break
 
@@ -289,9 +289,9 @@ class ExternalInputCallable:
                     combined_data = np.concatenate([video_data, residuals_y], axis=-1)
 
                     if H0 != video_data.shape[1] or W0 != video_data.shape[2]:
-                        print("[warn] residual尺寸与视频不一致: res=(%d,%d) video=(%d,%d)" % (H0, W0, video_data.shape[1], video_data.shape[2]))
+                        print("[warn] residual size does not match video: res=(%d,%d) video=(%d,%d)" % (H0, W0, video_data.shape[1], video_data.shape[2]))
                 finally:
-                    # 恢复环境变量
+                    # Restore environment variables
                     if _prev_y_only is None:
                         os.environ.pop("UMT_HEVC_Y_ONLY", None)
                     else:
@@ -348,13 +348,13 @@ def dali_pipeline(mode, source_params):
                 combined_data,
                 device="gpu",
                 crop=[input_size, input_size],
-                crop_pos_x=0.5,   # 中心裁剪
+                crop_pos_x=0.5,   # Center crop
                 crop_pos_y=0.5,
                 dtype=types.UINT8,
                 output_layout="FHWC"
             )
 
-            video_channels = source_params.get('video_channels', 3)  # 例如 RGB=3
+            video_channels = source_params.get('video_channels', 3)  # e.g. RGB=3
             videos = fn.slice(combined_data, start=[0], shape=[video_channels], axes=[3])
 
             res_zero_masks = fn.slice(combined_data, start=[video_channels], shape=[1], axes=[3])
@@ -395,7 +395,7 @@ def dali_pipeline(mode, source_params):
             combined_data = fn.resize(combined_data, device="gpu", resize_shorter=input_size, interp_type=types.INTERP_CUBIC)
             combined_data = fn.crop_mirror_normalize(combined_data, device="gpu", crop=[input_size, input_size], crop_pos_x=0.5, crop_pos_y=0.5, dtype=types.UINT8, output_layout="FHWC")
 
-            video_channels = source_params.get('video_channels', 3)  # 例如 RGB=3
+            video_channels = source_params.get('video_channels', 3)  # e.g. RGB=3
             videos = fn.slice(combined_data, start=[0], shape=[video_channels], axes=[3])
 
             res_zero_masks = fn.slice(combined_data, start=[video_channels], shape=[1], axes=[3])

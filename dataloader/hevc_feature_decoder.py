@@ -651,7 +651,7 @@ class HevcFeatureReader:
         Notes:
           - If `across_gops` is True (default), we take the first `gop_size` frames in decode order and IGNORE GOP boundaries.
             If False, we stop at the first frame whose `gop_id` changes from 0 (i.e., only the first GOP is considered).
-          - If `collect_mv_from_all` is True, we also collect MV/RES for frames marked as I-like; otherwise仅收集非 I 帧的 MV/RES。
+          - If `collect_mv_from_all` is True, we also collect MV/RES for frames marked as I-like; otherwise only collect MV/RES for non-I frames.
           - Frames beyond `gop_size` are ignored; decoding stops early for speed.
         # NOTE: single-ref stream; only L0 MV is used.
         """

@@ -9,61 +9,61 @@ import time
 
 def split_rec_file(rec_path, idx_path, output_prefix, process_id):
     """
-    将一个 MXNet RecordIO 文件分成两部分
+    Split a MXNet RecordIO file into two parts
     
     Args:
-        rec_path: .rec 文件路径
-        idx_path: .idx 文件路径
-        output_prefix: 输出文件的前缀
-        process_id: 进程ID，用于日志标识
+        rec_path: .rec file path
+        idx_path: .idx file path
+        output_prefix: Prefix for output files
+        process_id: Process ID for log identification
     """
     print(f"[Process {process_id}] Starting: {os.path.basename(rec_path)}")
     start_time = time.time()
     
     try:
-        # 读取索引文件获取总记录数
+        # Read index file to get total record count
         with open(idx_path, 'r') as f:
             lines = f.readlines()
         total_records = len(lines)
         
         print(f"[Process {process_id}] Total records: {total_records:,}")
         
-        # 计算分割点（分成两半）
+        # Calculate split point (split into two halves)
         split_point = total_records // 2
         
-        # 创建输出文件
+        # Create output files
         part1_rec = output_prefix + "_part1.rec"
         part1_idx = output_prefix + "_part1.idx"
         part2_rec = output_prefix + "_part2.rec"
         part2_idx = output_prefix + "_part2.idx"
         
-        # 打开原始 rec 文件（使用非索引方式，顺序读取 - 快速）
+        # Open original rec file (using non-indexed method, sequential read - fast)
         record = recordio.MXRecordIO(rec_path, 'r')
         
-        # 创建两个写入器（使用索引方式 - 自动生成索引）
+        # Create two writers (using indexed method - automatically generates index)
         writer1 = recordio.MXIndexedRecordIO(part1_idx, part1_rec, 'w')
         writer2 = recordio.MXIndexedRecordIO(part2_idx, part2_rec, 'w')
         
-        # 读取并分割数据
+        # Read and split data
         i = 0
         
         while True:
             try:
-                # 顺序读取记录（快速）
+                # Sequential record reading (fast)
                 item = record.read()
                 if item is None:
                     break
                 
                 if i < split_point:
-                    # 写入第一部分
+                    # Write to first part
                     writer1.write_idx(i, item)
                 else:
-                    # 写入第二部分（索引从0开始）
+                    # Write to second part (index starts from 0)
                     writer2.write_idx(i - split_point, item)
                 
                 i += 1
                 
-                # 显示进度（每10万条）
+                # Show progress (every 100,000 records)
                 if i % 100000 == 0:
                     elapsed = time.time() - start_time
                     progress = i * 100 / total_records
@@ -76,7 +76,7 @@ def split_rec_file(rec_path, idx_path, output_prefix, process_id):
                 print(f"[Process {process_id}] Error reading record {i}: {e}")
                 break
         
-        # 关闭所有文件
+        # Close all files
         record.close()
         writer1.close()
         writer2.close()
@@ -96,11 +96,11 @@ def split_rec_file(rec_path, idx_path, output_prefix, process_id):
 
 def worker(task_queue, process_id):
     """
-    工作进程函数
+    Worker process function
     """
     while True:
         task = task_queue.get()
-        if task is None:  # 结束信号
+        if task is None:  # End signal
             break
         
         rec_file, idx_file, output_prefix = task
@@ -112,10 +112,10 @@ def main():
     print("=" * 80)
     print()
     
-    # 数据目录（根据你的实际路径修改）
+    # Data directory (modify according to your actual path)
     data_dir = "./"
     
-    # 查找所有的 .rec 文件
+    # Find all .rec files
     rec_files = sorted(glob.glob(os.path.join(data_dir, "coyo700m_22.rec")))
     
     print(f"Found {len(rec_files)} rec files:")
@@ -124,7 +124,7 @@ def main():
         print(f"  {i}. {os.path.basename(rec_file)} ({file_size_gb:.1f} GB)")
     print()
     
-    # 准备任务列表
+    # Prepare task list
     tasks = []
     for rec_file in rec_files:
         idx_file = rec_file.replace('.rec', '.idx')
@@ -149,25 +149,25 @@ def main():
     
     start_time = time.time()
     
-    # 创建任务队列
+    # Create task queue
     task_queue = Queue()
     
-    # 将任务放入队列
+    # Put tasks into queue
     for task in tasks:
         task_queue.put(task)
     
-    # 添加结束信号
+    # Add end signals
     for _ in range(1):
         task_queue.put(None)
     
-    # 创建并启动1个进程
+    # Create and start 1 process
     processes = []
     for i in range(1):
         p = Process(target=worker, args=(task_queue, i+1))
         p.start()
         processes.append(p)
     
-    # 等待所有进程完成
+    # Wait for all processes to complete
     for p in processes:
         p.join()
     

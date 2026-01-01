@@ -135,7 +135,7 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
         self.h_size = 6 * unit
         self.w_size = 6 * unit
 
-        # 为每个轴单独构建 inv_freq（各自归一化到自身尺度）
+        # Build inv_freq for each axis separately (each normalized to its own scale)
         self.register_buffer(
             "inv_freq_t",
             1.0 / (base ** (torch.arange(self.t_size, dtype=torch.float32) / self.t_size)),
@@ -173,12 +173,12 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
         inv_h = self.inv_freq_h.to(device=device, dtype=dtype)
         inv_w = self.inv_freq_w.to(device=device, dtype=dtype)
 
-        # 各轴外积
+        # Outer product for each axis
         ft = torch.outer(torch.arange(t, device=device, dtype=dtype), inv_t)  # (t, t_size)
         fh = torch.outer(torch.arange(h, device=device, dtype=dtype), inv_h)  # (h, h_size)
         fw = torch.outer(torch.arange(w, device=device, dtype=dtype), inv_w)  # (w, w_size)
 
-        # 展平序列索引 (与之前风格一致)
+        # Flatten sequence indices (consistent with previous style)
         L = t * h * w
         t_ids = torch.arange(t, device=device).repeat_interleave(h * w)     # (L,)
         h_base = torch.arange(h, device=device).repeat_interleave(w)        # (h*w,)
@@ -225,7 +225,7 @@ class VisionSdpaAttentionCausal(nn.Module):
         qkv = self.in_proj(hidden_states).view(L, B, 3, self.num_attention_heads, self.head_dim).permute(2,1,0,3,4)
         q, k, v = qkv.unbind(0)  # (B,L,H,D)
 
-        # 应用 RoPE（批维广播）
+        # Apply RoPE (batch dimension broadcast)
         if rotary_pos_emb is not None:
             if rotary_pos_emb.dim() == 2:
                 rotary_pos_emb = rotary_pos_emb.unsqueeze(0)  # (1,L,D/2)
@@ -249,8 +249,8 @@ class VisionSdpaAttentionCausal(nn.Module):
         v = v.permute(0,2,1,3)
 
         if attention_mask is not None:
-            # attention_mask: (B,L,L) True=禁止
-            # PyTorch 允许 (B,1,L,L) 或 (B,L,L)
+            # attention_mask: (B,L,L) True=masked
+            # PyTorch allows (B,1,L,L) or (B,L,L)
             attn_mask = attention_mask.unsqueeze(1)  # (B,1,L,L)
         else:
             attn_mask = None

@@ -21,10 +21,10 @@ import numpy as np
 
 def iter_npy_paths(src):
     """
-    生成器：从目录、列表文件或单个 .npy 路径中产出待加载的 .npy 文件路径。
-    - 目录：收集该目录下所有 .npy（不递归），按文件名排序
-    - 列表文件：逐行读取，相对路径相对于列表文件所在目录，忽略空行与不存在的路径
-    - 单个 .npy 文件：直接返回该路径
+    Generator: Yields .npy file paths to load from a directory, list file, or single .npy path.
+    - Directory: Collects all .npy files in the directory (non-recursive), sorted by filename
+    - List file: Reads line by line, relative paths are relative to the list file's directory, ignores empty lines and non-existent paths
+    - Single .npy file: Returns that path directly
     """
     if os.path.isdir(src):
         for fn in sorted(os.listdir(src)):
@@ -37,7 +37,7 @@ def iter_npy_paths(src):
             yield src
             return
 
-        # 视为列表文件
+        # Treat as list file
         base = os.path.dirname(os.path.abspath(src))
         collected = []
         with open(src, "r", encoding="utf-8") as f:
@@ -50,35 +50,35 @@ def iter_npy_paths(src):
                 if os.path.isfile(p) and p.lower().endswith(".npy"):
                     collected.append(p)
                 else:
-                    print(f"[warn] 列表中路径不存在或不是 .npy，已忽略: {p}", file=sys.stderr)
+                    print(f"[warn] Path in list does not exist or is not .npy, ignored: {p}", file=sys.stderr)
         for p in sorted(collected):
             yield p
         return
 
-    print(f"[error] --input 路径无效：{src}", file=sys.stderr)
+    print(f"[error] --input path is invalid: {src}", file=sys.stderr)
 
 
 def load_and_concat(paths, drop_last=False):
     """
-    加载多个 .npy 并在样本维拼接。
-    - 数组会 reshape 为 [num_samples, -1] 保证拼接一致
-    - drop_last=True 时，会对每个数组执行 arr = arr[:, :-1]
-    - 统一对文件路径排序，保证稳定顺序
+    Load multiple .npy files and concatenate along the sample dimension.
+    - Arrays are reshaped to [num_samples, -1] to ensure consistent concatenation
+    - When drop_last=True, each array has arr = arr[:, :-1] applied
+    - File paths are sorted to ensure stable order
     """
     paths = sorted(list(paths))
     if not paths:
-        raise FileNotFoundError("未收集到任何 .npy 文件")
+        raise FileNotFoundError("No .npy files were collected")
 
     arrays = []
     for idx, p in enumerate(paths):
         print(f"[load] ({idx+1}/{len(paths)}) {p}")
         arr = np.load(p)
         if arr.ndim == 0:
-            raise ValueError(f"文件 {p} 加载为标量，无法使用")
+            raise ValueError(f"File {p} loaded as scalar, cannot use")
         if arr.ndim == 1:
             arr = arr.reshape(1, -1)
         else:
-            # 将后续维度展平，使其成为二维 [num_samples, feat_dim]
+            # Flatten subsequent dimensions to make it 2D [num_samples, feat_dim]
             arr = arr.reshape(arr.shape[0], -1)
 
         if drop_last and arr.shape[1] > 0:
@@ -93,8 +93,8 @@ def load_and_concat(paths, drop_last=False):
 
 def read_feat(input_path, drop_last=False):
     """
-    读取特征入口：支持目录、列表文件或单个 .npy 文件。
-    不做任何归一化处理（归一化由主流程根据 args 控制）。
+    Feature reading entry point: supports directory, list file, or single .npy file.
+    Does not perform any normalization (normalization is controlled by main process based on args).
     """
     paths = iter_npy_paths(input_path)
     x = load_and_concat(paths, drop_last=bool(drop_last))
@@ -103,8 +103,8 @@ def read_feat(input_path, drop_last=False):
 
 def l2_row_normalize(a, eps=1e-12):
     """
-    行向量 L2 归一化，返回新的数组（float32）。
-    防止除零，使用 eps。
+    L2 row-wise normalization, returns a new array (float32).
+    Uses eps to prevent division by zero.
     """
     # a: (n, d)
     norms = np.linalg.norm(a, axis=1, keepdims=True)
@@ -113,16 +113,16 @@ def l2_row_normalize(a, eps=1e-12):
 
 def train_kmeans(x, k, ngpu, niter=20):
     """
-    在一个或多个 GPU 上运行 KMeans（Faiss）
+    Run KMeans on one or more GPUs (Faiss)
     x: float32 [n, d]
-    k: 聚类数
+    k: number of clusters
     """
     d = x.shape[1]
     clus = faiss.Clustering(d, k)
     clus.verbose = True
     clus.niter = niter
 
-    # 不子采样
+    # No subsampling
     clus.max_points_per_centroid = 10_000_000
 
     res = [faiss.StandardGpuResources() for _ in range(ngpu)]
@@ -142,7 +142,7 @@ def train_kmeans(x, k, ngpu, niter=20):
         for sub_index in indexes:
             index.addIndex(sub_index)
 
-    # 训练
+    # Train
     clus.train(x, index)
     centroids = faiss.vector_float_to_array(clus.centroids)
     return centroids.reshape(k, d)
@@ -150,45 +150,45 @@ def train_kmeans(x, k, ngpu, niter=20):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="Numpy 输入：目录 / 列表文件 / 单个 .npy 文件")
-    parser.add_argument("--num_classes", type=int, required=True, help="聚类数 (k)")
-    parser.add_argument("--output", required=True, help="输出 .npy 文件路径（保存质心，不做归一化，除非指定 --l2norm）")
-    parser.add_argument("--drop_last", type=int, default=0, help="是否丢弃最后一维（1 丢弃，0 保留）")
-    parser.add_argument("--ngpu", type=int, default=8, help="使用的 GPU 数量")
+    parser.add_argument("--input", required=True, help="Numpy input: directory / list file / single .npy file")
+    parser.add_argument("--num_classes", type=int, required=True, help="Number of clusters (k)")
+    parser.add_argument("--output", required=True, help="Output .npy file path (saves centroids, no normalization unless --l2norm is specified)")
+    parser.add_argument("--drop_last", type=int, default=0, help="Whether to drop the last dimension (1 drop, 0 keep)")
+    parser.add_argument("--ngpu", type=int, default=8, help="Number of GPUs to use")
     parser.add_argument(
         "--l2norm",
         action="store_true",
         help=(
-            "是否对输入特征做 L2 归一化（行归一化）。"
-            "如果指定，则会在聚类前对输入做 unit-norm，并在训练结束后对质心也做 unit-norm 后保存。"
-            "适用于希望以余弦/内积相似度为目标的场景。"
+            "Whether to L2 normalize input features (row normalization). "
+            "If specified, input features will be unit-normalized before clustering, and centroids will also be unit-normalized before saving. "
+            "Suitable for scenarios targeting cosine/inner product similarity."
         ),
     )
     args = parser.parse_args()
 
     ngpu = args.ngpu
 
-    print("[info] 读取特征...")
+    print("[info] Reading features...")
     x = read_feat(args.input, args.drop_last)
     x = x.reshape(x.shape[0], -1).astype("float32", copy=False)
 
-    print(f"[info] 特征维度: n={x.shape[0]}, d={x.shape[1]}")
+    print(f"[info] Feature dimensions: n={x.shape[0]}, d={x.shape[1]}")
 
     if args.l2norm:
-        print("[info] 对输入特征进行 L2 归一化（unit-norm）...")
+        print("[info] Performing L2 normalization on input features (unit-norm)...")
         x = l2_row_normalize(x)
 
-    print("[info] 运行 KMeans...")
+    print("[info] Running KMeans...")
     t0 = time.time()
     centroids = train_kmeans(x, args.num_classes, ngpu)
     t1 = time.time()
     print("total runtime: %.3f s" % (t1 - t0))
 
-    # 如果输入被归一化，我们也对质心做行归一化再保存，这样保存的质心可以直接用于基于内积/余弦的检索。
+    # If input was normalized, we also normalize centroids before saving, so saved centroids can be used directly for inner product/cosine-based retrieval.
     if args.l2norm:
-        print("[info] 对质心做 L2 归一化后保存（因为 --l2norm 被指定）...")
+        print("[info] L2 normalizing centroids before saving (because --l2norm was specified)...")
         centroids = l2_row_normalize(centroids)
 
-    print(f"[info] 保存质心到: {args.output}")
+    print(f"[info] Saving centroids to: {args.output}")
     np.save(args.output, centroids)
     print("[done]")

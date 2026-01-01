@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-分布式批量转码至 H.265（HEVC），支持通过 DeepSpeed/torchrun 等启动方式进行 rank 级分片：
-- 传入一个或多个 list 文件，每行一个路径（绝对或相对 source_root）
-- 在构建任务之前，先对“视频条目”按 RANK/WORLD_SIZE 做全局均匀分片，每个 rank 仅处理自身片段，降低重复解析成本
-- 每个 rank 会保存：
-  - 本 rank 的“目标路径列表”文件（targets.rank{RANK}.txt）：该 rank 对应的目标输出路径（包含已存在和将要生成的目标，剔除源缺失项）
-- 每个 rank 可继续使用本地多进程池进行并行（默认会按 WORLD_SIZE 降低并行度）
+Distributed batch transcoding to H.265 (HEVC), supports rank-level sharding via DeepSpeed/torchrun etc.:
+- Pass one or more list files, one path per line (absolute or relative to source_root)
+- Before building tasks, perform global uniform sharding of "video entries" by RANK/WORLD_SIZE, each rank only processes its own segment, reducing redundant parsing cost
+- Each rank will save:
+  - This rank's "target path list" file (targets.rank{RANK}.txt): target output paths for this rank (including existing and to-be-generated targets, excluding missing source items)
+- Each rank can continue using local multiprocessing pool for parallelism (parallelism is reduced by WORLD_SIZE by default)
 
 deepspeed \
   --hostfile hosts_14 \
@@ -30,20 +30,20 @@ from typing import Iterable, List, Optional, Tuple
 import time
 from tqdm import tqdm
 
-# ===== 分布式环境变量（与原代码一致）=====
+# ===== Distributed environment variables (consistent with original code) =====
 RANK = int(os.environ.get("RANK", "0"))
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
 # ========================================
 
-time.sleep(10 * RANK)  # 避免多进程启动时日志混乱
+time.sleep(10 * RANK)  # Avoid log confusion when multiple processes start
 
-# ===== 可调参数（环境变量） =====
-GOP_SIZE = int(os.getenv("GOP_SIZE", "16"))          # 固定 GOP=16
-CRF = int(os.getenv("CRF", "23"))                    # 画质/码率平衡（libx265）或 hevc_nvenc 的 -cq
-SKIP_AUDIO = os.getenv("SKIP_AUDIO", "1") == "1"     # 默认去音频
+# ===== Adjustable parameters (environment variables) =====
+GOP_SIZE = int(os.getenv("GOP_SIZE", "16"))          # Fixed GOP=16
+CRF = int(os.getenv("CRF", "23"))                    # Quality/bitrate balance (libx265) or hevc_nvenc's -cq
+SKIP_AUDIO = os.getenv("SKIP_AUDIO", "1") == "1"     # Remove audio by default
 
-# 根据 WORLD_SIZE 自动下调每个 rank 的并行度；若显式设置 NPROC 则以 NPROC 为准
+# Automatically reduce parallelism per rank based on WORLD_SIZE; if NPROC is explicitly set, use NPROC
 _auto_proc = max(1, (os.cpu_count() or 1) // max(1, WORLD_SIZE))
 PROCESSES = 8
 # =================================
@@ -51,13 +51,13 @@ PROCESSES = 8
 def _resolve_paths(relative_src_path: str, source_root: str, target_root: str) -> Tuple[str, str]:
     rel = relative_src_path.strip()
 
-    # 1) 解析源路径（支持绝对或相对）
+    # 1) Parse source path (supports absolute or relative)
     if os.path.isabs(rel):
         src_path = os.path.normpath(rel)
     else:
         src_path = os.path.normpath(os.path.join(source_root, rel.lstrip('/')))
 
-    # 2) 在 target_root 下镜像目录结构
+    # 2) Mirror directory structure under target_root
     if os.path.commonpath([os.path.abspath(src_path), os.path.abspath(source_root)]) == os.path.abspath(source_root):
         rel_from_src = os.path.relpath(src_path, start=source_root)
     else:
@@ -67,7 +67,7 @@ def _resolve_paths(relative_src_path: str, source_root: str, target_root: str) -
     target_dir = os.path.join(target_root, rel_dir)
     os.makedirs(target_dir, exist_ok=True)
 
-    # 统一输出为 .mp4（HEVC）
+    # Unified output as .mp4 (HEVC)
     file_stem = os.path.splitext(os.path.basename(src_path))[0]
     mp4_name = file_stem + ".mp4"
     mp4_path = os.path.join(target_dir, mp4_name)
@@ -96,16 +96,16 @@ def _build_ffmpeg_cmd(
     src_path: str,
     dst_path: str,
     encoder: str,
-    ff_log: str = "error",      # FFmpeg 的日志级别：quiet|panic|fatal|error|warning|info|verbose|debug|trace
-    x265_log: str = "error"     # libx265 的日志级别：none|error|warning|info|debug|full
+    ff_log: str = "error",      # FFmpeg log level: quiet|panic|fatal|error|warning|info|verbose|debug|trace
+    x265_log: str = "error"     # libx265 log level: none|error|warning|info|debug|full
 ) -> List[str]:
     cmd = [
         "ffmpeg",
         "-y",
         "-nostdin",
-        "-hide_banner",          # 不打印横幅
-        "-nostats",              # 不打印进度/stat 行
-        "-loglevel", ff_log,     # 控制 FFmpeg 自身日志
+        "-hide_banner",          # Do not print banner
+        "-nostats",              # Do not print progress/stat lines
+        "-loglevel", ff_log,     # Control FFmpeg's own logs
         "-i", src_path,
         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v", encoder,
@@ -116,7 +116,7 @@ def _build_ffmpeg_cmd(
         x265_params = (
             f"keyint={GOP_SIZE}:min-keyint={GOP_SIZE}:scenecut=0:"
             f"bframes=0:ref=1:repeat-headers=1:"
-            f"log-level={x265_log}"  # 控制 libx265 的日志
+            f"log-level={x265_log}"  # Control libx265 logs
         )
         cmd += [
             "-preset", "fast",
@@ -125,7 +125,7 @@ def _build_ffmpeg_cmd(
             "-x265-params", x265_params,
         ]
     else:
-        # hevc_nvenc 或其它硬编参数
+        # hevc_nvenc or other hardware encoding parameters
         cmd += [
             "-preset", "p5",
             "-cq", str(CRF),
@@ -191,11 +191,11 @@ def _extract_field(line: str, field_index: int) -> Optional[str]:
     try:
         return parts[field_index]
     except Exception:
-        # 若索引非法，尝试找第一个包含 '/' 的 token
+        # If index invalid, try to find first token containing '/'
         for tok in parts:
             if "/" in tok or "\\" in tok:
                 return tok
-        # 否则退回第 0 个
+        # Otherwise fall back to token 0
         return parts[0]
 
 def _expand_lists(list_args: List[str]) -> List[str]:
@@ -205,10 +205,10 @@ def _expand_lists(list_args: List[str]) -> List[str]:
         if matches:
             files.extend(sorted(matches))
         else:
-            # 如果没有 glob 匹配且是现有文件，就直接加
+            # If no glob match and is existing file, add directly
             if os.path.isfile(pat):
                 files.append(pat)
-    # 去重同时保序
+    # Deduplicate while preserving order
     seen = set()
     deduped = []
     for f in files:
@@ -222,8 +222,8 @@ def parse_items_from_lists(
     strip_prefix: str,
 ) -> List[str]:
     """
-    解析 list 文件，提取并规范化“原始条目”（已应用 field_index 和 strip_prefix），不做文件存在性检查。
-    返回按输入顺序去重后的条目列表。
+    Parse list files, extract and normalize "raw entries" (with field_index and strip_prefix applied), no file existence check.
+    Return deduplicated entry list in input order.
     """
     items: List[str] = []
     seen = set()
@@ -255,14 +255,14 @@ def build_tasks_from_items(
     log_path: Optional[str] = None
 ) -> Tuple[List[Tuple[str, str, str, str]], List[str]]:
     """
-    基于“分片后的原始条目”构建任务与目标列表（仅对当前 rank 的条目进行处理）。
-    返回：
-      - tasks: 需要处理的任务列表 (src_path, dst_path, encoder, log_path)
-      - targets_rank: 本 rank 的所有“源存在”的目标输出路径（含已存在与待生成，已去重）
+    Build task and target lists based on "sharded raw entries" (only process entries for current rank).
+    Returns:
+      - tasks: List of tasks to process (src_path, dst_path, encoder, log_path)
+      - targets_rank: All "source exists" target output paths for this rank (including existing and to-be-generated, deduplicated)
     """
     encoder = _pick_encoder()
     if not encoder:
-        print("[warn] 未能确定可用 HEVC 编码器。请设置环境变量 HEVC_ENCODER=libx265 或 hevc_nvenc。")
+        print("[warn] Unable to determine available HEVC encoder. Please set environment variable HEVC_ENCODER=libx265 or hevc_nvenc.")
 
     tasks: List[Tuple[str, str, str, str]] = []
     targets_rank: List[str] = []
@@ -302,18 +302,18 @@ def shard_list(seq: List[str], world_size: int, rank: int) -> List[str]:
 
 def main():
     ap = argparse.ArgumentParser(description="Distributed H.265 batch converter (DeepSpeed compatible via env RANK/WORLD_SIZE).")
-    ap.add_argument("--file", required=True, help="一个或多个 list 文件或 glob（例：worker-*.txt my.list）")
-    # 同时支持短横线和下划线参数名
-    ap.add_argument("--source-root", "--source_root", dest="source_root", required=True, help="源视频根目录")
-    ap.add_argument("--target-root", "--target_root", dest="target_root", required=True, help="输出根目录（将镜像源目录结构，统一输出 .mp4）")
-    ap.add_argument("--log-dir", "--log_dir", dest="log_dir", default="logs", help="日志目录（默认：logs）")
-    ap.add_argument("--field-index", "--field_index", dest="field_index", type=int, default=0, help="每行取第几个字段作为路径（默认 0）")
-    ap.add_argument("--strip-prefix", "--strip_prefix", dest="strip_prefix", default="", help="从行内路径头部去掉的前缀（可选）")
+    ap.add_argument("--file", required=True, help="One or more list files or glob (e.g.: worker-*.txt my.list)")
+    # Support both hyphen and underscore parameter names
+    ap.add_argument("--source-root", "--source_root", dest="source_root", required=True, help="Source video root directory")
+    ap.add_argument("--target-root", "--target_root", dest="target_root", required=True, help="Output root directory (will mirror source directory structure, unified output .mp4)")
+    ap.add_argument("--log-dir", "--log_dir", dest="log_dir", default="logs", help="Log directory (default: logs)")
+    ap.add_argument("--field-index", "--field_index", dest="field_index", type=int, default=0, help="Which field per line to use as path (default 0)")
+    ap.add_argument("--strip-prefix", "--strip_prefix", dest="strip_prefix", default="", help="Prefix to remove from line path head (optional)")
     ap.add_argument("--local_rank")
 
     args = ap.parse_args()
 
-    # 准备日志（每个 rank 单独文件，避免并发写冲突）
+    # Prepare logs (separate file per rank, avoid concurrent write conflicts)
     os.makedirs(args.log_dir, exist_ok=True)
     log_path = os.path.join(args.log_dir, f"failed.rank{RANK}.txt")
 
@@ -326,7 +326,7 @@ def main():
     items_rank = shard_list(list_files, WORLD_SIZE, RANK)
     print(f"[rank {RANK}] Items assigned to this rank: {len(items_rank)}")
 
-    # 2) 基于“当前 rank 的条目”构建任务与目标清单
+    # 2) Build task and target list based on "current rank entries"
     tasks_rank, targets_rank = build_tasks_from_items(
         items=items_rank,
         source_root=args.source_root,
@@ -336,7 +336,7 @@ def main():
     print(f"[rank {RANK}] Targets in this rank (dedup & src exists): {len(targets_rank)}")
     print(f"[rank {RANK}] Tasks to process in this rank: {len(tasks_rank)}")
 
-    # 保存本 rank 的目标路径列表
+    # Save target path list for this rank
     targets_list_path = os.path.join(args.target_root, f"targets.rank{RANK:03d}.txt")
     try:
         with open(targets_list_path, "w", encoding="utf-8") as f:
@@ -346,7 +346,7 @@ def main():
     except Exception as e:
         print(f"[rank {RANK}] Failed to save targets list {targets_list_path}: {e}")
 
-    # 3) 执行本 rank 的任务
+    # 3) Execute tasks for this rank
     if tasks_rank:
         with Pool(processes=PROCESSES, maxtasksperchild=64) as pool:
             pool.map(convert_to_h265, tasks_rank)

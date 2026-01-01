@@ -6,5 +6,5 @@ dependencies:
   # Python
   - python=3.11
   
-  # 基础工具
+  # Basic tools
   - pip

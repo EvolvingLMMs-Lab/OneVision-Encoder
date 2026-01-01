@@ -18,15 +18,15 @@ class AIMv2(nn.Module):
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         pixel_values = pixel_values.to(self.device)
         with torch.no_grad():
-            # AIMv2 的 forward 通常接受 pixel_values
-            # output_hidden_states=True 确保我们可以获取隐藏层状态
+            # AIMv2's forward typically accepts pixel_values
+            # output_hidden_states=True ensures we can get hidden layer states
             outputs = self.model(pixel_values=pixel_values, output_hidden_states=True)
             # print(outputs)
-            # 获取最后一层隐藏状态
+            # Get the last hidden state
             if hasattr(outputs, "last_hidden_state"):
                 last_hidden_state = outputs.last_hidden_state
             else:
-                # 如果返回的是 tuple，通常第一个元素是 last_hidden_state
+                # If the return is a tuple, the first element is typically last_hidden_state
                 last_hidden_state = outputs[0]
 
         return last_hidden_state
@@ -39,15 +39,15 @@ def aimv2_large_patch14_native_ap(pretrained: bool = False, **kwargs):
 if __name__ == "__main__":
     import timm
 
-    # 创建模型
+    # Create model
     model = timm.create_model("aimv2_large_patch14_native_ap")
     # /path/to/data/...
 
     bs = 4
-    # AIMv2 Large Patch14 通常输入大小为 224x224
+    # AIMv2 Large Patch14 typically uses input size of 224x224
     test_input = torch.randn(bs, 3, 224, 224, device=model.device)
 
-    # 前向传播
+    # Forward pass
     last_hidden_state = model(test_input)
 
     print(f"Model: {type(model)}")
