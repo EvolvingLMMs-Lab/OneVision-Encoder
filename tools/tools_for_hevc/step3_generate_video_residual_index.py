@@ -21,14 +21,14 @@ except Exception:
 import torch
 from hevc_feature_decoder import ResPipeReader
 
-# ===== 分布式环境变量（与原代码一致）=====
+# ===== Distributed environment variables (consistent with original code) =====
 RANK = int(os.environ.get("RANK", "0"))
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
 # ========================================
 
 
-# ---------- 小工具 ----------
+# ---------- Utilities ----------
 def _resize_u8_gray(arr_u8: np.ndarray, size: int = 224) -> np.ndarray:
     if arr_u8.ndim != 2:
         raise ValueError(f"expect HxW, got shape {arr_u8.shape}")
@@ -60,13 +60,13 @@ def _resize_u8_gray(arr_u8: np.ndarray, size: int = 224) -> np.ndarray:
 def _load_list_file(list_path: str):
     with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
-    return lines  # 每行一个视频路径
+    return lines  # One video path per line
 
 def mask_by_residual_topk(res_torch: torch.Tensor, k_keep: int, patch_size: int):
-    assert res_torch.dim() == 5 and res_torch.size(1) == 1, "res 需为 (B,1,T,H,W)"
+    assert res_torch.dim() == 5 and res_torch.size(1) == 1, "res must be (B,1,T,H,W)"
     B, _, T, H, W = res_torch.shape
     ph = pw = patch_size
-    assert H % ph == 0 and W % pw == 0, "H/W 必须能被 patch 大小整除"
+    assert H % ph == 0 and W % pw == 0, "H/W must be divisible by patch size"
     hb, wb = H // ph, W // pw
     L = T * hb * wb
 
@@ -89,7 +89,7 @@ def process_one_video(
     hevc_n_parallel: int,
     hevc_y_only: bool,
 ) -> np.ndarray:
-    """返回 shape=(K,) 的 int32 可见索引。失败则返回全 0（用于断点续跑标记）。"""
+    """Return shape=(K,) int32 visible indices. Return all 0 on failure (for checkpoint resume marking)."""
     try:
         os.environ["UMT_HEVC_Y_ONLY"] = "1" if hevc_y_only else "0"
         prefix_fast = int(os.environ.get("HEVC_PREFIX_FAST", "1")) != 0
@@ -104,7 +104,7 @@ def process_one_video(
         else:
             frame_id_list = list(range(duration)) + [duration - 1] * (T - duration)
 
-        # I 帧（相对 T 片段的位置）
+        # I-frame (position relative to T segment)
         key_idx = None
         if hasattr(vr, "get_key_indices"):
             key_idx = vr.get_key_indices()
@@ -116,7 +116,7 @@ def process_one_video(
             I_global = set(int(i) for i in range(0, duration, 16))
         I_pos = set([i for i, fid in enumerate(frame_id_list) if fid in I_global])
 
-        # 读残差（Y 通道），I 位置置 0
+        # Read residual (Y channel), set I-frame position to 0
         Tsel = T
         residuals_y = [None] * Tsel
         H0 = W0 = None
@@ -182,7 +182,7 @@ def process_one_video(
 
         res_stack_u8 = np.stack(residuals_y, axis=0)  # (T,H0,W0) uint8
 
-        # resize -> 224 & 转有符号残差
+        # resize -> 224 & convert to signed residual
         # res224_u8 = np.empty((Tsel, 224, 224), dtype=np.uint8)
         # for i in range(Tsel):
         #     print(res_stack_u8[i].shape)
@@ -191,7 +191,7 @@ def process_one_video(
         # res224_signed = res224_u8.astype(np.int16) - 128  # (T,224,224)
         res224_signed = res_stack_u8.astype(np.int16) - 128  # (T,224,224)
 
-        # 计算 Top-K
+        # Calculate Top-K
         res_torch = torch.from_numpy(res224_signed).to(torch.int16).unsqueeze(0).unsqueeze(1)  # (1,1,T,224,224)
         with torch.no_grad():
             vis_idx = mask_by_residual_topk(res_torch, K, patch_size)  # (1,K)
@@ -200,16 +200,16 @@ def process_one_video(
 
     except Exception:
         sys.stderr.write(f"[WARN] failed: {video_path}\n{traceback.format_exc()}\n")
-        return np.zeros((K,), dtype=np.int32)  # 失败用全 0 占位
+        return np.zeros((K,), dtype=np.int32)  # Use all 0 as placeholder on failure
 
 def _find_zero_rows_memmap(mm: np.memmap, chunk: int = 20000):
-    """保留原函数，但分文件保存模式下不再使用"""
+    """Keep original function, but no longer used in per-file save mode"""
     N = mm.shape[0]
     todo = []
     for st in range(0, N, chunk):
         ed = min(N, st + chunk)
-        blk = mm[st:ed]           # memmap 切片，逐块触盘
-        # 行是否全 0：等价于 (blk != 0).any(axis=1) == False
+        blk = mm[st:ed]           # memmap slice, read block by block
+        # Whether row is all 0: equivalent to (blk != 0).any(axis=1) == False
         row_zero = ~(blk != 0).any(axis=1)
         idxs = np.nonzero(row_zero)[0] + st
         if idxs.size:
@@ -218,9 +218,9 @@ def _find_zero_rows_memmap(mm: np.memmap, chunk: int = 20000):
 
 
 def _make_out_path(video_path: str, src: str, dst: str, suffix: str = ".visidx.npy") -> str:
-    """基于原始视频路径做字符串 replace，保持层级不变，只改前缀，并将扩展改为 .visidx.npy"""
+    """String replace based on original video path, keep hierarchy unchanged, only change prefix, and change extension to .visidx.npy"""
     if src not in video_path:
-        raise ValueError(f"--out-replace-src '{src}' 不在视频路径中：{video_path}")
+        raise ValueError(f"--out-replace-src '{src}' not in video path: {video_path}")
     replaced = video_path.replace(src, dst)
     stem, _ = os.path.splitext(replaced)
     out_path = stem + suffix
@@ -232,32 +232,32 @@ def _make_out_path(video_path: str, src: str, dst: str, suffix: str = ".visidx.n
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--list", required=True, help="视频列表文件（每行一个路径）")
-    ap.add_argument("--seq_len", type=int, default=64, help="T：每视频使用的帧数（不足重复最后一帧）")
-    ap.add_argument("--patch_size", type=int, default=16, help="ViT patch 大小，需整除 224")
+    ap.add_argument("--list", required=True, help="Video list file (one path per line)")
+    ap.add_argument("--seq_len", type=int, default=64, help="T: number of frames per video (repeat last frame if insufficient)")
+    ap.add_argument("--patch_size", type=int, default=16, help="ViT patch size, must divide 224")
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--keep_ratio", type=float, default=0.30, help="保留比例（0~1），用于计算 K")
-    g.add_argument("--k_keep",     type=int,   default=2000, help="直接指定 K")
-    ap.add_argument("--hevc_n_parallel", type=int, default=6, help="ResPipeReader 并行度")
-    ap.add_argument("--hevc_y_only",     type=int, default=1, help="Y 通道残差（1/0）")
-    ap.add_argument("--flush_every",     type=int, default=100, help="每处理多少视频打印一次日志")
-    # 分文件输出相关
-    ap.add_argument("--out_replace_src", required=True, help="输出路径替换：原始路径中的子串（如原根目录）")
-    ap.add_argument("--out_replace_dst", required=True, help="输出路径替换：替换成的子串（如新根目录）")
-    ap.add_argument("--out_suffix", default=".visidx.npy", help="每个视频结果文件后缀，默认 .visidx.npy")
-    ap.add_argument("--overwrite",  type=int, default=0, help="输出文件存在时是否覆盖（0 跳过，1 覆盖）")
-    ap.add_argument("--local_rank", type=int, default=0, help="输出文件存在时是否覆盖（0 跳过，1 覆盖）")
+    g.add_argument("--keep_ratio", type=float, default=0.30, help="Keep ratio (0~1), used to calculate K")
+    g.add_argument("--k_keep",     type=int,   default=2000, help="Directly specify K")
+    ap.add_argument("--hevc_n_parallel", type=int, default=6, help="ResPipeReader parallelism")
+    ap.add_argument("--hevc_y_only",     type=int, default=1, help="Y channel residual (1/0)")
+    ap.add_argument("--flush_every",     type=int, default=100, help="Print log every N videos processed")
+    # Per-file output related
+    ap.add_argument("--out_replace_src", required=True, help="Output path replacement: substring in original path (e.g. original root directory)")
+    ap.add_argument("--out_replace_dst", required=True, help="Output path replacement: replacement substring (e.g. new root directory)")
+    ap.add_argument("--out_suffix", default=".visidx.npy", help="Output file suffix for each video, default .visidx.npy")
+    ap.add_argument("--overwrite",  type=int, default=0, help="Whether to overwrite if output file exists (0 skip, 1 overwrite)")
+    ap.add_argument("--local_rank", type=int, default=0, help="Local rank for distributed training")
     args = ap.parse_args()
 
-    videos = _load_list_file(args.list)  # 保序     
+    videos = _load_list_file(args.list)  # Preserve order     
     N = len(videos)
     if N == 0:
         raise RuntimeError("empty list")
 
-    # 计算 L 与 K
+    # Calculate L and K
     T = int(args.seq_len)
     p = int(args.patch_size)
-    assert 224 % p == 0, "224 必须能被 patch_size 整除"
+    assert 224 % p == 0, "224 must be divisible by patch_size"
     hb = 224 // p
     wb = 224 // p
     L = T * hb * wb
@@ -268,16 +268,16 @@ def main():
         keep_ratio = max(0.0, min(float(args.keep_ratio), 1.0))
         K = int(round(L * keep_ratio))
     if K <= 1:
-        raise RuntimeError(f"K={K} 不安全（可能与全 0 行冲突），请设置更大的 keep-ratio 或 k-keep。")
+        raise RuntimeError(f"K={K} is unsafe (may conflict with all-0 rows), please set larger keep-ratio or k-keep.")
 
-    # 将列表均匀切给各 rank
+    # Evenly split list to each rank
     num_local = N // WORLD_SIZE + int(RANK < (N % WORLD_SIZE))
     start = (N // WORLD_SIZE) * RANK + min(RANK, N % WORLD_SIZE)
     end = start + num_local
     local_indices = list(range(start, end))
 
     if RANK == 0:
-        print(f"[dist] WORLD_SIZE={WORLD_SIZE}, N={N}, K={K}, slice per rank ~{N//max(1,WORLD_SIZE)} (+余数)")
+        print(f"[dist] WORLD_SIZE={WORLD_SIZE}, N={N}, K={K}, slice per rank ~{N//max(1,WORLD_SIZE)} (+remainder)")
     print(f"[rank {RANK}/{WORLD_SIZE}] will process indices [{start}, {end}) => {num_local} videos")
 
     processed = 0
