@@ -246,7 +246,7 @@ def main():
     ap.add_argument("--out_replace_dst", required=True, help="Output path replacement: replacement substring (e.g. new root directory)")
     ap.add_argument("--out_suffix", default=".visidx.npy", help="Output file suffix for each video, default .visidx.npy")
     ap.add_argument("--overwrite",  type=int, default=0, help="Whether to overwrite if output file exists (0 skip, 1 overwrite)")
-    ap.add_argument("--local_rank", type=int, default=0, help="Local rank for distributed training")
+    ap.add_argument("--local_rank", type=int, default=0, help="Local rank (auto-injected by DeepSpeed)")
     args = ap.parse_args()
 
     videos = _load_list_file(args.list)  # Preserve order     

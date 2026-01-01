@@ -246,7 +246,7 @@ def worker_proc(worker_id: int,
                 continue
 
             if total % log_every == 0:
-                logger.info(f"Processed {total} records, current file {rec_path} read to record {idx_in_file}")
+                logger.info(f"Processed {total} records, current file {rec_path} read up to record {idx_in_file}")
 
         r.close()
 
@@ -361,7 +361,7 @@ def main():
     logging.info("All completed")
     logging.info(f"Total read: {total}, read failed(bad): {bad}, non-JPEG: {non_jpeg}")
     for b in BUCKETS:
-        logging.info(f"{b}: written {written_agg[b]}  records -> file prefix {args.prefix}, output directory {args.out_dir}")
+        logging.info(f"{b}: written {written_agg[b]} records -> file prefix {args.prefix}, output directory {args.out_dir}")
 
 if __name__ == "__main__":
     main()
