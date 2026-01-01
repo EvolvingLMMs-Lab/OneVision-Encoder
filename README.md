@@ -145,7 +145,7 @@ We compare the performance of different vision encoders using the Attentive Prob
 > [!IMPORTANT]
 > **Transformers Version Compatibility:**
 > - ✅ **`transformers==4.53.1`** (Recommended): Works with `AutoModel.from_pretrained()` 
-> - ⚠️ **`transformers>=5.0.0`**: Use source code installation (see [Loading from Source Code](#loading-from-source-code))
+> - ⚠️ **`transformers>=5.0.0`**: Not currently supported. We are actively working on a fix.
 
 
 > **Note:** This model supports native resolution input. For optimal performance:
