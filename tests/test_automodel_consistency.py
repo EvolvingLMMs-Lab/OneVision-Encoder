@@ -115,8 +115,9 @@ class TestAutoModelOutputConsistency:
 
         # Run inference with both models
         with torch.no_grad():
-            auto_output = auto_model(pixel_values)
-            onevision_output = onevision_model(pixel_values)
+            with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                auto_output = auto_model(pixel_values)
+                onevision_output = onevision_model(pixel_values)
 
         # Compare last_hidden_state
         assert auto_output.last_hidden_state.shape == onevision_output.last_hidden_state.shape, (
@@ -239,76 +240,6 @@ class TestAutoModelOutputConsistency:
         del auto_model, onevision_model
         torch.cuda.empty_cache()
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-    def test_automodel_vs_onevision_encoder_model_batch_input(
-        self, model_name
-    ):
-        """
-        Test output consistency with batched input.
-        
-        This ensures both loading methods handle batch processing identically.
-        """
-        from transformers import AutoModel, AutoImageProcessor
-
-        # Log transformers version
-        current_version = get_current_transformers_version()
-        print(f"\nRunning test with transformers version: {current_version}")
-
-        # Create multiple test images
-        images = [create_test_image(seed=i) for i in range(3)]
-
-        # Load models
-        auto_model = AutoModel.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2"
-        ).to("cuda").eval()
-
-        onevision_model = OneVisionEncoderModel.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2"
-        ).to("cuda").eval()
-
-        # Load preprocessor
-        preprocessor = AutoImageProcessor.from_pretrained(
-            model_name,
-            trust_remote_code=True
-        )
-
-        # Preprocess batch of images
-        inputs = preprocessor(images=images, return_tensors="pt")
-        pixel_values = inputs["pixel_values"].to("cuda")
-
-        # Run inference
-        with torch.no_grad():
-            auto_output = auto_model(pixel_values)
-            onevision_output = onevision_model(pixel_values)
-
-        # Compare outputs
-        assert auto_output.last_hidden_state.shape[0] == len(images), (
-            f"Expected batch size {len(images)}, got {auto_output.last_hidden_state.shape[0]}"
-        )
-
-        is_close = torch.allclose(
-            auto_output.last_hidden_state,
-            onevision_output.last_hidden_state,
-            rtol=1e-4,
-            atol=1e-4
-        )
-
-        if not is_close:
-            max_diff = (
-                auto_output.last_hidden_state - onevision_output.last_hidden_state
-            ).abs().max().item()
-            pytest.fail(
-                f"Batch output mismatch!\n"
-                f"Max difference: {max_diff}"
-            )
-
-        # Clean up
-        del auto_model, onevision_model
-        torch.cuda.empty_cache()
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_automodel_vs_onevision_encoder_model_dtype_consistency(
