@@ -82,6 +82,15 @@ class OneVisionEncoderConfig(PretrainedConfig):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        
+        # Set auto_map for transformers 5.0.0+ compatibility
+        # This enables AutoModel.from_pretrained() to find the custom model classes
+        if "auto_map" not in kwargs:
+            self.auto_map = {
+                "AutoModel": "modeling_onevision_encoder.OneVisionEncoderModel",
+                "AutoConfig": "configuration_onevision_encoder.OneVisionEncoderConfig",
+            }
+        
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size
         self.num_hidden_layers = num_hidden_layers
