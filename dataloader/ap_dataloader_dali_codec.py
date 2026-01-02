@@ -906,7 +906,7 @@ class ExternalInputCallable:
                     mv_incon_ksize=self.mv_incon_ksize,
                     res_use_grad=self.res_use_grad,
                 )
-            except:
+            except Exception:
                 video_path, video_label = self.replace_example_info
                 video_data, residuals_y, duration, frame_id_list = self.get_frame_id_list(
                     video_path,
@@ -930,7 +930,7 @@ class ExternalInputCallable:
         else:
             try:
                 video_data, duration, frame_id_list = self.get_frame_id_list_simple(video_path, self.sequence_length)
-            except:
+            except Exception:
                 video_path, video_label = self.replace_example_info
                 video_data, duration, frame_id_list = self.get_frame_id_list_simple(video_path, self.sequence_length)
 

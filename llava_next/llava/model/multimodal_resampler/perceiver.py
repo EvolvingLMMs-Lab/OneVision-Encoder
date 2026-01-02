@@ -7,7 +7,7 @@ from einops import rearrange, repeat
 
 try:
     from einops_exts import rearrange_many
-except:
+except ImportError:
     pass
 
 from torch import einsum, nn
