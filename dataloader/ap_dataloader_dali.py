@@ -16,7 +16,7 @@ from nvidia.dali.plugin.pytorch import DALIGenericIterator
 try:
     import cv2
     _HAS_CV2 = True
-except Exception:
+except ImportError:
     _HAS_CV2 = False
 
 

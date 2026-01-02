@@ -18,12 +18,12 @@ import glob
 import hashlib
 try:
     from .hevc_feature_decoder_mv import HevcFeatureReader
-except Exception:
+except ImportError:
     from hevc_feature_decoder_mv import HevcFeatureReader
 try:
     import cv2
     _HAS_CV2 = True
-except Exception:
+except ImportError:
     _HAS_CV2 = False
 
 import warnings
