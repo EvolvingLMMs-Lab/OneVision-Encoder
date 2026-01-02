@@ -183,7 +183,7 @@ class ExternalInputCallable:
 
         try:
             video_data = self.sparse_sampling_get_frameid_data(video_path, self.sequence_length, test_info)
-        except:
+        except Exception:
             print("Error: ", video_path)
             video_path = self.replace_example_info
             video_label = self.label[0]
