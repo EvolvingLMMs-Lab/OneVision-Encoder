@@ -427,7 +427,6 @@ def dali_dataloader(
 
 import argparse
 from pathlib import Path
-import numpy as np
 from PIL import Image
 
 try:

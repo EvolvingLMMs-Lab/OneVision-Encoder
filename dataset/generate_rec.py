@@ -1,11 +1,9 @@
-import numpy as np
-np.bool = np.bool_
-
-
 import os
 import random
+
 import mxnet as mx
 import numpy as np
+np.bool = np.bool_
 from PIL import Image
 import io
 

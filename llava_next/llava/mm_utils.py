@@ -300,7 +300,7 @@ def process_anyres_image(image, processor, grid_pinpoints):
     if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
         try:
             patch_size = processor.size[0]
-        except Exception as e:
+        except (KeyError, TypeError):
             patch_size = processor.size["shortest_edge"]
         assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
         # Use regex to extract the range from the input string
