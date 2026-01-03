@@ -94,35 +94,6 @@ def _split_yuv420_planes(buf: bytes, H: int, W: int, layout: str):
         raise ValueError(layout)
 
 
-# ---------------- YUV plane parsers ----------------
-def _split_yuv420_planes(buf: bytes, H: int, W: int, layout: str):
-    """Return Y (H,W), U (H/2,W/2), V (H/2,W/2) for layout in {i420,yv12,nv12,nv21}."""
-    nY = H*W
-    nUV = (H//2)*(W//2)
-    arr = np.frombuffer(buf, dtype=np.uint8)
-    if layout in ("i420","yv12"):
-        Y = arr[:nY].reshape(H, W)
-        UV = arr[nY:]
-        # planar U and V (each nUV)
-        U_planar, V_planar = (UV[:nUV], UV[nUV:]) if layout=="i420" else (UV[nUV:], UV[:nUV])
-        U = U_planar.reshape(H//2, W//2)
-        V = V_planar.reshape(H//2, W//2)
-        return Y, U, V
-    elif layout in ("nv12","nv21"):
-        Y = arr[:nY].reshape(H, W)
-        UVint = arr[nY:].reshape(H//2, W)  # interleaved per row: UVUV or VUVU
-        U = np.empty((H//2, W//2), dtype=np.uint8)
-        V = np.empty((H//2, W//2), dtype=np.uint8)
-        if layout == "nv12":  # UVUV...
-            U[:] = UVint[:, 0::2]
-            V[:] = UVint[:, 1::2]
-        else:                  # nv21: VUVU...
-            V[:] = UVint[:, 0::2]
-            U[:] = UVint[:, 1::2]
-        return Y, U, V
-    else:
-        raise ValueError(layout)
-
 # ---------------- manual YUV->BGR with matrix/range ----------------
 def _upsample_uv(U, V, H, W):
     # nearest-neighbor 2x upsample
@@ -210,7 +181,7 @@ def _auto_pick_color(yuv_buf: bytes, H: int, W: int):
                         best_mse = mse
                         best = (lay, mat, rng)
                         picked_bgr = bgr
-        except Exception:
+        except (ValueError, IndexError):
             continue
     if best is None:
         # 回退
@@ -255,9 +226,9 @@ class RobustHevcStream:
     def close(self):
         if self.proc and self.proc.poll() is None:
             try: self.proc.stdin.close()
-            except Exception: pass
+            except OSError: pass
             try: self.proc.stdout.close()
-            except Exception: pass
+            except OSError: pass
             self.proc.terminate()
         self.proc = None
 
@@ -442,7 +413,7 @@ def _parse_fraction(frac: Optional[str]) -> float:
             a = float(a.strip()); b = float(b.strip())
             return 0.0 if b == 0 else a / b
         return float(frac)
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return 0.0
 
 
@@ -485,10 +456,10 @@ class HevcFeatureReader:
                 continue
             try:
                 packets_pts.append(int(v))
-            except Exception:
+            except (ValueError, TypeError):
                 try:
                     packets_pts.append(int(float(v)))
-                except Exception:
+                except (ValueError, TypeError):
                     pass
         if not packets_pts:
             packets_pts = list(range(len(packets_list)))
@@ -505,7 +476,7 @@ class HevcFeatureReader:
             nbf = _get(viddict, "nb_frames", "@nb_frames")
             try:
                 self.nb_frames = int(nbf)
-            except Exception:
+            except (ValueError, TypeError):
                 self.nb_frames = len(packets_list) if packets_list else 0
 
         self.width = int(_get(viddict, "width", "@width"))
