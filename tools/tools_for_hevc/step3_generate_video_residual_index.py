@@ -10,12 +10,12 @@ import numpy as np
 try:
     import cv2
     _HAS_CV2 = True
-except Exception:
+except ImportError:
     _HAS_CV2 = False
 try:
     from PIL import Image
     _HAS_PIL = True
-except Exception:
+except ImportError:
     _HAS_PIL = False
 
 import torch

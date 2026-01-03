@@ -9,18 +9,17 @@ import decord
 try:
     import cv2
     _HAS_CV2 = True
-except Exception:
+except ImportError:
     _HAS_CV2 = False
 try:
     from PIL import Image
     _HAS_PIL = True
-except Exception:
+except ImportError:
     _HAS_PIL = False
 
 import torch
 from numpy.lib.format import open_memmap
 
-import numpy as np
 # ---- 你的残差读取器 ----
 from hevc_feature_decoder_mv import HevcFeatureReader
 

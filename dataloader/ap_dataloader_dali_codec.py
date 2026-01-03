@@ -233,8 +233,7 @@ def _residual_energy_norm(res_y: np.ndarray, pct: float = 95.0, use_grad: bool =
     a = max(a, 1.0)
     norm = np.clip(x / a, 0.0, 1.0)
     return norm.astype(np.float32), a
-import cv2
-import numpy as np
+
 
 def resize_and_center_crop_residuals(residuals_y, input_size):
     """
