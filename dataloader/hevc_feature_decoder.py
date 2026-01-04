@@ -145,7 +145,7 @@ def _parse_fraction(frac: Optional[str]) -> float:
             a = float(a.strip()); b = float(b.strip())
             return 0.0 if b == 0 else a / b
         return float(frac)
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return 0.0
 
 
@@ -188,10 +188,10 @@ class HevcFeatureReader:
                 continue
             try:
                 packets_pts.append(int(v))
-            except Exception:
+            except (ValueError, TypeError):
                 try:
                     packets_pts.append(int(float(v)))
-                except Exception:
+                except (ValueError, TypeError):
                     pass
         if not packets_pts:
             packets_pts = list(range(len(packets_list)))
@@ -208,7 +208,7 @@ class HevcFeatureReader:
             nbf = _get(viddict, "nb_frames", "@nb_frames")
             try:
                 self.nb_frames = int(nbf)
-            except Exception:
+            except (ValueError, TypeError):
                 self.nb_frames = len(packets_list) if packets_list else 0
 
         self.width = int(_get(viddict, "width", "@width"))
@@ -271,7 +271,7 @@ class HevcFeatureReader:
         self._proc = None
         if hasattr(self, 'DEVNULL') and self.DEVNULL:
             try: self.DEVNULL.close()
-            except Exception: pass
+            except OSError: pass
             self.DEVNULL = None
 
     def _terminate(self, timeout=1.0):
@@ -386,11 +386,11 @@ class HevcFeatureReader:
             _itypes_env = os.environ.get('UMT_HEVC_I_TYPES', '0')
             try:
                 _itypes = {int(x) for x in _itypes_env.replace(' ', '').split(',') if x != ''}
-            except Exception:
+            except ValueError:
                 _itypes = {0}
             if int(frame_type) in _itypes:
                 return True
-        except Exception:
+        except (ValueError, TypeError):
             pass
         if STRICT_I:
             # In strict mode, do NOT use the fallback; rely only on frame_type flag.
@@ -494,7 +494,7 @@ class HevcFeatureReader:
             # More explicit labels: common mapping 0=IDR, 1=CRA(IRAP), 2=P, 3=B
             _ft_map = {0: "IDR", 1: "CRA", 2: "P", 3: "B"}
             ft_str = _ft_map.get(_ft, str(_ft))
-        except Exception:
+        except (ValueError, TypeError):
             ft_str = "NA"
 
         # optional I cache key (Y-only) to help upper layers deduplicate compute
@@ -512,7 +512,7 @@ class HevcFeatureReader:
             else:
                 _y_small = cv2.resize(cv2.cvtColor(rgb, cv2.COLOR_BGR2YUV)[:,:,0], (8, 8), interpolation=cv2.INTER_AREA)
             _frame_hash = hashlib.md5(_y_small.tobytes()).hexdigest()
-        except Exception:
+        except (cv2.error, ValueError, TypeError):
             _frame_hash = None
 
         self._lastmeta = {
@@ -711,7 +711,7 @@ class HevcFeatureReader:
                     try:
                         _mvmax = float(max(np.abs(mv_x_L0).max(), np.abs(mv_y_L0).max()))
                         _refmax = int(np.max(ref_off_L0))
-                    except Exception:
+                    except (ValueError, TypeError):
                         _mvmax, _refmax = -1.0, -1
                     _ft_id = meta.get('frame_type')
                     _ft_str = meta.get('frame_type_str')
