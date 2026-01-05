@@ -21,14 +21,14 @@ def merge_npy_files(file_list, output_file, axis=0):
     merged_array = np.concatenate(npy_list, axis=axis)
     np.save(output_file, merged_array)
 
-# 读取list_chunk文件列表
+# Read list_chunk file list
 with open(f'{sys.argv[1]}', 'r') as file:
     file_list = [line.strip() for line in file]
 
-# 检查是否提供了axis参数
-axis = 0  # 默认值
+# Check if axis parameter is provided
+axis = 0  # default value
 if len(sys.argv) > 2:
     axis = int(sys.argv[2])
 
-# 合并npy文件并保存结果
+# Merge npy files and save result
 merge_npy_files(file_list, f'{sys.argv[1]}_merged', axis=axis)

@@ -199,7 +199,7 @@ class PartialFC_V2(torch.nn.Module):
         _gathered_bs = [torch.empty_like(batch_size_pt) for _ in range(self.world_size)]
         distributed.all_gather(_gathered_bs, batch_size_pt)  # list of [1]-shape tensors
 
-        # 张量方式得到每个 rank 的 batch size 和最大值（都是张量，.item() 由 capture_scalar_outputs 捕获）
+        # Get batch size and maximum for each rank using tensors (.item() captured by capture_scalar_outputs)
         sizes = torch.stack(_gathered_bs).squeeze(-1)   # [world_size], int64
         max_batch_size = sizes.max()                    # 0-dim tensor (int64)
 
@@ -219,8 +219,8 @@ class PartialFC_V2(torch.nn.Module):
         labels = torch.cat(_gather_labels)
 
         # Remove padding
-        sizes_list = [int(s.item()) for s in sizes]            # python ints（被捕获）
-        m = int(max_batch_size.item())                         # python int（被捕获）
+        sizes_list = [int(s.item()) for s in sizes]            # python ints (captured)
+        m = int(max_batch_size.item())                         # python int (captured)
         _all_embeddings = [feat[:sz] for feat, sz in zip(embeddings.split(m), sizes_list)]
         _all_labels     = [feat[:sz] for feat, sz in zip(labels.split(m), sizes_list)]
         embeddings = torch.cat(_all_embeddings, dim=0)

@@ -20,10 +20,11 @@ except ImportError:
 import torch
 from numpy.lib.format import open_memmap
 
-# ---- 你的残差读取器 ----
+import numpy as np
+# ---- Your residual reader ----
 from hevc_feature_decoder_mv import HevcFeatureReader
 
-# ===== 新增：读取分布式环境变量 =====
+# ===== Added: Read distributed environment variables =====
 RANK = int(os.environ.get("RANK", "0"))
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
@@ -58,11 +59,11 @@ def _reshape_size_from_bytes(buf: bytes, H: int, W: int) -> np.ndarray:
     sz = np.frombuffer(buf, dtype=np.uint8, count=cnt)
     return sz.reshape(H8, W8)
 
-# ---------- 可视化工具（带无 OpenCV 兜底） ----------
+# ---------- Visualization tools (with OpenCV fallback) ----------
 def _viz_mv_to_hsv_bgr(mvx: np.ndarray, mvy: np.ndarray, full_hw: tuple = None) -> np.ndarray:
     """
-    将 MV (x,y) 可视化为 HSV→BGR 图。若无 OpenCV，则退化为灰度幅值图的三通道堆叠。
-    mvx, mvy: (H/4,W/4) 或 (H,W)；若与 full_hw=(H,W) 匹配 1/4 分辨率，将先最近邻上采样。
+    Visualize MV (x,y) as HSV→BGR image. If no OpenCV, fallback to 3-channel grayscale magnitude image.
+    mvx, mvy: (H/4,W/4) or (H,W); if matching 1/4 resolution of full_hw=(H,W), will first upsample with nearest neighbor.
     return: uint8 BGR (H,W,3)
     """
     assert mvx.shape == mvy.shape
@@ -93,7 +94,7 @@ def _viz_mv_to_hsv_bgr(mvx: np.ndarray, mvy: np.ndarray, full_hw: tuple = None) 
         bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
         return bgr
     else:
-        # 无 OpenCV：用幅值灰度图复制到 3 个通道
+        # No OpenCV: copy magnitude grayscale to 3 channels
         mag = np.sqrt(mvx_u.astype(np.float32)**2 + mvy_u.astype(np.float32)**2)
         s = np.percentile(mag, 95) if np.isfinite(mag).all() else 1.0
         s = max(float(s), 1e-6)
@@ -103,8 +104,8 @@ def _viz_mv_to_hsv_bgr(mvx: np.ndarray, mvy: np.ndarray, full_hw: tuple = None) 
 
 def _viz_residual_y(res_y: np.ndarray, signed: bool = True) -> np.ndarray:
     """
-    将残差 Y (H,W) 可视化。默认以 128 为中心显示正负偏差；若无 OpenCV 则直接输出灰度或双边归一化后的灰度。
-    return: uint8 BGR (H,W,3) 若有 OpenCV，否则 uint8 灰度 (H,W) 或 (H,W,3)
+    Visualize residual Y (H,W). Default shows positive/negative deviation centered at 128; if no OpenCV, output grayscale or bilateral normalized grayscale.
+    return: uint8 BGR (H,W,3) if OpenCV available, otherwise uint8 grayscale (H,W) or (H,W,3)
     """
     if res_y.ndim != 2:
         res_y = np.squeeze(res_y)
@@ -124,7 +125,7 @@ def _viz_residual_y(res_y: np.ndarray, signed: bool = True) -> np.ndarray:
     if _HAS_CV2:
         return cv2.applyColorMap(vis_u8, cv2.COLORMAP_TURBO)
     else:
-        # 无 OpenCV：退化为三通道灰度
+        # No OpenCV: fallback to 3-channel grayscale
         return np.stack([vis_u8, vis_u8, vis_u8], axis=-1)
 
 
@@ -168,7 +169,7 @@ def _mv_energy_norm(
     norm_u = cv2.resize(norm, (W, H), interpolation=cv2.INTER_NEAREST)
     return norm_u.astype(np.float32), a
 
-# ---------- 小工具 ----------
+# ---------- Utilities ----------
 def _resize_u8_gray(arr_u8: np.ndarray, size: int = 224) -> np.ndarray:
     if arr_u8.ndim != 2:
         raise ValueError(f"expect HxW, got shape {arr_u8.shape}")
@@ -201,13 +202,13 @@ def _maybe_swap_to_hevc(p: str) -> str:
 def _load_list_file(list_path: str):
     with open(list_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
-    return lines  # 每行一个视频路径
+    return lines  # One video path per line
 
 def mask_by_residual_topk(res_torch: torch.Tensor, k_keep: int, patch_size: int):
-    assert res_torch.dim() == 5 and res_torch.size(1) == 1, "res 需为 (B,1,T,H,W)"
+    assert res_torch.dim() == 5 and res_torch.size(1) == 1, "res must be (B,1,T,H,W)"
     B, _, T, H, W = res_torch.shape
     ph = pw = patch_size
-    assert H % ph == 0 and W % pw == 0, "H/W 必须能被 patch 大小整除"
+    assert H % ph == 0 and W % pw == 0, "H/W must be divisible by patch size"
     hb = H // ph
     wb = W // pw
     L = T * hb * wb
@@ -229,19 +230,19 @@ def process_one_video_mv_res(
     patch_size: int,
     K: int,
     hevc_n_parallel: int,
-    hevc_y_only: bool,          # 仅保留签名一致，这里不直接使用
+    hevc_y_only: bool,          # Keep signature consistent, not directly used here
     *,
     mv_unit_div: float = 4.0,   # quarter-pel -> pixel
-    mv_pct: float = 95.0,       # MV 归一化分位数（传给 _mv_energy_norm）
-    res_pct: float = 95.0,      # 残差归一化分位数（传给 _residual_energy_norm）
+    mv_pct: float = 95.0,       # MV normalization percentile (passed to _mv_energy_norm)
+    res_pct: float = 95.0,      # Residual normalization percentile (passed to _residual_energy_norm)
     fuse_mode: str = "weighted",
     w_mv: float = 1.0,
     w_res: float = 1.0,
 ) -> np.ndarray:
     """
-    读取视频前 seq_len 帧的 MV(L0) 与残差(Y)，I 位置置 0；按 _mv_energy_norm/_residual_energy_norm 归一化，
-    用 _fuse_energy 融合后在 224×224 上做 patch Top-K，返回 (K,) int32。
-    异常时返回全 0（便于断点续跑）。
+    Read first seq_len frames MV(L0) and residual(Y), set I-frame position to 0; normalize with _mv_energy_norm/_residual_energy_norm,
+    fuse with _fuse_energy then do patch Top-K on 224×224, return (K,) int32.
+    Return all 0 on exception (for checkpoint resume).
     """
     try:
         os.environ["UMT_HEVC_Y_ONLY"] = "1" if hevc_y_only else "0"
@@ -251,40 +252,40 @@ def process_one_video_mv_res(
         vr = decord.VideoReader(video_path, num_threads=max(4, hevc_n_parallel), ctx=decord.cpu(0))
         duration = len(vr)
 
-        ## 抽帧全覆盖
+        ## Frame extraction full coverage
         frame_id_list = np.linspace(0, duration - 1, num=seq_len, dtype=int).tolist()
-        ## 第一帧为I帧 其余是P帧
+        ## First frame is I-frame, rest are P-frames
         I_pos = {0}
 
-        # 读残差（Y 通道），I 位置置 0
+        # Read residual (Y channel), set I-frame position to 0
         Tsel = T
-        # --- 用 HevcFeatureReader 与 C 端严格对齐（读取顺序与字段布局由 C 端决定） ---
+        # --- Use HevcFeatureReader to strictly align with C side (read order and field layout determined by C side) ---
         rdr = HevcFeatureReader(video_path, nb_frames=seq_len, n_parallel=hevc_n_parallel)
         H, W = rdr.height, rdr.width
 
         T = int(seq_len)
-        fused_list = [None] * T  # 存每帧融合后的 [0,1] map，shape=(H,W)
+        fused_list = [None] * T  # Store fused [0,1] map for each frame, shape=(H,W)
 
-        # 提供一个小工具：把残差转成 Y 通道（若是 BGR）
+        # Provide a utility: convert residual to Y channel (if BGR)
         def _residual_y(residual: np.ndarray) -> np.ndarray:
             if residual.ndim == 2:
                 return residual
             if residual.ndim == 3 and residual.shape[2] == 3:
                 # BGR -> Y
                 return cv2.cvtColor(residual, cv2.COLOR_BGR2YUV)[:, :, 0]
-            # 其它形状做兜底（尽量 squeeze 到 H×W）
+            # Other shapes as fallback (try to squeeze to H×W)
             r = np.squeeze(residual)
             if r.ndim == 2:
                 return r
             raise ValueError(f"Unexpected residual shape: {residual.shape}")
 
-        # 逐帧读取，保持首 T 帧（不足用最后一帧补齐）
+        # Read frame by frame, keep first T frames (pad with last frame if insufficient)
         frames_collected = 0
         last_fused = np.zeros((H, W), dtype=np.float32)
 
         try:
             if all(fid == i for i, fid in enumerate(frame_id_list)) and prefix_fast:
-                # 连续帧：直接取前 Tsel 帧
+                # Continuous frames: directly take first Tsel frames
                 it = rdr.nextFrameEx()
                 for i in range(Tsel):
                     frame_tuple, meta = next(it)
@@ -323,7 +324,7 @@ def process_one_video_mv_res(
                     fused_list[i] = fused
                     last_fused = fused
             else:
-                # 非连续：顺序扫描并映射
+                # Non-continuous: scan and map sequentially
                 wanted = set(frame_id_list)
                 idx2pos = {fid: i for i, fid in enumerate(frame_id_list)}
                 filled = 0
@@ -369,23 +370,23 @@ def process_one_video_mv_res(
                     cur_idx += 1
         finally:
             rdr.close()
-        # 若不足 T 帧，则用最后一帧的 fused 重复补齐
+        # If less than T frames, repeat last frame fused to pad
         for i in range(frames_collected, T):
             fused_list[i] = last_fused.copy()
 
-        # 兜底（极端异常下）
+        # Fallback (under extreme exceptions)
         for i in range(T):
             if fused_list[i] is None:
                 fused_list[i] = np.zeros((H, W), dtype=np.float32)
 
         fused = np.stack(fused_list, axis=0)  # (T, H, W)
 
-        # resize -> 224×224，并转成"强度"型 uint8（不需要居中）
+        # resize -> 224×224, convert to "intensity" type uint8 (no centering needed)
         fused224_u8 = np.empty((T, 224, 224), dtype=np.uint8)
         for i in range(T):
             fused224_u8[i] = _resize_u8_gray((fused[i] * 255.0).astype(np.uint8), size=224)
 
-        # 用你现有的 Top-K（按 patch 求和）
+        # Use your existing Top-K (sum by patch)
         score_int16 = fused224_u8.astype(np.int16)  # (T,224,224)
         try:
             # Fast path when PyTorch has NumPy bridge available
@@ -413,7 +414,7 @@ def process_one_video_mv_res(
         return np.zeros((K,), dtype=np.int32)
 
 
-# ---------- 单视频可视化调试分支 ----------
+# ---------- Single video visualization debug branch ----------
 def _debug_dump_video(video_path: str, out_dir: str, frames: int, hevc_n_parallel: int = 1):
     os.makedirs(out_dir, exist_ok=True)
     rdr = HevcFeatureReader(video_path, nb_frames=frames, n_parallel=hevc_n_parallel)
@@ -442,7 +443,7 @@ def _debug_dump_video(video_path: str, out_dir: str, frames: int, hevc_n_paralle
                 Hc = int(meta.get("coded_height", H))
                 Wc = int(meta.get("coded_width", W))
                 tight = bool(meta.get("tight_planes", True))
-            # 只做 L0；I 帧也可视化（通常为 0）
+            # Only do L0; I-frames also visualized (usually 0)
             if raw_mode:
                 mvx = rdr._upsample_mv_to_hw(_reshape_mv_from_bytes(mv_x_L0, H, W).astype(np.float32))
                 mvy = rdr._upsample_mv_to_hw(_reshape_mv_from_bytes(mv_y_L0, H, W).astype(np.float32))
@@ -451,7 +452,7 @@ def _debug_dump_video(video_path: str, out_dir: str, frames: int, hevc_n_paralle
                 mvy = rdr._upsample_mv_to_hw(mv_y_L0.astype(np.float32))
             mv_bgr = _viz_mv_to_hsv_bgr(mvx, mvy, full_hw=(H, W))
 
-            # 残差取 Y
+            # Take residual Y
             if raw_mode:
                 y_res = _y_from_yuv_bytes(residual, H, W, Wc, Hc, tight=tight)
             else:
@@ -459,18 +460,18 @@ def _debug_dump_video(video_path: str, out_dir: str, frames: int, hevc_n_paralle
                     if _HAS_CV2:
                         y_res = cv2.cvtColor(residual, cv2.COLOR_BGR2YUV)[:, :, 0]
                     else:
-                        # 无 OpenCV：简单取第一通道兜底
+                        # No OpenCV: simply take first channel as fallback
                         y_res = residual[:, :, 0]
                 else:
                     y_res = np.squeeze(residual)
             res_bgr = _viz_residual_y(y_res, signed=True)
 
-            # 写文件
+            # Write files
             out_prefix = os.path.join(out_dir, f"{cnt:05d}")
             if _HAS_CV2:
                 cv2.imwrite(out_prefix + "_mv_hsv.png", mv_bgr)
                 cv2.imwrite(out_prefix + "_residual_viz.png", res_bgr)
-                # RGB/Y 也顺手导出
+                # Also export RGB/Y
                 if raw_mode:
                     y_vis = _y_from_yuv_bytes(rgb, H, W, Wc, Hc, tight=tight)
                     cv2.imwrite(out_prefix + "_rgb.png", cv2.cvtColor(y_vis, cv2.COLOR_GRAY2BGR))
@@ -489,9 +490,9 @@ def _debug_dump_video(video_path: str, out_dir: str, frames: int, hevc_n_paralle
                         rgb_img = rgb if (rgb.ndim == 3 and rgb.shape[2] == 3) else np.stack([rgb]*3, axis=-1)
                         Image.fromarray(rgb_img.astype(np.uint8)).save(out_prefix + "_rgb.png")
                 else:
-                    # 最简兜底：只保存 .npy
+                    # Simplest fallback: only save .npy
                     pass
-            # 方便深入排查，保存原始数组
+            # For easier debugging, save original arrays
             np.save(out_prefix + "_mvx_L0.npy", mvx.astype(np.float32))
             np.save(out_prefix + "_mvy_L0.npy", mvy.astype(np.float32))
             np.save(out_prefix + "_residual_y.npy", y_res.astype(np.uint8))
@@ -501,11 +502,11 @@ def _debug_dump_video(video_path: str, out_dir: str, frames: int, hevc_n_paralle
     print(f"[debug] dumped {cnt} frames to {out_dir}")
 
 
-# ===== 新增：按样本生成输出路径的工具函数 =====
+# ===== Added: Utility function to generate output path per sample =====
 def _make_out_path(video_path: str, src: str, dst: str, suffix: str = ".visidx.npy") -> str:
-    """基于原始视频路径做字符串 replace，保持层级不变，只改前缀，并将扩展改为 .visidx.npy"""
+    """String replace based on original video path, keep hierarchy unchanged, only change prefix, and change extension to .visidx.npy"""
     if src not in video_path:
-        raise ValueError(f"--out_replace_src '{src}' 不在视频路径中：{video_path}")
+        raise ValueError(f"--out_replace_src '{src}' not in video path: {video_path}")
     replaced = video_path.replace(src, dst)
     stem, _ = os.path.splitext(replaced)
     out_path = stem + suffix
@@ -518,45 +519,45 @@ def _make_out_path(video_path: str, src: str, dst: str, suffix: str = ".visidx.n
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--list", type=str, default="${DATA_DIR}", help="视频列表文件（每行一个路径）")
-    # ===== 新增：分文件输出相关参数 =====
-    ap.add_argument("--out_replace_src", default="clips_square_aug_k710_ssv2_hevc_v2", help="输出路径替换：原始路径中的子串（如原根目录）")
-    ap.add_argument("--out_replace_dst", default="clips_square_aug_k710_ssv2_hevc_v2_residual_mv", help="输出路径替换：替换成的子串（如新根目录）")
-    ap.add_argument("--out_suffix", default=".visidx.npy", help="每个视频结果文件后缀，默认 .visidx.npy")
-    ap.add_argument("--overwrite",  type=int, default=0, help="输出文件存在时是否覆盖（0 跳过，1 覆盖）")
+    ap.add_argument("--list", type=str, default="${DATA_DIR}", help="Video list file (one path per line)")
+    # ===== Added: Per-file output related parameters =====
+    ap.add_argument("--out_replace_src", default="clips_square_aug_k710_ssv2_hevc_v2", help="Output path replacement: substring in original path (e.g. original root directory)")
+    ap.add_argument("--out_replace_dst", default="clips_square_aug_k710_ssv2_hevc_v2_residual_mv", help="Output path replacement: replacement substring (e.g. new root directory)")
+    ap.add_argument("--out_suffix", default=".visidx.npy", help="Output file suffix for each video, default .visidx.npy")
+    ap.add_argument("--overwrite",  type=int, default=0, help="Whether to overwrite if output file exists (0 skip, 1 overwrite)")
     # ====================================
-    ap.add_argument("--seq-len", type=int, default=64, help="T：每视频使用的帧数（不足重复最后一帧）")
-    ap.add_argument("--patch-size", type=int, default=16, help="ViT patch 大小，需整除 224")
+    ap.add_argument("--seq-len", type=int, default=64, help="T: number of frames per video (repeat last frame if insufficient)")
+    ap.add_argument("--patch-size", type=int, default=16, help="ViT patch size, must divide 224")
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--keep-ratio", type=float, default=0.30, help="保留比例（0~1），用于计算 K")
-    g.add_argument("--k-keep",     type=int,   default=2000, help="直接指定 K")
-    ap.add_argument("--hevc-n-parallel", type=int, default=6, help="HevcFeatureReader 并行度")
-    ap.add_argument("--hevc-y-only",     type=int, default=1, help="Y 通道残差（1/0）")
-    ap.add_argument("--flush-every",     type=int, default=100, help="每处理多少视频打印一次日志")
-    # 单视频调试参数
-    ap.add_argument("--video", type=str, help="单视频调试：输入视频路径（优先级高于 --list）")
-    ap.add_argument("--debug-out", type=str, default="viz_residual_debug", help="单视频调试输出目录")
-    ap.add_argument("--debug-frames", type=int, default=16, help="单视频调试：读取的帧数 T")
-    ap.add_argument("--local_rank", type=int, default=0, help="本地 rank（DeepSpeed 自动注入）")
+    g.add_argument("--keep-ratio", type=float, default=0.30, help="Keep ratio (0~1), used to calculate K")
+    g.add_argument("--k-keep",     type=int,   default=2000, help="Directly specify K")
+    ap.add_argument("--hevc-n-parallel", type=int, default=6, help="HevcFeatureReader parallelism")
+    ap.add_argument("--hevc-y-only",     type=int, default=1, help="Y channel residual (1/0)")
+    ap.add_argument("--flush-every",     type=int, default=100, help="Print log every N videos processed")
+    # Single video debug parameters
+    ap.add_argument("--video", type=str, help="Single video debug: input video path (higher priority than --list)")
+    ap.add_argument("--debug-out", type=str, default="viz_residual_debug", help="Single video debug output directory")
+    ap.add_argument("--debug-frames", type=int, default=16, help="Single video debug: number of frames T to read")
+    ap.add_argument("--local_rank", type=int, default=0, help="Local rank (auto-injected by DeepSpeed)")
 
     args = ap.parse_args()
 
-    # === 单视频可视化直通分支（不变） ===
+    # === Single video visualization pass-through branch (unchanged) ===
     if args.video:
         vp = _maybe_swap_to_hevc(args.video)
         os.makedirs(args.debug_out, exist_ok=True)
         _debug_dump_video(vp, args.debug_out, frames=args.debug_frames, hevc_n_parallel=args.hevc_n_parallel)
         return
 
-    videos = _load_list_file(args.list)  # 保序
+    videos = _load_list_file(args.list)  # Preserve order
     N = len(videos)
     if N == 0:
         raise RuntimeError("empty list")
 
-    # 计算 L 与 K
+    # Calculate L and K
     T = int(args.seq_len)
     p = int(args.patch_size)
-    assert 224 % p == 0, "224 必须能被 patch_size 整除"
+    assert 224 % p == 0, "224 must be divisible by patch_size"
     hb = 224 // p
     wb = 224 // p
     L = T * hb * wb
@@ -567,16 +568,16 @@ def main():
         keep_ratio = max(0.0, min(float(args.keep_ratio), 1.0))
         K = int(round(L * keep_ratio))
     if K <= 1:
-        raise RuntimeError(f"K={K} 不安全（可能与全 0 行冲突），请设置更大的 keep-ratio 或 k-keep。")
+        raise RuntimeError(f"K={K} is unsafe (may conflict with all-0 rows), please set larger keep-ratio or k-keep.")
 
-    # ===== 新增：DeepSpeed 分片逻辑 =====
+    # ===== Added: DeepSpeed sharding logic =====
     num_local = N // WORLD_SIZE + int(RANK < (N % WORLD_SIZE))
     start = (N // WORLD_SIZE) * RANK + min(RANK, N % WORLD_SIZE)
     end = start + num_local
     local_indices = list(range(start, end))
 
     if RANK == 0:
-        print(f"[dist] WORLD_SIZE={WORLD_SIZE}, N={N}, K={K}, slice per rank ~{N//max(1,WORLD_SIZE)} (+余数)")
+        print(f"[dist] WORLD_SIZE={WORLD_SIZE}, N={N}, K={K}, slice per rank ~{N//max(1,WORLD_SIZE)} (+remainder)")
     print(f"[rank {RANK}/{WORLD_SIZE}] will process indices [{start}, {end}) => {num_local} videos")
     # ====================================
 
@@ -587,7 +588,7 @@ def main():
             sys.stderr.write(f"[WARN][rank {RANK}] empty line at {i}, skip\n")
             continue
 
-        # ===== 新增：生成单样本输出路径 =====
+        # ===== Added: Generate per-sample output path =====
         try:
             out_path = _make_out_path(
                 video_path=vp,
@@ -614,7 +615,7 @@ def main():
             hevc_y_only=bool(args.hevc_y_only),
         )
 
-        # ===== 新增：保存到单样本文件 =====
+        # ===== Added: Save to per-sample file =====
         try:
             np.save(out_path, vis_idx.astype(np.int32), allow_pickle=False)
         except Exception as e:

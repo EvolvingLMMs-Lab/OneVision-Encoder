@@ -206,7 +206,7 @@ def main():
     """Main training function."""
     global_step = 0
 
-    # image_size 保持你原逻辑
+    # image_size keep your original logic
     args.image_size = [int(x) for x in args.image_size.split(",")]
     if len(args.image_size) == 1:
         args.image_size = args.image_size * 2
@@ -218,7 +218,7 @@ def main():
     args.list_datasets = [DATASET_REGISTRY.get(x)() for x in args.list_datasets]
     args.num_heads = len(args.list_datasets)
 
-    # 如果 argparse 已经做了类型转换，下面几行可以省略；保留也安全
+    # If argparse has already done type conversion, the lines below can be omitted; keeping them is safe
     args.list_batch_sizes = [int(x) for x in args.list_batch_sizes]
     args.list_sample_rates = [float(x) for x in args.list_sample_rates]
     args.list_margins = [float(x) for x in args.list_margins]
@@ -928,7 +928,7 @@ def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, r
         logger.info(f"{k:<{col_width}} = {vs}")
     logger.info(sep)
 
-    # ---------- TensorBoard 记录 ----------
+    # ---------- TensorBoard logging ----------
     if writer is not None:
 
         md_lines = ["| Argument | Value |", "|----------|-------|"]

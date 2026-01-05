@@ -22,7 +22,7 @@ except ImportError:
 
 
 # ----------------------------------------------------------------------------
-# 1. DALI Iterator Wrapper (已修改 - 返回 indices, total_frames 和 file_name)
+# 1. DALI Iterator Wrapper (modified - returns indices, total_frames and file_name)
 # ----------------------------------------------------------------------------
 class DALIWarper:
     def __init__(self, dali_iter: DALIGenericIterator, steps_per_epoch: int):
@@ -48,7 +48,7 @@ class DALIWarper:
         self.iter.reset()
 
 # ----------------------------------------------------------------------------
-# 2. DALI External Source for Video Data (已修改 - 返回 indices, total_frames 和 file_name)
+# 2. DALI External Source for Video Data (modified - returns indices, total_frames and file_name)
 # ----------------------------------------------------------------------------
 class VideoExternalSource:
     def __init__(self, mode: str, source_params: Dict[str, Any]):
@@ -61,7 +61,7 @@ class VideoExternalSource:
         self.use_rgb: bool = source_params["use_rgb"]
         self.seed: int = source_params["seed"]
 
-        # ===> decord 线程数参数 <===
+        # ===> decord thread count parameter <===
         self.decord_num_threads: int = source_params["decord_num_threads"]
 
         self.shard_size = len(self.file_list) // self.num_shards
@@ -86,14 +86,14 @@ class VideoExternalSource:
         return indices
 
     def _load_video_data(self, video_path: str) -> Tuple[np.ndarray, np.ndarray, int, str]:
-        # ===> 在此处使用可配置的线程数，并返回 indices, total_frames 和 file_name <===
+        # ===> Use configurable thread count here, and return indices, total_frames and file_name <===
         vr = decord.VideoReader(video_path, num_threads=self.decord_num_threads, ctx=decord.cpu(0))
         num_frames = len(vr)
         frame_indices = self._get_frame_indices(num_frames)
         video_data = vr.get_batch(frame_indices).asnumpy()
         if self.use_rgb:
             video_data = video_data[:, :, :, ::-1]
-        # 返回 video_data, indices, total_frames 和 file_name
+        # Return video_data, indices, total_frames and file_name
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
     def __call__(self, sample_info) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -117,7 +117,7 @@ class VideoExternalSource:
 
 
 def preprocess_videos(videos, mode, input_size, mean, std):
-    # 统一 resize + 中心裁剪
+    # Unified resize + center crop
     videos = fn.resize(
         videos,
         device="gpu",
@@ -135,7 +135,7 @@ def preprocess_videos(videos, mode, input_size, mean, std):
     )
 
     if mode == "train":
-        # 亮度/对比度
+        # Brightness/contrast
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
             videos = fn.brightness_contrast(
                 videos,
@@ -144,7 +144,7 @@ def preprocess_videos(videos, mode, input_size, mean, std):
                 device="gpu",
             )
 
-        # 饱和度
+        # Saturation
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
             videos = fn.saturation(
                 videos,
@@ -152,7 +152,7 @@ def preprocess_videos(videos, mode, input_size, mean, std):
                 device="gpu",
             )
 
-        # 色相
+        # Hue
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
             videos = fn.hue(
                 videos,
@@ -160,7 +160,7 @@ def preprocess_videos(videos, mode, input_size, mean, std):
                 device="gpu",
             )
 
-        # 色彩空间转换
+        # Color space conversion
         if fn.random.coin_flip(dtype=types.BOOL, probability=0.1):
             videos = fn.color_space_conversion(
                 videos,
@@ -169,7 +169,7 @@ def preprocess_videos(videos, mode, input_size, mean, std):
                 device="gpu",
             )
 
-    # 统一归一化到 FLOAT / CFHW
+    # Unified normalization to FLOAT / CFHW
     videos = fn.crop_mirror_normalize(
         videos,
         dtype=types.FLOAT,
@@ -182,7 +182,7 @@ def preprocess_videos(videos, mode, input_size, mean, std):
 
 
 # ----------------------------------------------------------------------------
-# 3. DALI Pipeline Definition (已修改 - 处理 indices, total_frames 和 file_name)
+# 3. DALI Pipeline Definition (modified - handles indices, total_frames and file_name)
 # ----------------------------------------------------------------------------
 @pipeline_def(enable_conditionals=True)
 def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
@@ -191,7 +191,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     mean = source_params["mean"]
     std = source_params["std"]
 
-    # ===> 现在返回 5 个输出: videos, labels, indices, total_frames, file_name <===
+    # ===> Now returns 5 outputs: videos, labels, indices, total_frames, file_name <===
     videos, labels, indices, total_frames = fn.external_source(
         source=VideoExternalSource(mode, source_params),
         num_outputs=4,
@@ -210,7 +210,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
     return videos, labels, indices, total_frames
 
 # ----------------------------------------------------------------------------
-# 4. Main Dataloader Function (已修改 - output_map 增加 indices, total_frames 和 file_name)
+# 4. Main Dataloader Function (modified - output_map adds indices, total_frames and file_name)
 # ----------------------------------------------------------------------------
 def get_dali_dataloader(
     data_root_path: str,
@@ -263,7 +263,7 @@ def get_dali_dataloader(
     )
     pipe.build()
 
-    # ===> output_map 增加 "indices", "total_frames" 和 "file_name" <===
+    # ===> output_map adds "indices", "total_frames" and "file_name" <===
     dali_iter = DALIGenericIterator(
         pipelines=[pipe],
         output_map=["videos", "labels", "indices", "total_frames"],

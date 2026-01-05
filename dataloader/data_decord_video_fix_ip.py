@@ -95,14 +95,14 @@ class ExternalInputCallable:
 
     def __getstate__(self):
         state = dict(self.__dict__)
-        # 不要把 mmap arrays pickled 过去
+        # Do not pickle mmap arrays
         state["label"] = None
         state["video_visible_indices"] = None
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        # 在子进程里按路径重新打开 mmap
+        # Reopen mmap by path in subprocess
         if self.label is None and self.label_path is not None:
             self.label = np.load(self.label_path)
         if self.video_visible_indices is None and self.visible_indices_path is not None:

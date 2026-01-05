@@ -234,15 +234,15 @@ if __name__ == "__main__":
     # Create the model using timm framework
     model = timm.create_model("siglip2_base", pretrained=False)
 
-    # 创建测试输入: [bs, 3, 224, 224]
+    # Create test input: [bs, 3, 224, 224]
     bs = 4
     test_input = torch.randn(bs, 3, 224, 224).cuda()
 
-    # 获取最后的 hidden state
+    # Get the last hidden state
     last_hidden_state = model(test_input)
 
-    # 打印形状信息
+    # Print shape information
     print(f"Input shape: {test_input.shape}")
     print(f"Last hidden state shape: {last_hidden_state.shape}")
-    # 预期输出: [bs, seq_len, hidden_size]
-    # 例如: [4, 197, 768] (196 patches + 1 CLS token)
+    # Expected output: [bs, seq_len, hidden_size]
+    # e.g.: [4, 197, 768] (196 patches + 1 CLS token)
