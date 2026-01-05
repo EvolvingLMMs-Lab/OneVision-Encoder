@@ -377,13 +377,16 @@ To evaluate the encoder with codec-style patch selection:
 cd eval_encoder
 
 # Run codec evaluation with 2K patches (recommended)
+# First positional argument is the model weight path
 bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh lmms-lab-encoder/onevision-encoder-large
 
 # Or with 4K patches for higher quality
 bash shells_eval_ap/eval_ov_encoder_large_4kpatches_codec.sh lmms-lab-encoder/onevision-encoder-large
 ```
 
-**Note:** The model weight path is a required positional argument. You can use `lmms-lab-encoder/onevision-encoder-large` to load directly from HuggingFace, or provide a local path to your model checkpoint.
+**Note:** 
+- The model weight path is a required positional argument. You can use `lmms-lab-encoder/onevision-encoder-large` to load directly from HuggingFace, or provide a local path to your model checkpoint.
+- The evaluation scripts are configured for 8 GPUs by default. Adjust `CUDA_VISIBLE_DEVICES` in the shell script if you have a different GPU configuration.
 
 **Codec-Specific Parameters:**
 - `K_keep`: Number of patches to keep (e.g., 2048 for 2K patches, 4096 for 4K patches)
@@ -403,7 +406,7 @@ huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
   --local-dir ./codec_artifacts
 
 # Run evaluation with the cache directory by running the Python script directly
-# Example for SSv2 dataset with 2K patches
+# Example for SSv2 dataset with 2K patches (requires 8 GPUs)
 cd eval_encoder
 torchrun --nproc_per_node 8 --master_port 15555 \
   attentive_probe_codec.py \
@@ -421,6 +424,8 @@ torchrun --nproc_per_node 8 --master_port 15555 \
   --default_weight_decay 0 \
   --cache_dir ../codec_artifacts/codec_index \
   --save_report ./results/ssv2
+
+# Note: Adjust --nproc_per_node based on your available GPUs
 ```
 
 #### Shared Parameters
