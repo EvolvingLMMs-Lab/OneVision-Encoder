@@ -65,17 +65,20 @@ class OneVisionEncoderTower(nn.Module):
         
         self.is_loaded = True
 
-    def forward(self, images, grid_thw=None, visible_indices=None):
+    def forward(self, images, grid_thw=None, visible_indices=None, num_frames=None):
         """
         Forward pass for the vision tower.
-        
+
         Args:
             images: Can be:
                 - Tensor of shape (B, C, H, W) for single images
-                - Tensor of shape (B, C, T, H, W) for video
+                - Tensor of shape (T, C, H, W) for video frames stacked in batch dim
                 - List of tensors
             grid_thw: Optional grid info for variable resolution
-            
+            visible_indices: Optional indices for visible patches
+            num_frames: Number of video frames. When > 1, treats input as video
+                and reshapes (T, C, H, W) -> (1, C, T, H, W) for processing.
+
         Returns:
             image_features: Tensor of shape (B, num_patches, hidden_size)
         """
@@ -98,10 +101,12 @@ class OneVisionEncoderTower(nn.Module):
             if pixel_values.dim() == 3:
                 # (C, H, W) -> (1, C, H, W)
                 pixel_values = pixel_values.unsqueeze(0)
-            bs = pixel_values.shape[0]
-            if bs == 8: # FIXME hardcoded for 8 images input as video sample
-                # (B, C, T, H, W) -> (1, C, B*T, H, W)
+
+            is_video = num_frames is not None and num_frames > 1
+            if is_video:
+                # (T, C, H, W) -> (1, C, T, H, W) for video processing
                 pixel_values = pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4)
+
             image_forward_outs = self.vision_tower(
                 pixel_values,
                 output_hidden_states=True,
@@ -113,8 +118,10 @@ class OneVisionEncoderTower(nn.Module):
                 image_features = image_forward_outs.hidden_states[self.select_layer]
             else:
                 image_features = image_forward_outs.hidden_states[-2]
-            if bs == 8: # FIXME hardcoded for 8 images input as video sample
-                image_features = image_features.squeeze(0).reshape(8, -1, self.hidden_size)
+
+            if is_video:
+                # Reshape back: (1, T*patches, hidden) -> (T, patches, hidden)
+                image_features = image_features.squeeze(0).reshape(num_frames, -1, self.hidden_size)
 
         return image_features
 

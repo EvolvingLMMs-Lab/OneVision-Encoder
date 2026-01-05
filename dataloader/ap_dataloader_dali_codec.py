@@ -18,12 +18,12 @@ import glob
 import hashlib
 try:
     from .hevc_feature_decoder_mv import HevcFeatureReader
-except Exception:
+except ImportError:
     from hevc_feature_decoder_mv import HevcFeatureReader
 try:
     import cv2
     _HAS_CV2 = True
-except Exception:
+except ImportError:
     _HAS_CV2 = False
 
 import warnings
@@ -233,8 +233,7 @@ def _residual_energy_norm(res_y: np.ndarray, pct: float = 95.0, use_grad: bool =
     a = max(a, 1.0)
     norm = np.clip(x / a, 0.0, 1.0)
     return norm.astype(np.float32), a
-import cv2
-import numpy as np
+
 
 def resize_and_center_crop_residuals(residuals_y, input_size):
     """
@@ -906,7 +905,7 @@ class ExternalInputCallable:
                     mv_incon_ksize=self.mv_incon_ksize,
                     res_use_grad=self.res_use_grad,
                 )
-            except:
+            except Exception:
                 video_path, video_label = self.replace_example_info
                 video_data, residuals_y, duration, frame_id_list = self.get_frame_id_list(
                     video_path,
@@ -930,7 +929,7 @@ class ExternalInputCallable:
         else:
             try:
                 video_data, duration, frame_id_list = self.get_frame_id_list_simple(video_path, self.sequence_length)
-            except:
+            except Exception:
                 video_path, video_label = self.replace_example_info
                 video_data, duration, frame_id_list = self.get_frame_id_list_simple(video_path, self.sequence_length)
 

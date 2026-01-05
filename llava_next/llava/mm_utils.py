@@ -100,17 +100,11 @@ def process_highres_image_crop_split(image, data_args, processor=None):
 
 def process_highres_image(image, processor, grid_pinpoints):
     grid_params = [int(x) for x in grid_pinpoints.split(",")]
-    width_height = max(image.size)
-    fit_grid_params = [x for x in grid_params if x >= width_height]
-    if len(fit_grid_params) == 0:
-        select_size = max(grid_params)
-    else:
-        select_size = min(fit_grid_params)
-    # FIXME: always select the 448
     select_size = max(grid_params)
     image_padded = expand2square(image, tuple(int(x * 255) for x in processor.image_mean))
 
-    # FIXME: this seems to be a bug that it always resizes instead of padding
+    # Create global view by resizing original image (preserves aspect ratio info)
+    # and local patches from padded square image for detail
     image_original_resize = image.resize((processor.size["shortest_edge"], processor.size["shortest_edge"]))
     image_padded = image_padded.resize((select_size, select_size))
     image_patches = extract_patches(image_padded, patch_size=processor.size["shortest_edge"], overlap_ratio=0)
@@ -306,7 +300,7 @@ def process_anyres_image(image, processor, grid_pinpoints):
     if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
         try:
             patch_size = processor.size[0]
-        except Exception as e:
+        except (KeyError, TypeError):
             patch_size = processor.size["shortest_edge"]
         assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
         # Use regex to extract the range from the input string
@@ -328,7 +322,8 @@ def process_anyres_image(image, processor, grid_pinpoints):
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
         return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
-    else: # FIXME: for onevision encoder
+    else:
+        # OneVision encoder uses patch_size=14
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
         return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
@@ -352,10 +347,10 @@ def expand2square(pil_img, background_color):
         return result
 
 
-def process_images(images, image_processor, model_cfg):
+def process_images(images, image_processor, model_cfg, is_video=False):
     image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", None)
     new_images = []
-    if len(images) == 8: #FIXME hardcoded for 8 images input as video sample
+    if is_video:
         image_aspect_ratio = 'pad'
 
     if image_aspect_ratio == "highres":
@@ -376,30 +371,20 @@ def process_images(images, image_processor, model_cfg):
             image = process_highres_image_crop_split(image, model_cfg, image_processor)
             new_images.append(image)
     elif image_aspect_ratio == "pad":
+        image_patchs = []
+        grid_thw = []
         if 'siglip' in image_processor.__class__.__name__.lower():
-            image_patchs = []
-            grid_thw = []
-            for image in images:
-                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
-                image = image.resize((512, 512))
-                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
-                grid_thw.append([1, 32, 32])
-            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
-
-        else: # FIXME: for onevision encoder video
-            image_patchs = []
-            grid_thw = []
-            for image in images:
-                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
-                image = image.resize((504, 504))
-                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
-                grid_thw.append([1, 36, 36])
-            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
-
-        image = image.resize((504, 504))
-        # image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))
-        image = image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
-        new_images.append(image)
+            # SigLIP uses 512x512 with patch_size=16 -> 32x32 patches
+            target_size, patch_grid = 512, 32
+        else:
+            # OneVision encoder uses 504x504 with patch_size=14 -> 36x36 patches
+            target_size, patch_grid = 504, 36
+        for image in images:
+            image = expand2square(image, (0, 0, 0))
+            image = image.resize((target_size, target_size))
+            image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
+            grid_thw.append([1, patch_grid, patch_grid])
+        return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
     else:
         return image_processor.preprocess(images, return_tensors="pt")["pixel_values"]
     if all(x.shape == new_images[0].shape for x in new_images):
