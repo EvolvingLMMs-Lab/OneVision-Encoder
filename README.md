@@ -346,16 +346,26 @@ To download artifacts for a specific dataset:
 # Install huggingface-hub if needed
 pip install huggingface-hub
 
-# Download specific artifacts
+# Download all codec indices
 huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
   --repo-type dataset \
-  --include "codec_index/<dataset>.json" \
-  --include "logs/<dataset>.log" \
-  --include "checkpoints/<dataset>.pt" \
+  --include "codec_index/*" \
   --local-dir ./codec_artifacts
 
-# Replace <dataset> with: ssv2, diving48, perception_test, charadesego, epic_verb, epic_noun, k400, or hmdb51
+# Download logs for a specific dataset (e.g., ssv2)
+huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
+  --repo-type dataset \
+  --include "logs/ssv2.log" \
+  --local-dir ./codec_artifacts
+
+# Download checkpoint for a specific dataset (e.g., ssv2)
+huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
+  --repo-type dataset \
+  --include "checkpoints/ssv2.pt" \
+  --local-dir ./codec_artifacts
 ```
+
+Available datasets: ssv2, diving48, perception_test, charadesego, epic_verb, epic_noun, k400, hmdb51
 
 
 **Running Codec-Style Evaluation:**
@@ -367,13 +377,13 @@ To evaluate the encoder with codec-style patch selection:
 cd eval_encoder
 
 # Run codec evaluation with 2K patches (recommended)
-bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh <model_weight_path>
+bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh lmms-lab-encoder/onevision-encoder-large
 
 # Or with 4K patches for higher quality
-bash shells_eval_ap/eval_ov_encoder_large_4kpatches_codec.sh <model_weight_path>
+bash shells_eval_ap/eval_ov_encoder_large_4kpatches_codec.sh lmms-lab-encoder/onevision-encoder-large
 ```
 
-Replace `<model_weight_path>` with your model path, or use `lmms-lab-encoder/onevision-encoder-large` to load directly from HuggingFace.
+**Note:** The model weight path is a required positional argument. You can use `lmms-lab-encoder/onevision-encoder-large` to load directly from HuggingFace, or provide a local path to your model checkpoint.
 
 **Codec-Specific Parameters:**
 - `K_keep`: Number of patches to keep (e.g., 2048 for 2K patches, 4096 for 4K patches)
@@ -389,11 +399,12 @@ To reproduce our exact results using the pre-computed codec indices:
 # Download the codec indices from HuggingFace
 huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
   --repo-type dataset \
-  --include "codec_index/*.json" \
+  --include "codec_index/*" \
   --local-dir ./codec_artifacts
 
-# Run evaluation with the cache directory by modifying the shell script
-# or running the Python script directly with --cache_dir parameter
+# Run evaluation with the cache directory by running the Python script directly
+# Example for SSv2 dataset with 2K patches
+cd eval_encoder
 torchrun --nproc_per_node 8 --master_port 15555 \
   attentive_probe_codec.py \
   --model_family ov_encoder_codec \
@@ -403,11 +414,12 @@ torchrun --nproc_per_node 8 --master_port 15555 \
   --num_frames 64 \
   --frames_token_num 256 \
   --embedding_size 1024 \
+  --K_keep 2048 \
   --batch_size 4 \
   --default_lr_list 0.0001 \
   --default_epoch 10 \
   --default_weight_decay 0 \
-  --cache_dir ./codec_artifacts/codec_index \
+  --cache_dir ../codec_artifacts/codec_index \
   --save_report ./results/ssv2
 ```
 
