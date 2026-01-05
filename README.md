@@ -322,62 +322,44 @@ bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 
 #### OV-Encoder Codec Evaluation
 
-
 #### Evaluation Attentive Probes
 
-We share the trained attentive probes for two of our visual understanding evals (Something-Something v2 and Diving48) and the action anticipation eval EPIC-KITCHENS-100.
+We share the attentive probing evaluation results for our visual representation model across a diverse set of video understanding benchmarks. 
+For reproducibility, we provide the corresponding training and inference logs for each evaluation.
 
 <table>
   <tr>
-    <th colspan="1">Model</th>
-    <th colspan="4">SSv2</th>
-    <th colspan="4">Diving48</th>
-    <th colspan="4">EK100</th>
+    <th>Model</th>
+    <th>SSv2</th>
+    <th>Diving48</th>
+    <th>Perception Test</th>
+    <th>CharadesEgo</th>
+    <th>Epic-Verb</th>
+    <th>Epic-Noun</th>
+    <th>Kinetics-400</th>
+    <th>HMDB51</th>
+    <th>Logs</th>
   </tr>
   <tr>
-    <th colspan="1"></th>
-    <th colspan="1">Checkpoint</th>
-    <th colspan="1">Training Config</th>
-    <th colspan="1">Inference Config</th>
-    <th colspan="1">Result</th>
-    <th colspan="1">Checkpoint</th>
-    <th colspan="1">Training Config</th>
-    <th colspan="1">Inference Config</th>
-    <th colspan="1">Result</th>
-    <th colspan="1">Checkpoint</th>
-    <th colspan="1">Training Config</th>
-    <th colspan="1">Inference Config</th>
-    <th colspan="1">Result</th>
-  </tr>
-  <tr>
-    <td>ViT-L/16</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ssv2-vitl-16x2x3.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitl/ssv2.yaml">config</a></td>
-    <td><a href="configs/inference/vitl/ssv2.yaml">config</a></td>
-    <td>73.7%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/diving48-vitl-256.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitl/diving48.yaml">config</a></td>
-    <td><a href="configs/inference/vitl/diving48.yaml">config</a></td>
-    <td>89.0%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ek100-vitl-256.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitl/ek100.yaml">config</a></td>
-    <td><a href="configs/inference/vitl/ek100.yaml">config</a></td>
-    <td>32.7 R@5</td>
-  </tr>
-  <tr>
-    <td>ViT-g/16<sub>384</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ssv2-vitg-384-64x2x3.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitg-384/ssv2.yaml">config</a></td>
-    <td><a href="configs/inference/vitg-384/ssv2.yaml">config</a></td>
-    <td>77.3%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/diving48-vitg-384-32x4x3.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitg-384/diving48.yaml">config</a></td>
-    <td><a href="configs/inference/vitg-384/diving48.yaml">config</a></td>
-    <td>90.2%</td>
-    <td><a href="https://dl.fbaipublicfiles.com/vjepa2/evals/ek100-vitg-384.pt">checkpoint</a></td>
-    <td><a href="configs/eval/vitg-384/ek100.yaml">config</a></td>
-    <td><a href="configs/inference/vitg-384/ek100.yaml">config</a></td>
-    <td>39.7 R@5</td>
+    <td><b>OV-Encoder (Codec)</b></td>
+    <td>58.4%</td>
+    <td>66.0%</td>
+    <td>59.7%</td>
+    <td>12.1%</td>
+    <td>62.2%</td>
+    <td>53.9%</td>
+    <td>84.3%</td>
+    <td>83.5%</td>
+    <td>
+      <a href="logs/ssv2.log">SSv2</a> /
+      <a href="logs/diving48.log">Diving48</a> /
+      <a href="logs/perception_test.log">PT</a> /
+      <a href="logs/charadesego.log">CE</a> /
+      <a href="logs/epic_verb.log">EV</a> /
+      <a href="logs/epic_noun.log">EN</a> /
+      <a href="logs/k400.log">K400</a> /
+      <a href="logs/hmdb51.log">HMDB</a>
+    </td>
   </tr>
 </table>
 
