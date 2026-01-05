@@ -321,45 +321,76 @@ bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 - `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
 
 #### OV-Encoder Codec Evaluation
-
 #### Evaluation Attentive Probes
 
-We share the attentive probing evaluation results for our visual representation model across a diverse set of video understanding benchmarks. 
-For reproducibility, we provide the corresponding training and inference logs for each evaluation.
+We provide the attentive probing artifacts for our codec-based model across a range of video understanding benchmarks.
+For each dataset, we release the codec patch indices, training logs, model checkpoint, and the final evaluation result.
 
 <table>
   <tr>
-    <th>Model</th>
-    <th>SSv2</th>
-    <th>Diving48</th>
-    <th>Perception Test</th>
-    <th>CharadesEgo</th>
-    <th>Epic-Verb</th>
-    <th>Epic-Noun</th>
-    <th>Kinetics-400</th>
-    <th>HMDB51</th>
-    <th>Logs</th>
+    <th rowspan="2">Model</th>
+    <th colspan="4">SSv2</th>
+    <th colspan="4">Diving48</th>
+    <th colspan="4">Perception Test</th>
+    <th colspan="4">CharadesEgo</th>
+    <th colspan="4">Epic-Verb</th>
+    <th colspan="4">Epic-Noun</th>
+    <th colspan="4">Kinetics-400</th>
+    <th colspan="4">HMDB51</th>
   </tr>
   <tr>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+  </tr>
+
+  <tr>
     <td><b>OV-Encoder (Codec)</b></td>
+
+    <td><a href="codec_index/ssv2.json">index</a></td>
+    <td><a href="logs/ssv2.log">log</a></td>
+    <td><a href="checkpoints/ssv2.pt">ckpt</a></td>
     <td>58.4%</td>
+
+    <td><a href="codec_index/diving48.json">index</a></td>
+    <td><a href="logs/diving48.log">log</a></td>
+    <td><a href="checkpoints/diving48.pt">ckpt</a></td>
     <td>66.0%</td>
+
+    <td><a href="codec_index/perception_test.json">index</a></td>
+    <td><a href="logs/perception_test.log">log</a></td>
+    <td><a href="checkpoints/perception_test.pt">ckpt</a></td>
     <td>59.7%</td>
+
+    <td><a href="codec_index/charadesego.json">index</a></td>
+    <td><a href="logs/charadesego.log">log</a></td>
+    <td><a href="checkpoints/charadesego.pt">ckpt</a></td>
     <td>12.1%</td>
+
+    <td><a href="codec_index/epic_verb.json">index</a></td>
+    <td><a href="logs/epic_verb.log">log</a></td>
+    <td><a href="checkpoints/epic_verb.pt">ckpt</a></td>
     <td>62.2%</td>
+
+    <td><a href="codec_index/epic_noun.json">index</a></td>
+    <td><a href="logs/epic_noun.log">log</a></td>
+    <td><a href="checkpoints/epic_noun.pt">ckpt</a></td>
     <td>53.9%</td>
+
+    <td><a href="codec_index/k400.json">index</a></td>
+    <td><a href="logs/k400.log">log</a></td>
+    <td><a href="checkpoints/k400.pt">ckpt</a></td>
     <td>84.3%</td>
+
+    <td><a href="codec_index/hmdb51.json">index</a></td>
+    <td><a href="logs/hmdb51.log">log</a></td>
+    <td><a href="checkpoints/hmdb51.pt">ckpt</a></td>
     <td>83.5%</td>
-    <td>
-      <a href="logs/ssv2.log">SSv2</a> /
-      <a href="logs/diving48.log">Diving48</a> /
-      <a href="logs/perception_test.log">PT</a> /
-      <a href="logs/charadesego.log">CE</a> /
-      <a href="logs/epic_verb.log">EV</a> /
-      <a href="logs/epic_noun.log">EN</a> /
-      <a href="logs/k400.log">K400</a> /
-      <a href="logs/hmdb51.log">HMDB</a>
-    </td>
   </tr>
 </table>
 
