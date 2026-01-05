@@ -392,10 +392,23 @@ huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
   --include "codec_index/*.json" \
   --local-dir ./codec_artifacts
 
-# Then run evaluation with the cache directory
-bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh \
-  lmms-lab-encoder/onevision-encoder-large \
-  --cache_dir ./codec_artifacts/codec_index
+# Run evaluation with the cache directory by modifying the shell script
+# or running the Python script directly with --cache_dir parameter
+torchrun --nproc_per_node 8 --master_port 15555 \
+  attentive_probe_codec.py \
+  --model_family ov_encoder_codec \
+  --model_name ov_encoder_large \
+  --model_weight lmms-lab-encoder/onevision-encoder-large \
+  --dataset ssv2 \
+  --num_frames 64 \
+  --frames_token_num 256 \
+  --embedding_size 1024 \
+  --batch_size 4 \
+  --default_lr_list 0.0001 \
+  --default_epoch 10 \
+  --default_weight_decay 0 \
+  --cache_dir ./codec_artifacts/codec_index \
+  --save_report ./results/ssv2
 ```
 
 #### Shared Parameters
