@@ -24,9 +24,9 @@ def split_with_rank_worldsize(list_like, rank, world_size):
 
 def collect_input_paths(input_path: str):
     """
-    收集待处理的 .npy 文件路径：
-    - 若为目录：收集目录下所有 .npy（不递归），按文件名排序
-    - 若为文件：视为列表文件，逐行读取 .npy 路径（相对路径以列表文件所在目录为基准），过滤不存在的路径，整体排序
+    Collect .npy file paths to process:
+    - If directory: collect all .npy files in the directory (non-recursive), sorted by filename
+    - If file: treat as list file, read .npy paths line by line (relative paths are based on list file's directory), filter non-existent paths, sort overall
     """
     if os.path.isdir(input_path):
         files = [
@@ -37,7 +37,7 @@ def collect_input_paths(input_path: str):
         return sorted(files)
 
     if os.path.isfile(input_path):
-        # 视为列表文件
+        # Treat as list file
         base_dir = os.path.dirname(os.path.abspath(input_path))
         paths = []
         with open(input_path, "r", encoding="utf-8") as f:
@@ -51,22 +51,22 @@ def collect_input_paths(input_path: str):
                     paths.append(p)
         return sorted(paths)
 
-    raise FileNotFoundError(f"输入路径无效：{input_path}")
+    raise FileNotFoundError(f"Input path is invalid: {input_path}")
 
 
 @torch.no_grad()
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", "-i", help="可以是目录（含 .npy）或包含 .npy 路径的列表文件")
+    parser.add_argument("--input", "-i", help="Can be a directory (containing .npy) or a list file containing .npy paths")
     parser.add_argument("--class_center", "-c", required=True, help="class center (.npy)")
     parser.add_argument("--drop_last", type=int, default=0)
     parser.add_argument("--topk", type=int, default=10)
     args = parser.parse_args()
 
-    # 收集特征文件路径并按 rank 切片
+    # Collect feature file paths and slice by rank
     lines = collect_input_paths(args.input)
     if len(lines) == 0:
-        raise FileNotFoundError(f"未在输入中找到任何 .npy 文件：{args.input}")
+        raise FileNotFoundError(f"No .npy files found in input: {args.input}")
 
     num_local, start = split_with_rank_worldsize(lines, rank, world_size)
     lines = lines[start: start + num_local]

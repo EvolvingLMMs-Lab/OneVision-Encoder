@@ -20,7 +20,7 @@ class CLIP(nn.Module):
         """
         super(CLIP, self).__init__()
         self.device = torch.device(device)
-        # 直接从 transformers 导入 CLIPModel，然后取 vision_model
+        # Import CLIPModel directly from transformers, then get vision_model
         base_model = CLIPModel.from_pretrained(ckpt)
         self.model = base_model.vision_model.to(self.device).eval()
 
@@ -38,7 +38,7 @@ class CLIP(nn.Module):
         pixel_values = pixel_values.to(self.device)
         with torch.no_grad():
             outputs = self.model(pixel_values=pixel_values, output_hidden_states=True)
-            # 最后一层的 hidden state: [bs, seq_len, hidden_size]
+            # Last layer's hidden state: [bs, seq_len, hidden_size]
             last_hidden_state = outputs.last_hidden_state
 
         return last_hidden_state
@@ -51,14 +51,14 @@ def clip_vit_base_patch16(pretrained: bool = False, **kwargs):
 
     Args:
         pretrained (bool): If True, load pretrained weights (from the HuggingFace ckpt path).
-                           这里的 pretrained 标志仅用于接口兼容，权重加载在 CLIP 中完成。
+                           The pretrained flag here is only for interface compatibility; weight loading is done in CLIP.
         **kwargs: Additional arguments passed to CLIP.
 
     Returns:
         CLIP: An instance of CLIP.
     """
     model = CLIP(
-        # 如需使用本地 ckpt，设置为本地路径；否则传入默认/自定义的 HF 路径
+        # To use a local checkpoint, set to local path; otherwise pass the default/custom HF path
         ckpt=kwargs.get("ckpt", "openai/clip-vit-base-patch16"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -72,14 +72,14 @@ def clip_vit_large_patch14(pretrained: bool = False, **kwargs):
 
     Args:
         pretrained (bool): If True, load pretrained weights (from the HuggingFace ckpt path).
-                           这里的 pretrained 标志仅用于接口兼容，权重加载在 CLIP 中完成。
+                           The pretrained flag here is only for interface compatibility; weight loading is done in CLIP.
         **kwargs: Additional arguments passed to CLIP.
 
     Returns:
         CLIP: An instance of CLIP.
     """
     model = CLIP(
-        # 如需使用本地 ckpt，设置为本地路径；否则传入默认/自定义的 HF 路径
+        # To use a local checkpoint, set to local path; otherwise pass the default/custom HF path
         ckpt=kwargs.get("ckpt", "openai/clip-vit-large-patch14"),
         device=kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
     )
@@ -88,19 +88,19 @@ def clip_vit_large_patch14(pretrained: bool = False, **kwargs):
 if __name__ == "__main__":
     import timm
 
-    # 通过 timm 创建模型（名称与 register 的函数名一致）
+    # Create model using timm (name matches the registered function name)
     model = timm.create_model("clip_base", pretrained=False)
 
-    # 测试输入: [bs, 3, 224, 224]
+    # Test input: [bs, 3, 224, 224]
     bs = 4
-    # 与模型 device 对齐，避免 CPU-only 环境下 .cuda() 报错
+    # Align with model device to avoid .cuda() error in CPU-only environment
     test_input = torch.randn(bs, 3, 224, 224, device=model.device)
 
-    # 获取最后的 hidden state
+    # Get the last hidden state
     last_hidden_state = model(test_input)
 
-    # 打印形状
+    # Print shapes
     print(f"Input shape: {test_input.shape}")
     print(f"Last hidden state shape: {last_hidden_state.shape}")
-    # 预期: [4, seq_len, hidden_size]
-    # 对 CLIP ViT-B/16, 224x224 通常是 [4, 197, 768]
+    # Expected: [4, seq_len, hidden_size]
+    # For CLIP ViT-B/16, 224x224 it is typically [4, 197, 768]

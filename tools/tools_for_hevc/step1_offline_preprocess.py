@@ -8,7 +8,7 @@ import torch
 
 from dataloader.data_decord_video import dali_dataloader
 
-# 环境变量（与原代码一致）
+# Environment variables (consistent with original code)
 RANK = int(os.environ.get("RANK", "0"))
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
@@ -48,7 +48,7 @@ def _undo_dali_norm(frame_chw, mean255, std255):
 
 def _write_video_rgb(frames_uint8_hwc, out_path, fps=12):
     """
-    使用 imageio+ffmpeg 将 RGB 帧写为 mp4（yuv420p），保证通用播放器可播。
+    Use imageio+ffmpeg to write RGB frames to mp4 (yuv420p), ensuring playability in common players.
     """
     out_path = str(out_path)
     writer = imageio.get_writer(
@@ -69,29 +69,29 @@ def _write_video_rgb(frames_uint8_hwc, out_path, fps=12):
 
 def _build_epoch_order_indices(file_list_len, batch_size, num_shards=1, shard_id=0, seed=0, rank=0):
     """
-    复现 ExternalInputCallable 在 train 模式下的首个 epoch 置乱与分片、丢尾（drop-last）后的样本顺序索引。
-    用于将 DALI 输出批次映射回原始 file_list 索引，以便用原文件名命名输出。
+    Reproduce the sample order indices after shuffle, sharding, and drop-last for the first epoch in ExternalInputCallable train mode.
+    Used to map DALI output batches back to original file_list indices for naming outputs with original filenames.
     """
     shard_size = file_list_len // num_shards
     shard_offset = shard_size * shard_id
     full_iterations = shard_size // batch_size
-    sample_count = full_iterations * batch_size  # 丢尾后参与本 epoch 的样本数
+    sample_count = full_iterations * batch_size  # Number of samples participating in this epoch after drop-last
 
     rng = np.random.default_rng(seed=seed + rank)
     perm = rng.permutation(file_list_len)
     order = perm[shard_offset: shard_offset + sample_count]
-    # 返回按批次切片的二维列表：batch -> [idx0, idx1, ...]
+    # Return 2D list sliced by batch: batch -> [idx0, idx1, ...]
     batched = [order[i * batch_size: (i + 1) * batch_size] for i in range(full_iterations)]
     return batched, full_iterations
 
 
 def _bucket_dir_from_serial(base_dir: Path, serial: int) -> Path:
     """
-    使用“编号”的最后两位拆成两级目录（多级目录）：
-    - 十位作为第一级目录（0-9）
-    - 个位作为第二级目录（0-9）
-    例如 serial=123 -> 2/3；serial=37 -> 3/7
-    总计 10x10=100 个叶子文件夹。
+    Split into two-level directories using the last two digits of the "serial number" (multi-level directories):
+    - Tens digit as first level directory (0-9)
+    - Ones digit as second level directory (0-9)
+    For example serial=123 -> 2/3; serial=37 -> 3/7
+    Total 10x10=100 leaf folders.
     """
     tens = (serial // 10) % 10
     ones = serial % 10
@@ -102,22 +102,22 @@ def _bucket_dir_from_serial(base_dir: Path, serial: int) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description="Export augmented square videos (1s@16fps) and labels using DALI train pipeline")
-    parser.add_argument("--file_list", type=str, required=True, help="文本文件，每行一个视频路径")
-    parser.add_argument("--labels_npy", type=str, required=True, help="与 file-list 对应的标签 npy（可为 int/np.int64），将保存为 int32")
-    parser.add_argument("--outdir", type=str, required=True, help="输出目录，将生成 *.mp4 与 *_label.npy（多级目录，按编号最后两位分到 100 个目录）")
+    parser.add_argument("--file_list", type=str, required=True, help="Text file, one video path per line")
+    parser.add_argument("--labels_npy", type=str, required=True, help="Label npy corresponding to file-list (can be int/np.int64), will be saved as int32")
+    parser.add_argument("--outdir", type=str, required=True, help="Output directory, will generate *.mp4 and *_label.npy (multi-level directories, split into 100 folders by last two digits of serial number)")
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--sequence_length", type=int, default=64, help="期望 64（脚本将对非 64 帧进行重采样/补齐）")
+    parser.add_argument("--sequence_length", type=int, default=64, help="Expected 64 (script will resample/pad for non-64 frames)")
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--short_side_size", type=int, default=256)
     parser.add_argument("--dali_threads", type=int, default=2)
     parser.add_argument("--dali_py_workers", type=int, default=2)
-    parser.add_argument("--seed", type=int, default=0, help="影响样本置乱顺序的种子（与 ExternalInputCallable 一致：seed+RANK）")
-    parser.add_argument("--use_original_names", action="store_true", help="尝试复现置乱以用原始文件名命名输出")
-    parser.add_argument("--io_workers", type=int, default=4, help="并行写文件的线程数（建议 2-8）")
+    parser.add_argument("--seed", type=int, default=0, help="Seed affecting sample shuffle order (consistent with ExternalInputCallable: seed+RANK)")
+    parser.add_argument("--use_original_names", action="store_true", help="Try to reproduce shuffle to use original filenames for output naming")
+    parser.add_argument("--io_workers", type=int, default=4, help="Number of threads for parallel file writing (recommended 2-8)")
     parser.add_argument("--local_rank")
     args = parser.parse_args()
 
-    # 从环境变量获取分片信息（DeepSpeed/分布式环境）
+    # Get sharding info from environment variables (DeepSpeed/distributed environment)
     num_shards = WORLD_SIZE
     shard_id = RANK
     print(f"[Shard] Using env sharding: num_shards={num_shards}, shard_id={shard_id} (WORLD_SIZE={WORLD_SIZE}, RANK={RANK}, LOCAL_RANK={LOCAL_RANK})")
@@ -125,7 +125,7 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # 每张卡自己的 mp4 相对路径列表（相对于 outdir）
+    # mp4 relative path list for each GPU (relative to outdir)
     mp4_rel_paths = []
 
     with open(args.file_list, "r", encoding="utf-8") as f:
@@ -137,11 +137,11 @@ def main():
     if len(labels_arr) < len(file_list):
         raise SystemExit(f"labels-npy shorter than file_list: {len(labels_arr)} < {len(file_list)}")
 
-    # 与 dali_dataloader 保持一致的 mean/std（乘以 255）
+    # mean/std consistent with dali_dataloader (multiplied by 255)
     mean255 = [x * 255 for x in [0.48145466, 0.4578275, 0.40821073]]
     std255 = [x * 255 for x in [0.26862954, 0.26130258, 0.27577711]]
 
-    # 构建 DALI 迭代器（train 模式）
+    # Build DALI iterator (train mode)
     dataloader = dali_dataloader(
         file_list=file_list,
         label=labels_arr,
@@ -158,7 +158,7 @@ def main():
         shard_id=shard_id,
     )
 
-    # 复现本 epoch 的样本顺序（用于命名）
+    # Reproduce sample order for this epoch (for naming)
     planned_batches = None
     total_planned_batches = None
     if args.use_original_names and num_shards == 1:
@@ -197,18 +197,18 @@ def main():
 
         B, C, F, H, W = vids_np.shape
 
-        # 计算本批次每个样本的命名与“编号”（用于分桶目录）
+        # Calculate naming and "serial number" for each sample in this batch (for bucket directory)
         names_for_batch = []
         serials_for_batch = []
         fallback = False
         if planned_batches is not None and batch_idx < len(planned_batches):
             idxs = planned_batches[batch_idx]
             if len(idxs) == B:
-                # 尝试校验标签是否一致（如不一致则回退）
+                # Try to verify label consistency (fallback if inconsistent)
                 try:
                     for j in range(B):
                         src_idx = idxs[j]
-                        # labels_arr[src_idx] 可能是 int 或数组
+                        # labels_arr[src_idx] may be int or array
                         src_label = labels_arr[src_idx]
                         src_label_int = int(src_label) if np.isscalar(src_label) else int(src_label[0])
                         out_label_int = int(labs_np[j]) if np.isscalar(labs_np[j]) else int(labs_np[j][0])
@@ -220,7 +220,7 @@ def main():
                             src_idx = idxs[j]
                             stem = Path(file_list[src_idx]).stem
                             names_for_batch.append(stem)
-                            # 使用 file_list 的索引作为稳定编号
+                            # Use file_list index as stable serial number
                             serials_for_batch.append(int(src_idx))
                 except Exception:
                     fallback = True
@@ -230,17 +230,17 @@ def main():
             fallback = True
 
         if fallback:
-            # 用顺序编号命名，编号也用顺序号
+            # Name with sequential numbering, serial also uses sequential number
             names_for_batch = [f"rank_{RANK:03d}_sample_{saved + j:010d}" for j in range(B)]
             serials_for_batch = [int(saved + j) for j in range(B)]
 
-        # 并行写文件（按编号最后两位分到 100 个多级目录：十位/个位）
+        # Parallel file writing (split into 100 multi-level directories by last two digits of serial: tens/ones)
         io_workers = args.io_workers if args.io_workers and args.io_workers > 0 else max(2, min(8, (os.cpu_count() or 4) // 2))
 
         futures = []
         with ThreadPoolExecutor(max_workers=io_workers) as ex:
             for b in range(B):
-                sample = vids_np[b]  # C x F x H x W (numpy 视图, 线程间无需拷贝)
+                sample = vids_np[b]  # C x F x H x W (numpy view, no copy needed between threads)
                 label_val = labs_np[b]
                 if isinstance(label_val, np.ndarray):
                     label_val = label_val.squeeze()
@@ -260,11 +260,11 @@ def main():
                     )
                 )
 
-            # 按提交顺序收集（保持打印顺序稳定；也可用 as_completed 提前打印）
+            # Collect in submission order (keep print order stable; can also use as_completed for early printing)
             for fut in futures:
                 out_mp4_s, out_npy_s, label_i = fut.result()
                 saved += 1
-                # 记录相对 outdir 的 mp4 路径
+                # Record mp4 path relative to outdir
                 rel_mp4 = Path(out_mp4_s).relative_to(outdir).as_posix()
                 mp4_rel_paths.append(rel_mp4)
 
@@ -273,7 +273,7 @@ def main():
 
         batch_idx += 1
 
-    # 每张卡将自己的 mp4 相对路径列表写到文件
+    # Each GPU writes its mp4 relative path list to file
     list_file = outdir / f"mp4_list_rank_{RANK:03d}.txt"
     with open(list_file, "w", encoding="utf-8") as f:
         if mp4_rel_paths:
