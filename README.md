@@ -322,98 +322,81 @@ bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 
 #### OV-Encoder Codec Evaluation
 
-<p>
-We release the attentive probing artifacts for our codec-based model across multiple video understanding benchmarks.
-For each dataset, we provide the codec-derived patch indices, training logs, model checkpoints, and final evaluation results.
-</p>
+We release the attentive probing artifacts for our codec-based model across multiple video understanding benchmarks. For each dataset, we provide the codec-derived patch indices, training logs, model checkpoints, and final evaluation results.
 
-<table>
-  <thead>
-    <tr>
-      <th rowspan="2">Model</th>
-      <th colspan="4">SSv2</th>
-      <th colspan="4">Diving48</th>
-      <th colspan="4">Perception Test</th>
-      <th colspan="4">CharadesEgo</th>
-      <th colspan="4">Epic-Verb</th>
-      <th colspan="4">Epic-Noun</th>
-      <th colspan="4">Kinetics-400</th>
-      <th colspan="4">HMDB51</th>
-    </tr>
-    <tr>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b>OV-Encoder (Codec)</b></td>
+> 📦 **Artifacts Repository**: All codec evaluation artifacts (codec indices, training logs, and checkpoints) are available on HuggingFace:  
+> 🤗 [lmms-lab-encoder/onevision-encoder-codec-eval](https://huggingface.co/datasets/lmms-lab-encoder/onevision-encoder-codec-eval)
 
-      <td><a href="codec_index/ssv2.json">index</a></td>
-      <td><a href="logs/ssv2.log">log</a></td>
-      <td><a href="checkpoints/ssv2.pt">ckpt</a></td>
-      <td>58.4%</td>
+**Evaluation Results Summary:**
 
-      <td><a href="codec_index/diving48.json">index</a></td>
-      <td><a href="logs/diving48.log">log</a></td>
-      <td><a href="checkpoints/diving48.pt">ckpt</a></td>
-      <td>66.0%</td>
+| Dataset | SSv2 | Diving48 | Perception Test | CharadesEgo | Epic-Verb | Epic-Noun | Kinetics-400 | HMDB51 |
+|---------|------|----------|-----------------|-------------|-----------|-----------|--------------|--------|
+| **Accuracy** | 58.4% | 66.0% | 59.7% | 12.1% | 62.2% | 53.9% | 84.3% | 83.5% |
 
-      <td><a href="codec_index/perception_test.json">index</a></td>
-      <td><a href="logs/perception_test.log">log</a></td>
-      <td><a href="checkpoints/perception_test.pt">ckpt</a></td>
-      <td>59.7%</td>
+**Available Artifacts per Dataset:**
 
-      <td><a href="codec_index/charadesego.json">index</a></td>
-      <td><a href="logs/charadesego.log">log</a></td>
-      <td><a href="checkpoints/charadesego.pt">ckpt</a></td>
-      <td>12.1%</td>
+For each dataset listed above, we provide:
+- **Codec Index** (`*.json`): Pre-computed temporally salient patch indices for efficient codec-style evaluation
+- **Training Logs** (`*.log`): Complete training logs including loss curves and intermediate metrics
+- **Checkpoints** (`*.pt`): Fine-tuned attentive probe checkpoints for each dataset
 
-      <td><a href="codec_index/epic_verb.json">index</a></td>
-      <td><a href="logs/epic_verb.log">log</a></td>
-      <td><a href="checkpoints/epic_verb.pt">ckpt</a></td>
-      <td>62.2%</td>
-
-      <td><a href="codec_index/epic_noun.json">index</a></td>
-      <td><a href="logs/epic_noun.log">log</a></td>
-      <td><a href="checkpoints/epic_noun.pt">ckpt</a></td>
-      <td>53.9%</td>
-
-      <td><a href="codec_index/k400.json">index</a></td>
-      <td><a href="logs/k400.log">log</a></td>
-      <td><a href="checkpoints/k400.pt">ckpt</a></td>
-      <td>84.3%</td>
-
-      <td><a href="codec_index/hmdb51.json">index</a></td>
-      <td><a href="logs/hmdb51.log">log</a></td>
-      <td><a href="checkpoints/hmdb51.pt">ckpt</a></td>
-      <td>83.5%</td>
-    </tr>
-  </tbody>
-</table>
-
-
-To evaluate the encoder with codec-style patch selection, first navigate to the evaluation directory:
+To download artifacts for a specific dataset:
 
 ```bash
+# Install huggingface-hub if needed
+pip install huggingface-hub
+
+# Download specific artifacts
+huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
+  --repo-type dataset \
+  --include "codec_index/<dataset>.json" \
+  --include "logs/<dataset>.log" \
+  --include "checkpoints/<dataset>.pt" \
+  --local-dir ./codec_artifacts
+
+# Replace <dataset> with: ssv2, diving48, perception_test, charadesego, epic_verb, epic_noun, k400, or hmdb51
+```
+
+
+**Running Codec-Style Evaluation:**
+
+To evaluate the encoder with codec-style patch selection:
+
+```bash
+# Navigate to evaluation directory
 cd eval_encoder
+
+# Run codec evaluation with 2K patches (recommended)
+bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh <model_weight_path>
+
+# Or with 4K patches for higher quality
+bash shells_eval_ap/eval_ov_encoder_large_4kpatches_codec.sh <model_weight_path>
 ```
 
-Then run the following command:
-
-```bash
-bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh
-```
+Replace `<model_weight_path>` with your model path, or use `lmms-lab-encoder/onevision-encoder-large` to load directly from HuggingFace.
 
 **Codec-Specific Parameters:**
-- `K_keep`: Number of patches to keep.
-- `cache_dir` (optional): Directory for cached codec patches. Use this to specify where codec-selected patches are stored/loaded when you want to persist or reuse them.
+- `K_keep`: Number of patches to keep (e.g., 2048 for 2K patches, 4096 for 4K patches)
+- `num_frames`: Total number of frames in the video sequence (typically 64 for codec evaluation)
+- `frames_token_num`: Number of tokens per frame (e.g., 256 tokens)
+- `cache_dir` (optional): Directory for cached codec patches. Use this to specify where codec-selected patches are stored/loaded when you want to persist or reuse them
+
+**Using Pre-computed Codec Indices:**
+
+To reproduce our exact results using the pre-computed codec indices:
+
+```bash
+# Download the codec indices from HuggingFace
+huggingface-cli download lmms-lab-encoder/onevision-encoder-codec-eval \
+  --repo-type dataset \
+  --include "codec_index/*.json" \
+  --local-dir ./codec_artifacts
+
+# Then run evaluation with the cache directory
+bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh \
+  lmms-lab-encoder/onevision-encoder-large \
+  --cache_dir ./codec_artifacts/codec_index
+```
 
 #### Shared Parameters
 
