@@ -321,7 +321,6 @@ bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 - `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
 
 #### OV-Encoder Codec Evaluation
-#### Evaluation Attentive Probes
 
 We provide the attentive probing artifacts for our codec-based model across a range of video understanding benchmarks.
 For each dataset, we release the codec patch indices, training logs, model checkpoint, and the final evaluation result.
