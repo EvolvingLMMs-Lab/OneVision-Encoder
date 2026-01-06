@@ -1,0 +1,5 @@
+Evaluation log for OV-Encoder (Codec) on SSv2 dataset
+Model: OV-Encoder Large
+Configuration: 2k patches, codec-based patch selection
+Dataset: Something-Something-v2 (SSv2)
+Final Accuracy: 58.4%
