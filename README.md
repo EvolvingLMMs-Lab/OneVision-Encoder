@@ -138,7 +138,75 @@ We compare the performance of different vision encoders using the Attentive Prob
   </picture>
 </p>
 
+<h4>Evaluation Attentive Probes</h4>
 
+<p>
+We release the attentive probing artifacts for our codec-based model across multiple video understanding benchmarks.
+For each dataset, we provide the codec-derived patch indices, training logs, model checkpoints, and final evaluation results.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Model</th>
+      <th colspan="4">SSv2</th>
+      <th colspan="4">Diving48</th>
+      <th colspan="4">Perception Test</th>
+      <th colspan="4">CharadesEgo</th>
+      <th colspan="4">Epic-Verb</th>
+      <th colspan="4">Epic-Noun</th>
+      <th colspan="4">Kinetics-400</th>
+      <th colspan="4">HMDB51</th>
+    </tr>
+    <tr>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+      <th>Codec Index</th><th>Logs</th><th>Checkpoint</th><th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>OV-Encoder (Codec)</b></td>
+      <td><a href="codec_index/ssv2.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_ssv2.log">log</a></td>
+      <td><a href="checkpoints/ssv2.pt">checkpoint</a></td>
+      <td>58.4%</td>
+      <td><a href="codec_index/diving48.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_diving48.log">log</a></td>
+      <td><a href="checkpoints/diving48.pt">checkpoint</a></td>
+      <td>66.0%</td>
+      <td><a href="codec_index/perception_test.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_perception_test.log">log</a></td>
+      <td><a href="checkpoints/perception_test.pt">checkpoint</a></td>
+      <td>59.7%</td>
+      <td><a href="codec_index/charadesego.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_charadesego.log">log</a></td>
+      <td><a href="checkpoints/charadesego.pt">checkpoint</a></td>
+      <td>12.1%</td>
+      <td><a href="codec_index/epic_verb.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_epic_verb.log">log</a></td>
+      <td><a href="checkpoints/epic_verb.pt">checkpoint</a></td>
+      <td>62.2%</td>
+      <td><a href="codec_index/epic_noun.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_epic_noun.log">log</a></td>
+      <td><a href="checkpoints/epic_noun.pt">checkpoint</a></td>
+      <td>53.9%</td>
+      <td><a href="codec_index/k400.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_k400.log">log</a></td>
+      <td><a href="checkpoints/k400.pt">checkpoint</a></td>
+      <td>84.3%</td>
+      <td><a href="codec_index/hmdb51.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_hmdb51.log">log</a></td>
+      <td><a href="checkpoints/hmdb51.pt">checkpoint</a></td>
+      <td>83.5%</td>
+    </tr>
+  </tbody>
+</table>
 
 ## ⚡ Quick Start
 

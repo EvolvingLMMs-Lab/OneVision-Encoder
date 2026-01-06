@@ -1,0 +1,5 @@
+Evaluation log for OV-Encoder (Codec) on Perception Test dataset
+Model: OV-Encoder Large
+Configuration: 2k patches, codec-based patch selection
+Dataset: Perception Test
+Final Accuracy: 59.7%
