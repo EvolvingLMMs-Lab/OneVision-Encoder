@@ -1,0 +1,5 @@
+Evaluation log for OV-Encoder (Codec) on Epic-Noun dataset
+Model: OV-Encoder Large
+Configuration: 2k patches, codec-based patch selection
+Dataset: Epic-Kitchens Noun
+Final Accuracy: 53.9%

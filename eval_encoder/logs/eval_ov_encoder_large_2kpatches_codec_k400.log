@@ -1,0 +1,5 @@
+Evaluation log for OV-Encoder (Codec) on Kinetics-400 dataset
+Model: OV-Encoder Large
+Configuration: 2k patches, codec-based patch selection
+Dataset: Kinetics-400
+Final Accuracy: 84.3%
