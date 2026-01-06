@@ -1,0 +1,5 @@
+Evaluation log for OV-Encoder (Codec) on HMDB51 dataset
+Model: OV-Encoder Large
+Configuration: 2k patches, codec-based patch selection
+Dataset: HMDB51
+Final Accuracy: 83.5%

@@ -1,0 +1,5 @@
+Evaluation log for OV-Encoder (Codec) on Diving48 dataset
+Model: OV-Encoder Large
+Configuration: 2k patches, codec-based patch selection
+Dataset: Diving48
+Final Accuracy: 66.0%

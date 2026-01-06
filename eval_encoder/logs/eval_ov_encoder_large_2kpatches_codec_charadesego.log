@@ -1,0 +1,5 @@
+Evaluation log for OV-Encoder (Codec) on CharadesEgo dataset
+Model: OV-Encoder Large
+Configuration: 2k patches, codec-based patch selection
+Dataset: CharadesEgo
+Final Accuracy: 12.1%
