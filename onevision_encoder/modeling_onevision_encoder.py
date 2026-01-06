@@ -562,6 +562,7 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
     def forward(
         self,
         pixel_values: torch.Tensor,
+        patch_postions: Optional[torch.Tensor] = None,
         visible_indices: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -616,13 +617,16 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
             )
 
         # 3. RoPE Construction
-        freqs_full = self.video_rope(
-            t=t_frames,
-            h=height // self.config.patch_size,
-            w=width // self.config.patch_size,
-            device=pixel_values.device,
-        )
-        freqs_visible = freqs_full[visible_indices]
+        if patch_postions is not None:
+            freqs_visible = self.video_rope.forward_from_positions(patch_postions)
+        else:
+            freqs_full = self.video_rope(
+                t=t_frames,
+                h=height // self.config.patch_size,
+                w=width // self.config.patch_size,
+                device=pixel_values.device,
+            )
+            freqs_visible = freqs_full[visible_indices]
 
         # Concatenate D/2 + D/2 -> D for applying rope
         freqs_visible = torch.cat([freqs_visible, freqs_visible], dim=-1)
