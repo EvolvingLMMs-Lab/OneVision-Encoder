@@ -172,37 +172,37 @@ For each dataset, we provide the codec-derived patch indices, training logs, mod
   <tbody>
     <tr>
       <td><b>OV-Encoder (Codec)</b></td>
-      <td><a href="codec_index/ssv2.json">index</a></td>
-      <td><a href="logs/ssv2.log">log</a></td>
-      <td><a href="checkpoints/ssv2.pt">ckpt</a></td>
+      <td><a href="codec_index/ssv2.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_ssv2.log">log</a></td>
+      <td><a href="checkpoints/ssv2.pt">checkpoint</a></td>
       <td>58.4%</td>
-      <td><a href="codec_index/diving48.json">index</a></td>
-      <td><a href="logs/diving48.log">log</a></td>
-      <td><a href="checkpoints/diving48.pt">ckpt</a></td>
+      <td><a href="codec_index/diving48.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_diving48.log">log</a></td>
+      <td><a href="checkpoints/diving48.pt">checkpoint</a></td>
       <td>66.0%</td>
-      <td><a href="codec_index/perception_test.json">index</a></td>
-      <td><a href="logs/perception_test.log">log</a></td>
-      <td><a href="checkpoints/perception_test.pt">ckpt</a></td>
+      <td><a href="codec_index/perception_test.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_perception_test.log">log</a></td>
+      <td><a href="checkpoints/perception_test.pt">checkpoint</a></td>
       <td>59.7%</td>
-      <td><a href="codec_index/charadesego.json">index</a></td>
-      <td><a href="logs/charadesego.log">log</a></td>
-      <td><a href="checkpoints/charadesego.pt">ckpt</a></td>
+      <td><a href="codec_index/charadesego.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_charadesego.log">log</a></td>
+      <td><a href="checkpoints/charadesego.pt">checkpoint</a></td>
       <td>12.1%</td>
-      <td><a href="codec_index/epic_verb.json">index</a></td>
-      <td><a href="logs/epic_verb.log">log</a></td>
-      <td><a href="checkpoints/epic_verb.pt">ckpt</a></td>
+      <td><a href="codec_index/epic_verb.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_epic_verb.log">log</a></td>
+      <td><a href="checkpoints/epic_verb.pt">checkpoint</a></td>
       <td>62.2%</td>
-      <td><a href="codec_index/epic_noun.json">index</a></td>
-      <td><a href="logs/epic_noun.log">log</a></td>
-      <td><a href="checkpoints/epic_noun.pt">ckpt</a></td>
+      <td><a href="codec_index/epic_noun.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_epic_noun.log">log</a></td>
+      <td><a href="checkpoints/epic_noun.pt">checkpoint</a></td>
       <td>53.9%</td>
-      <td><a href="codec_index/k400.json">index</a></td>
-      <td><a href="logs/k400.log">log</a></td>
-      <td><a href="checkpoints/k400.pt">ckpt</a></td>
+      <td><a href="codec_index/k400.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_k400.log">log</a></td>
+      <td><a href="checkpoints/k400.pt">checkpoint</a></td>
       <td>84.3%</td>
-      <td><a href="codec_index/hmdb51.json">index</a></td>
-      <td><a href="logs/hmdb51.log">log</a></td>
-      <td><a href="checkpoints/hmdb51.pt">ckpt</a></td>
+      <td><a href="codec_index/hmdb51.json">codec_patches_index</a></td>
+      <td><a href="eval_encoder/logs/eval_ov_encoder_large_2kpatches_codec_hmdb51.log">log</a></td>
+      <td><a href="checkpoints/hmdb51.pt">checkpoint</a></td>
       <td>83.5%</td>
     </tr>
   </tbody>
