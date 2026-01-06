@@ -1,4 +1,4 @@
-from typing import Optional, Union, tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -282,7 +282,7 @@ class OneVisionEncoderAttention(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         rotary_pos_emb: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         batch_size, q_len, _ = hidden_states.size()
 
         query_states = self.q_proj(hidden_states)
@@ -352,7 +352,7 @@ class OneVisionEncoderFlashAttention2(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         rotary_pos_emb: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass using Flash Attention 2.
         """
@@ -432,7 +432,7 @@ class OneVisionEncoderEncoderLayer(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         rotary_pos_emb: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         residual = hidden_states
         hidden_states = self.layer_norm1(hidden_states)
 
