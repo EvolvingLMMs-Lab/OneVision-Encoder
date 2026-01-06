@@ -172,42 +172,34 @@ For each dataset, we provide the codec-derived patch indices, training logs, mod
   <tbody>
     <tr>
       <td><b>OV-Encoder (Codec)</b></td>
-
       <td><a href="codec_index/ssv2.json">index</a></td>
       <td><a href="logs/ssv2.log">log</a></td>
       <td><a href="checkpoints/ssv2.pt">ckpt</a></td>
       <td>58.4%</td>
-
       <td><a href="codec_index/diving48.json">index</a></td>
       <td><a href="logs/diving48.log">log</a></td>
       <td><a href="checkpoints/diving48.pt">ckpt</a></td>
       <td>66.0%</td>
-
       <td><a href="codec_index/perception_test.json">index</a></td>
       <td><a href="logs/perception_test.log">log</a></td>
       <td><a href="checkpoints/perception_test.pt">ckpt</a></td>
       <td>59.7%</td>
-
       <td><a href="codec_index/charadesego.json">index</a></td>
       <td><a href="logs/charadesego.log">log</a></td>
       <td><a href="checkpoints/charadesego.pt">ckpt</a></td>
       <td>12.1%</td>
-
       <td><a href="codec_index/epic_verb.json">index</a></td>
       <td><a href="logs/epic_verb.log">log</a></td>
       <td><a href="checkpoints/epic_verb.pt">ckpt</a></td>
       <td>62.2%</td>
-
       <td><a href="codec_index/epic_noun.json">index</a></td>
       <td><a href="logs/epic_noun.log">log</a></td>
       <td><a href="checkpoints/epic_noun.pt">ckpt</a></td>
       <td>53.9%</td>
-
       <td><a href="codec_index/k400.json">index</a></td>
       <td><a href="logs/k400.log">log</a></td>
       <td><a href="checkpoints/k400.pt">ckpt</a></td>
       <td>84.3%</td>
-
       <td><a href="codec_index/hmdb51.json">index</a></td>
       <td><a href="logs/hmdb51.log">log</a></td>
       <td><a href="checkpoints/hmdb51.pt">ckpt</a></td>
