@@ -152,6 +152,44 @@ Performance comparison of different vision encoders using Attentive Probe evalua
 
 ### Codec Input
 
-> **TODO:** Add codec-style input documentation for temporal saliency-based patch selection.
+For codec-style temporal saliency-based patch selection, you can use the optional `patch_positions` parameter (note: in the current API, the parameter is named `patch_postions`) to provide explicit 3D positions `[t, h, w]` for each patch. This enables non-grid patch selection patterns.
+
+**Parameter Details:**
+- **Type**: `torch.Tensor` of shape `[seq_len, 3]`
+- **Format**: Each row contains `[t, h, w]` coordinates for a patch, where:
+  - `t`: temporal position (frame index)
+  - `h`: height position (patch row)
+  - `w`: width position (patch column)
+
+**Example:**
+```python
+import torch
+
+# Select specific patches from different frames
+# Assume we have 4 frames with 14x14 patches each
+num_selected_patches = 100
+
+# Build custom patch positions (t, h, w) for each selected patch
+# Example: select patches based on temporal saliency
+t_positions = torch.tensor([0, 0, 1, 2, 3, ...])  # frame indices
+h_positions = torch.tensor([5, 6, 7, 3, 8, ...])  # height positions
+w_positions = torch.tensor([5, 6, 2, 9, 4, ...])  # width positions
+
+# Stack to create [seq_len, 3] tensor
+patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1).cuda()
+
+# Forward with explicit patch positions
+with torch.no_grad():
+    outputs = model(
+        video,
+        patch_postions=patch_positions,  # Note: parameter name has typo
+        visible_indices=visible_indices
+    )
+```
+
+When `patch_positions` is provided, the model uses `forward_from_positions` to compute 3D RoPE embeddings directly from the specified positions, instead of computing them from a dense grid. This is particularly useful for:
+- Codec-style sparse patch selection based on temporal saliency
+- Non-uniform sampling patterns across frames
+- Custom attention patterns that don't follow regular grid structure
 
 ---
