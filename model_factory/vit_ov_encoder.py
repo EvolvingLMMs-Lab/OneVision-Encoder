@@ -1,5 +1,6 @@
-from onevision_encoder import OneVisionEncoderModel, OneVisionEncoderConfig
 from timm.models.registry import register_model
+
+from onevision_encoder import OneVisionEncoderConfig, OneVisionEncoderModel
 
 
 @register_model

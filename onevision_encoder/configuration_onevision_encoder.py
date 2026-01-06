@@ -1,6 +1,7 @@
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 
+
 logger = logging.get_logger(__name__)
 
 
@@ -26,7 +27,7 @@ class OneVisionEncoderConfig(PretrainedConfig):
             The number of input channels.
         image_size (`int`, *optional*, defaults to 224):
             The size (resolution) of each image.
-        patch_size (`int`, *optional*, defaults to 16):
+        patch_size (`int`, *optional*, defaults to 14):
             The size (resolution) of each patch.
         hidden_act (`str` or `function`, *optional*, defaults to `"gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler.
@@ -70,7 +71,7 @@ class OneVisionEncoderConfig(PretrainedConfig):
         num_attention_heads=16,
         num_channels=3,
         image_size=448,
-        patch_size=16,
+        patch_size=14,
         hidden_act="gelu",
         layer_norm_eps=1e-6,
         layer_norm_type="layer_norm",

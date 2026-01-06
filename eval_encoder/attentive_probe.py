@@ -3,7 +3,7 @@ import math
 import os
 import time
 import warnings
-from typing import Dict
+from typing import dict
 
 import torch
 import torch.nn.functional as F
@@ -19,8 +19,7 @@ from transformers import AutoModel
 # Ensure custom models and layers are registered
 import model_factory
 from dataloader.ap_dataloader_dali import get_dali_dataloader
-from model_factory.layers import (Siglip2MultiheadAttentionPoolingHead,
-                                  Siglip2TransformerAttentionPoolingHead)
+from model_factory.layers import Siglip2MultiheadAttentionPoolingHead
 
 warnings.filterwarnings("ignore")
 
@@ -43,8 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tubelet_size", type=int, default=1)
     parser.add_argument("--embedding_size", type=int, default=768)
     parser.add_argument("--num_classes", type=int, default=0)
-    parser.add_argument("--target_frames", type=int, default=64,
-                        help="Target number of frames to interpolate to (default: 64)")
+    parser.add_argument(
+        "--target_frames", type=int, default=64, help="Target number of frames to interpolate to (default: 64)"
+    )
 
     # Train
     parser.add_argument("--batch_size", type=int, default=32)
@@ -62,8 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dali_num_threads", type=int, default=2)
     parser.add_argument("--dali_py_num_workers", type=int, default=4)
     # ===> New: decord thread number parameter <===
-    parser.add_argument("--decord_num_threads", type=int, default=2,
-                        help="Number of threads for decord video reader.")
+    parser.add_argument("--decord_num_threads", type=int, default=2, help="Number of threads for decord video reader.")
     parser.add_argument("--short_side_size", type=int, default=256)
 
     parser.add_argument("--mean", nargs=3, type=float, default=[0.48145466, 0.4578275, 0.40821073])
@@ -88,7 +87,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def interpolate_frame_indices(frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64) -> torch.Tensor:
+def interpolate_frame_indices(
+    frame_indices: torch.Tensor, total_frames: torch.Tensor, target_frames: int = 64
+) -> torch.Tensor:
     """
     Interpolate frame indices from original video frame count to target frame count
 
@@ -127,7 +128,7 @@ def get_feature(
     model: nn.Module,
     frame_indices: torch.Tensor = None,
     total_frames: torch.Tensor = None,
-    is_training: bool = False
+    is_training: bool = False,
 ) -> torch.Tensor:
     """
     Extract features, supporting both video and image input.
@@ -140,6 +141,7 @@ def get_feature(
         total_frames: total frames per video [B]
         is_training: whether in training mode
     """
+
     def video_to_images(videos: torch.Tensor) -> torch.Tensor:
         """
         Unfold video [B, C, T, H, W] into image sequence [B*T, C, H, W]
@@ -148,15 +150,7 @@ def get_feature(
         images = videos.permute(0, 2, 1, 3, 4).reshape(-1, C, H, W)  # [B*T, C, H, W]
         return images
 
-    list_vit_single_image = [
-        "clip",
-        "siglip",
-        "siglip2",
-        "dinov2",
-        "dinov3",
-        "metaclip",
-        "aimv2"
-    ]
+    list_vit_single_image = ["clip", "siglip", "siglip2", "dinov2", "dinov3", "metaclip", "aimv2"]
     if args.model_family in list_vit_single_image:
         # ===> Image-specific branch <===
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -174,9 +168,16 @@ def get_feature(
                     # hidden_states = hidden_states.view(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
                     hidden_states = hidden_states.reshape(B, -1, hidden_states.size(-1))  # [B, seq_len, hidden_size]
                     # ===> New: sin/cos temporal positional encoding (2 lines of code) <===
-                    pos = torch.arange(T, device=videos.device).unsqueeze(1) * torch.exp(torch.arange(0, args.embedding_size, 2, device=videos.device) * (-math.log(10000.0) / args.embedding_size))  # [T, D/2]
-                    temporal_pos = torch.stack([torch.sin(pos), torch.cos(pos)], dim=2).flatten(1)[:, :args.embedding_size]  # [T, D]
-                    hidden_states = hidden_states.view(B, T, -1, args.embedding_size) + temporal_pos.unsqueeze(0).unsqueeze(2)  # Add to tokens of each frame
+                    pos = torch.arange(T, device=videos.device).unsqueeze(1) * torch.exp(
+                        torch.arange(0, args.embedding_size, 2, device=videos.device)
+                        * (-math.log(10000.0) / args.embedding_size)
+                    )  # [T, D/2]
+                    temporal_pos = torch.stack([torch.sin(pos), torch.cos(pos)], dim=2).flatten(1)[
+                        :, : args.embedding_size
+                    ]  # [T, D]
+                    hidden_states = hidden_states.view(B, T, -1, args.embedding_size) + temporal_pos.unsqueeze(
+                        0
+                    ).unsqueeze(2)  # Add to tokens of each frame
                     hidden_states = hidden_states.view(B, -1, args.embedding_size)  # [B, T*tokens_per_frame, D]
                     return hidden_states
                 else:
@@ -193,9 +194,7 @@ def get_feature(
                 if frame_indices is not None and total_frames is not None:
                     # ===> Interpolate frame indices to target_frames <===
                     interpolated_indices = interpolate_frame_indices(
-                        frame_indices,
-                        total_frames.view(-1),
-                        target_frames
+                        frame_indices, total_frames.view(-1), target_frames
                     )
                     # ===> Calculate visible_index (based on target_frames) <===
                     per = torch.arange(frame_tokens, device=device)
@@ -219,7 +218,11 @@ def get_feature(
 class ClassificationHead(nn.Module):
     def __init__(self, hidden_dim: int, num_classes: int, init_scale: float = 1e-3, probe_size=1) -> None:
         super().__init__()
-        self.pool = Siglip2MultiheadAttentionPoolingHead(hidden_size=hidden_dim, num_attention_heads=max(1, hidden_dim // 64), intermediate_size=hidden_dim * 4,)
+        self.pool = Siglip2MultiheadAttentionPoolingHead(
+            hidden_size=hidden_dim,
+            num_attention_heads=max(1, hidden_dim // 64),
+            intermediate_size=hidden_dim * 4,
+        )
         # self.pool = Siglip2TransformerAttentionPoolingHead(
         #     hidden_size=hidden_dim,
         #     num_attention_heads=max(1, hidden_dim // 64),
@@ -231,6 +234,7 @@ class ClassificationHead(nn.Module):
         self.apply(self._init_weights)
         self.fc.weight.data.mul_(init_scale)
         self.fc.bias.data.mul_(init_scale)
+
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=0.02)
@@ -239,6 +243,7 @@ class ClassificationHead(nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
+
     def forward(self, feats: torch.Tensor) -> torch.Tensor:
         x = self.pool(feats)
         x = self.norm(x)
@@ -258,7 +263,9 @@ def train_one_experiment(
     head = ClassificationHead(hidden_dim=args.embedding_size, num_classes=args.num_classes, probe_size=args.probe_size)
     head.to(device)
     head = torch.nn.parallel.DistributedDataParallel(head, device_ids=[args.local_rank])
-    optimizer = torch.optim.AdamW(head.parameters(), lr=lr, eps=1e-8, betas=(0.9, 0.999), weight_decay=args.default_weight_decay)
+    optimizer = torch.optim.AdamW(
+        head.parameters(), lr=lr, eps=1e-8, betas=(0.9, 0.999), weight_decay=args.default_weight_decay
+    )
     steps_per_epoch = len(loader_train)
     total_iters = steps_per_epoch * args.default_epoch
     if total_iters <= 0:
@@ -266,8 +273,18 @@ def train_one_experiment(
     scheduler = None
     if args.default_min_lr < lr:
         scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=args.default_min_lr / lr, total_iters=total_iters)
-    criterion = (LabelSmoothingCrossEntropy(smoothing=args.smoothing).to(device) if args.smoothing > 0.0 else nn.CrossEntropyLoss().to(device))
-    train_metrics = torchmetrics.MetricCollection({"loss": torchmetrics.aggregation.MeanMetric(), "lr": torchmetrics.aggregation.MeanMetric(), "grad_norm": torchmetrics.aggregation.MeanMetric(),}).to(device)
+    criterion = (
+        LabelSmoothingCrossEntropy(smoothing=args.smoothing).to(device)
+        if args.smoothing > 0.0
+        else nn.CrossEntropyLoss().to(device)
+    )
+    train_metrics = torchmetrics.MetricCollection(
+        {
+            "loss": torchmetrics.aggregation.MeanMetric(),
+            "lr": torchmetrics.aggregation.MeanMetric(),
+            "grad_norm": torchmetrics.aggregation.MeanMetric(),
+        }
+    ).to(device)
     best = {"acc1": 0.0, "acc5": 0.0}
 
     start_time = time.time()
@@ -283,7 +300,9 @@ def train_one_experiment(
             total_frames = batch["total_frames"].to(device, non_blocking=True)  # [B, 1]
 
             with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                feats = get_feature(args, videos, base_model, frame_indices=indices, total_frames=total_frames, is_training=True)
+                feats = get_feature(
+                    args, videos, base_model, frame_indices=indices, total_frames=total_frames, is_training=True
+                )
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 logits = head(feats)
                 loss = criterion(logits, labels)
@@ -312,7 +331,7 @@ def train_one_experiment(
                     samples_per_sec = samples_processed / elapsed_time
 
                     print(
-                        f"Epoch: [{epoch}][{i+1}/{steps_per_epoch}]  "
+                        f"Epoch: [{epoch}][{i + 1}/{steps_per_epoch}]  "
                         f"Speed: {samples_per_sec:.2f} samples/s  "
                         f"Loss: {metrics_computed['loss']:.4f}  "
                         f"LR: {metrics_computed['lr']:.6f}  "
@@ -332,7 +351,9 @@ def train_one_experiment(
             if stats["acc1"] > best["acc1"]:
                 best = stats
             if args.rank == 0:
-                print(f"[Val][Epoch {epoch}] acc1={stats['acc1']:.4f} acc5={stats['acc5']:.4f} | Best acc1={best['acc1']:.4f}")
+                print(
+                    f"[Val][Epoch {epoch}] acc1={stats['acc1']:.4f} acc5={stats['acc5']:.4f} | Best acc1={best['acc1']:.4f}"
+                )
 
     return best["acc1"], best["acc5"]
 
@@ -344,19 +365,21 @@ def evaluate(
     device: torch.device,
     base_model: nn.Module,
     loader_val,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     head.eval()
-    val_metrics = torchmetrics.MetricCollection({
-        "acc1": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=1),
-        "acc5": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=5),
-    }).to(device)
+    val_metrics = torchmetrics.MetricCollection(
+        {
+            "acc1": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=1),
+            "acc5": torchmetrics.Accuracy(task="multiclass", num_classes=args.num_classes, top_k=5),
+        }
+    ).to(device)
 
     num_crops = args.num_temporal_crops * args.num_spatial_crops
 
     all_logits, all_targets = [], []
     steps_val = len(loader_val)
     for i, batch in enumerate(loader_val):
-        videos = batch["videos"].to(device, non_blocking=True)    # [B*N, C, T, H, W]
+        videos = batch["videos"].to(device, non_blocking=True)  # [B*N, C, T, H, W]
         labels = batch["labels"].view(-1).to(device, non_blocking=True)  # [B*N]
         indices = batch["indices"].to(device, non_blocking=True)
         total_frames = batch["total_frames"].to(device, non_blocking=True)
@@ -364,20 +387,27 @@ def evaluate(
         B = videos.shape[0] // num_crops
         # Reshape to [B, num_crops, ...]
         videos = videos.view(B, num_crops, *videos.shape[1:])
-        labels = labels.view(B, num_crops)[:, 0]   # [B], labels are the same for the same video
+        labels = labels.view(B, num_crops)[:, 0]  # [B], labels are the same for the same video
         indices = indices.view(B, num_crops, *indices.shape[1:])
         total_frames = total_frames.view(B, num_crops)[:, 0]
 
         logits_per_crop = []
         for crop_id in range(num_crops):
-            feats = get_feature(args, videos[:, crop_id], base_model, frame_indices=indices[:, crop_id], total_frames=total_frames, is_training=False)
+            feats = get_feature(
+                args,
+                videos[:, crop_id],
+                base_model,
+                frame_indices=indices[:, crop_id],
+                total_frames=total_frames,
+                is_training=False,
+            )
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                logits = head(feats)      # [B, num_classes]
+                logits = head(feats)  # [B, num_classes]
                 logits_per_crop.append(logits)
         # [num_crops, B, num_classes] -> [B, num_crops, num_classes]
         logits_all = torch.stack(logits_per_crop, dim=1)
         # Average over crop dimension (can use softmax then average / directly average logits)
-        logits_mean = logits_all.mean(dim=1)   # [B, num_classes]
+        logits_mean = logits_all.mean(dim=1)  # [B, num_classes]
         # Collect results
         all_logits.append(logits_mean)
         all_targets.append(labels)
@@ -385,26 +415,23 @@ def evaluate(
         if (i + 1) % args.print_freq == 0 and args.rank == 0:
             print(f"Eval: [{i + 1}/{steps_val}]")
 
-    all_logits = torch.cat(all_logits, dim=0)        # [total_B, num_classes]
-    all_targets = torch.cat(all_targets, dim=0)      # [total_B]
+    all_logits = torch.cat(all_logits, dim=0)  # [total_B, num_classes]
+    all_targets = torch.cat(all_targets, dim=0)  # [total_B]
 
     val_metrics.update(all_logits, all_targets)
     computed_metrics = val_metrics.compute()
     if args.rank == 0:
         print(
-            f"* Final Acc@1: {computed_metrics['acc1'] * 100:.1f} "
-            f"| Final Acc@5: {computed_metrics['acc5'] * 100:.1f}"
+            f"* Final Acc@1: {computed_metrics['acc1'] * 100:.1f} | Final Acc@5: {computed_metrics['acc5'] * 100:.1f}"
         )
     return {k: v.item() * 100 for k, v in computed_metrics.items()}
 
 
 def get_model(args: argparse.Namespace) -> nn.Module:
-
     if args.model_name == "ov_encoder_large":
         model = AutoModel.from_pretrained(
-            "lmms-lab-encoder/onevision-encoder-large",
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2")
+            "lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True, attn_implementation="flash_attention_2"
+        )
         model = torch.compile(model)
         return model
 
@@ -418,7 +445,26 @@ def get_model(args: argparse.Namespace) -> nn.Module:
 
 def main() -> None:
     args = parse_args()
-    nb_classes_map = {"charadesego": 157, "CharadesEgo_v1_only3rd": 157, "Drone_Action": 13, "epic_noun": 300, "hmdb51": 51, "k400": 400, "k700": 700, "mit": 339, "rareact": 149, "ucf101": 101, "CharadesEgo_v1_only1st": 157, "diving48": 48, "epic_verb": 97, "k600": 600, "k710": 710, "perception_test": 63, "ssv2": 174, "SSV2": 174,}
+    nb_classes_map = {
+        "charadesego": 157,
+        "CharadesEgo_v1_only3rd": 157,
+        "Drone_Action": 13,
+        "epic_noun": 300,
+        "hmdb51": 51,
+        "k400": 400,
+        "k700": 700,
+        "mit": 339,
+        "rareact": 149,
+        "ucf101": 101,
+        "CharadesEgo_v1_only1st": 157,
+        "diving48": 48,
+        "epic_verb": 97,
+        "k600": 600,
+        "k710": 710,
+        "perception_test": 63,
+        "ssv2": 174,
+        "SSV2": 174,
+    }
     args.num_classes = nb_classes_map[args.dataset]
 
     if args.dataset == "ssv2":
@@ -470,14 +516,15 @@ def main() -> None:
         args.rank = 0
         args.local_rank = 0
         args.world_size = 1
-        distributed.init_process_group(backend="nccl", init_method="tcp://127.0.0.1:12584", rank=args.rank, world_size=args.world_size)
+        distributed.init_process_group(
+            backend="nccl", init_method="tcp://127.0.0.1:12584", rank=args.rank, world_size=args.world_size
+        )
     torch.cuda.set_device(args.local_rank)
     device = torch.device(args.local_rank)
     args.global_rank = args.rank
 
     if args.rank == 0:
         print("Create data loaders...")
-
 
     if args.model_family in ["siglip", "siglip2"]:
         args.mean = [0.5, 0.5, 0.5]
@@ -499,7 +546,7 @@ def main() -> None:
         dali_num_threads=args.dali_num_threads,
         dali_py_num_workers=args.dali_py_num_workers,
         decord_num_threads=args.decord_num_threads,
-        seed=args.seed
+        seed=args.seed,
         # Training does not need num_temporal_crops/num_spatial_crops (only used for evaluation)
     )
     val_loader = get_dali_dataloader(
