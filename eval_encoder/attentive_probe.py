@@ -226,7 +226,7 @@ def get_feature(
                     # Stack to create patch_positions: [bs, seq_len * frame_tokens, 3]
                     patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
 
-                    enc_out = model(videos, patch_positions, visible_index)
+                    enc_out = model(videos, patch_positions=patch_positions)
                     if hasattr(enc_out, "last_hidden_state"):
                         outputs = enc_out.last_hidden_state
                     else:
