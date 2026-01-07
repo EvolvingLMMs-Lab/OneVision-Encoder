@@ -564,7 +564,7 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         self,
         pixel_values: torch.Tensor,
         visible_indices: Optional[torch.Tensor] = None,
-        patch_postions: Optional[torch.Tensor] = None,
+        patch_positions: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -618,8 +618,8 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
             )
 
         # 3. RoPE Construction
-        if patch_postions is not None:
-            freqs_visible = self.video_rope.forward_from_positions(patch_postions)
+        if patch_positions is not None:
+            freqs_visible = self.video_rope.forward_from_positions(patch_positions)
         else:
             freqs_full = self.video_rope(
                 t=t_frames,
