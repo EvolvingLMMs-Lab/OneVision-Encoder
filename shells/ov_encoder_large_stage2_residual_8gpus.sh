@@ -64,10 +64,10 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --num_frames 8 \
   --image_size_video 224 \
   --embedding_size 1024 \
-  --list_batch_sizes 2 2 \
+  --list_batch_sizes 8 8 \
   --lr 0.00005 \
   --warmup_ratio 0.001 \
-  --list_datasets onevision_encoder_si_cfs_single_node configs_for_onevision_encoder_versions_0_0_2_square_with_index_filtered  \
+  --list_datasets onevision_encoder_si_cfs_single_node onevision_encoder_video_codec  \
   --output "ckpts/$(basename "$0" .sh)" \
   --init_backbone $init_backbone \
   --list_init_partial_fc_paths $path_pfc_si NULL \

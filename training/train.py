@@ -11,16 +11,16 @@ from timm import create_model
 from torch import distributed
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
-from transformers import CLIPImageProcessor
 
 import dataset
 import model_factory
 from dataset import DATASET_REGISTRY, Property
 from onevision_encoder import OneVisionEncoderConfig, OneVisionEncoderModel
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
-from training.fused_partial_fc_v2_multi_res import (CombinedMarginLoss,
-                                                    PartialFC_V2)
+from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
+from transformers import CLIPImageProcessor
+
 
 torch._dynamo.config.optimize_ddp = False
 
@@ -42,27 +42,34 @@ parser.add_argument("--num_frames", type=int, default=8, help="Number of frames 
 parser.add_argument("--random_diff", type=int, default=10, help="Random diff for sampling jitter")
 
 # Multi-dataset (heads)
-parser.add_argument("--list_datasets", nargs='+', type=str, default=["k710_ssv2_univit_pfs"],
-                    help="Dataset registry names, one or more")
-parser.add_argument("--list_batch_sizes", nargs='+', type=int, default=[32],
-                    help="Per-dataset batch sizes")
-parser.add_argument("--list_sample_rates", nargs='+', type=float, default=[0.1],
-                    help="Per-dataset sampling rate")
-parser.add_argument("--list_margins", nargs='+', type=float, default=[0.3],
-                    help="Per-dataset loss margin")
-parser.add_argument("--list_filters", nargs='+', type=float, default=[0.75],
-                    help="Per-dataset filter ratio or threshold")
-parser.add_argument("--list_lr_pfc_weights", nargs='+', type=float, default=[1.0],
-                    help="Per-dataset LR scale for PFC params")
-parser.add_argument("--list_loss_weights", nargs='+', type=float, default=[1.0],
-                    help="Per-dataset loss weights")
-parser.add_argument("--list_init_partial_fc_paths", nargs='+', type=str, default=["NULL"],
-                    help="Per-dataset init path for partial-FC or 'NULL'")
+parser.add_argument(
+    "--list_datasets",
+    nargs="+",
+    type=str,
+    default=["k710_ssv2_univit_pfs"],
+    help="Dataset registry names, one or more",
+)
+parser.add_argument("--list_batch_sizes", nargs="+", type=int, default=[32], help="Per-dataset batch sizes")
+parser.add_argument("--list_sample_rates", nargs="+", type=float, default=[0.1], help="Per-dataset sampling rate")
+parser.add_argument("--list_margins", nargs="+", type=float, default=[0.3], help="Per-dataset loss margin")
+parser.add_argument("--list_filters", nargs="+", type=float, default=[0.75], help="Per-dataset filter ratio or threshold")
+parser.add_argument("--list_lr_pfc_weights", nargs="+", type=float, default=[1.0], help="Per-dataset LR scale for PFC params")
+parser.add_argument("--list_loss_weights", nargs="+", type=float, default=[1.0], help="Per-dataset loss weights")
+parser.add_argument(
+    "--list_init_partial_fc_paths",
+    nargs="+",
+    type=str,
+    default=["NULL"],
+    help="Per-dataset init path for partial-FC or 'NULL'",
+)
 
 # Model
-parser.add_argument("--model_name", default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head", help="Backbone model name")
-parser.add_argument("--model_weight", default=None,
-                    help="Path to pretrained weights, HuggingFace model ID, or None")
+parser.add_argument(
+    "--model_name",
+    default="pretrain_encoder_small_patch16_224_v10_12_rms_unmask_with_head",
+    help="Backbone model name",
+)
+parser.add_argument("--model_weight", default=None, help="Path to pretrained weights, HuggingFace model ID, or None")
 parser.add_argument("--embedding_size", type=int, default=384, help="Embedding dimension of the head")
 parser.add_argument("--gradient_checkpoint", type=int, default=0, help="Enable gradient checkpointing (0/1)")
 parser.add_argument("--mask", type=int, default=0, help="Enable mask-related training (0/1)")
@@ -100,12 +107,9 @@ parser.add_argument("--must_num", type=int, default=256, help="Number of indices
 parser.add_argument("--num_tokens_per_frame", type=int, default=256, help="Number of tokens per frame")
 
 # Multi-frame training (batch size inversely proportional to frame count)
-parser.add_argument("--enable_multi_frame", type=int, default=1,
-                    help="Enable multi-frame training (0/1)")
-parser.add_argument("--multi_frame_list", nargs='+', type=int, default=[8],
-                    help="List of frame counts to use in multi-frame training")
-parser.add_argument("--base_num_frames", type=int, default=8,
-                    help="Base frame count for batch size calculation")
+parser.add_argument("--enable_multi_frame", type=int, default=1, help="Enable multi-frame training (0/1)")
+parser.add_argument("--multi_frame_list", nargs="+", type=int, default=[8], help="List of frame counts to use in multi-frame training")
+parser.add_argument("--base_num_frames", type=int, default=8, help="Base frame count for batch size calculation")
 
 args = parser.parse_args()
 
@@ -136,6 +140,7 @@ else:
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     logger.setLevel(logging.INFO)
+
 
 def unwrap_module(model):
     """Unwraps a model from DistributedDataParallel or torch.compile if it is wrapped."""
@@ -194,7 +199,7 @@ def save_hf_checkpoint(output_dir, backbone, global_step, image_size=448):
             do_center_crop=True,
             do_normalize=True,
             do_resize=True,
-            feature_extractor_type="CLIPFeatureExtractor"
+            feature_extractor_type="CLIPFeatureExtractor",
         )
         processor.save_pretrained(hf_dir)
         logger.info(f"Saved CLIPImageProcessor to {hf_dir}")
@@ -213,7 +218,6 @@ def main():
     args.image_size_video = [int(x) for x in args.image_size_video.split(",")]
     if len(args.image_size_video) == 1:
         args.image_size_video = args.image_size_video * 2
-
 
     args.list_datasets = [DATASET_REGISTRY.get(x)() for x in args.list_datasets]
     args.num_heads = len(args.list_datasets)
@@ -246,8 +250,7 @@ def main():
         base_bs = args.list_batch_sizes[head_id]
         if dataset_config.dali_type == "decord":
             adjusted_bs = base_bs * 1
-            logger.info(f"[head_id={head_id}] Video branch: base_bs={base_bs}, "
-                        f"adjusted_bs={adjusted_bs} (scale={1}x)")
+            logger.info(f"[head_id={head_id}] Video branch: base_bs={base_bs}, adjusted_bs={adjusted_bs} (scale={1}x)")
         else:
             adjusted_bs = base_bs
             logger.info(f"[head_id={head_id}] Image branch: bs={adjusted_bs}")
@@ -261,7 +264,6 @@ def main():
         msg = f"{format(arg, '<30')}  {format(str(getattr(args, arg)))}"
         logger.info(msg)
 
-
     # Initialize models using timm's create_model
     backbone = create_model(args.model_name).cuda().train()
 
@@ -271,10 +273,7 @@ def main():
         # Check if init_backbone is a HuggingFace model directory
         if is_hf_model_dir(args.init_backbone):
             # Load from HuggingFace pretrained directory
-            backbone = OneVisionEncoderModel.from_pretrained(
-                args.init_backbone,
-                torch_dtype=torch.bfloat16
-            ).cuda().train()
+            backbone = OneVisionEncoderModel.from_pretrained(args.init_backbone, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2").cuda().train()
             logger.info(f"Loaded HuggingFace backbone from {args.init_backbone}")
         else:
             # Load from .pt checkpoint file
@@ -301,13 +300,7 @@ def main():
         dataset_config: Property
 
         if dataset_config.pfc_types[0] == "partial_fc":
-            margin_loss = CombinedMarginLoss(
-                64,
-                1,
-                0,
-                args.list_margins[head_id],
-                args.list_filters[head_id]
-            )
+            margin_loss = CombinedMarginLoss(64, 1, 0, args.list_margins[head_id], args.list_filters[head_id])
             partial_fc = PartialFC_V2(
                 margin_loss,
                 args.embedding_size,
@@ -316,9 +309,7 @@ def main():
                 fp16=False,
             )
         else:
-            raise ValueError(
-                f"dataset_config.pfc_type {dataset_config.pfc_types[0]} not support!"
-            )
+            raise ValueError(f"dataset_config.pfc_type {dataset_config.pfc_types[0]} not support!")
 
         partial_fc.train().cuda()
 
@@ -354,9 +345,7 @@ def main():
         optimizer_cls = torch.optim.AdamW
 
         opt = optimizer_cls(parameters, lr=args.lr, weight_decay=args.weight_decay)
-        lr_scheduler = PolynomialLRWarmup(
-            opt, int(args.total_steps * args.warmup_ratio), args.total_steps, 2
-        )
+        lr_scheduler = PolynomialLRWarmup(opt, int(args.total_steps * args.warmup_ratio), args.total_steps, 2)
     else:
         raise ValueError(f"{args.opt} not support!")
 
@@ -370,7 +359,7 @@ def main():
         args.list_head_names,
     )
     if result is not None:
-        global_step = result['global_step']
+        global_step = result["global_step"]
         logger.info(f"Resuming from step {global_step}")
     else:
         global_step = 0
@@ -382,16 +371,17 @@ def main():
             device_ids=[local_rank],
             bucket_cap_mb=32,
             find_unused_parameters=True,
-            static_graph=True)
+            static_graph=True,
+        )
 
     backbone_ddp = wrap_ddp(backbone)
     backbone_ddp_compiled = torch.compile(backbone_ddp)
 
     # Get patch_size from backbone config (outside of training loop for efficiency)
     backbone_module = unwrap_module(backbone)
-    if hasattr(backbone_module, 'config'):
+    if hasattr(backbone_module, "config"):
         patch_size = backbone_module.config.patch_size
-    elif hasattr(backbone_module, 'embeddings') and hasattr(backbone_module.embeddings, 'patch_size'):
+    elif hasattr(backbone_module, "embeddings") and hasattr(backbone_module.embeddings, "patch_size"):
         patch_size = backbone_module.embeddings.patch_size
     else:
         patch_size = 14  # default fallback
@@ -400,8 +390,7 @@ def main():
     list_head_names = []
     for head_id, dataset_config in enumerate(args.list_datasets):
         if dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video_sampling_frame import \
-                get_dali_dataloader
+            from dataloader.data_decord_video_sampling_frame import get_dali_dataloader
 
             train_iter = get_dali_dataloader(
                 data_root_path="",
@@ -413,11 +402,11 @@ def main():
                 batch_size=args.list_batch_sizes_adjusted[head_id],
                 input_size=args.image_size_video[0],
                 sequence_length=args.num_frames,
-                seed=0+rank,
+                seed=0 + rank,
                 shard_id=dataset_config.shard_id,
-                num_shards=dataset_config.num_shards)
-            logger.info(f"[head_id={head_id}] Video dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, "
-                        f"num_frames={args.num_frames}")
+                num_shards=dataset_config.num_shards,
+            )
+            logger.info(f"[head_id={head_id}] Video dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, num_frames={args.num_frames}")
 
         elif dataset_config.dali_type == "decord_residual":
             from dataloader.data_decord_llava_vit import get_dali_dataloader
@@ -432,50 +421,49 @@ def main():
                 batch_size=args.list_batch_sizes_adjusted[head_id],
                 input_size=args.image_size_video[0],
                 sequence_length=64,
-                seed=0+rank,
+                seed=0 + rank,
                 shard_id=dataset_config.shard_id,
-                num_shards=dataset_config.num_shards)
+                num_shards=dataset_config.num_shards,
+            )
 
-            logger.info(f"[head_id={head_id}] Video residual dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, "
-                        f"num_frames=64")
+            logger.info(f"[head_id={head_id}] Video residual dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, num_frames=64")
 
         elif dataset_config.dali_type == "origin":
             if args.debug:
                 from dataloader.data_v2 import SyntheticDataIter
-                train_iter = SyntheticDataIter(
-                    args.list_batch_sizes_adjusted[head_id], 224, local_rank
-                )
+
+                train_iter = SyntheticDataIter(args.list_batch_sizes_adjusted[head_id], 224, local_rank)
             else:
                 from dataloader.data_v2 import MultiRecDALIWarper
+
                 train_iter = MultiRecDALIWarper(
                     list_prefix=dataset_config.prefixes,
                     batch_size=args.list_batch_sizes_adjusted[head_id],
                     image_size=args.image_size,
                     workers=args.workers,
                     shard_id=dataset_config.shard_id,
-                    num_shards=dataset_config.num_shards
-        )
+                    num_shards=dataset_config.num_shards,
+                )
 
         elif dataset_config.dali_type == "ocr":
             if args.debug:
                 from dataloader.data_v2_ocr import SyntheticDataIter
-                train_iter = SyntheticDataIter(
-                    args.list_batch_sizes_adjusted[head_id], 224, local_rank
-                )
+
+                train_iter = SyntheticDataIter(args.list_batch_sizes_adjusted[head_id], 224, local_rank)
             else:
                 from dataloader.data_v2_ocr import MultiRecDALIWarper
+
                 train_iter = MultiRecDALIWarper(
                     list_prefix=dataset_config.prefixes,
                     batch_size=args.list_batch_sizes_adjusted[head_id],
                     image_size=args.image_size,
                     workers=args.workers,
                     shard_id=dataset_config.shard_id,
-                    num_shards=dataset_config.num_shards)
+                    num_shards=dataset_config.num_shards,
+                )
 
         else:
-            raise ValueError(
-                f"dataset_config.dali_type {dataset_config.dali_type} not support!"
-            )
+            raise ValueError(f"dataset_config.dali_type {dataset_config.dali_type} not support!")
 
         list_dali_dataloader.append(train_iter)
         list_head_names.append(dataset_config.name)
@@ -495,17 +483,13 @@ def main():
     )
     log_args(args, logger, writer=tb_writer, save_dir=args.output, rank=rank)
 
-
     for head_id, dataset_config in enumerate(args.list_datasets):
         name = dataset_config.name if hasattr(dataset_config, "name") else f"head_{head_id}"
         prefixes = getattr(dataset_config, "prefixes", None)
-        logger.info(
-            f"[rank {rank}][local_rank {local_rank}] head_id={head_id} dataset={name} assigned_prefixes_num={len(prefixes) if prefixes is not None else 'N/A'}"
-        )
+        logger.info(f"[rank {rank}][local_rank {local_rank}] head_id={head_id} dataset={name} assigned_prefixes_num={len(prefixes) if prefixes is not None else 'N/A'}")
         if prefixes is not None:
             preview_prefixes = prefixes
             logger.info(f"[rank {rank}][local_rank {local_rank}] prefixes preview: {preview_prefixes}")
-
 
     list_iter = []
     list_next_data_batch = []
@@ -526,22 +510,17 @@ def main():
         list_embedding = []
         list_batch_sizes = []
         for head_id, dataset_config in enumerate(args.list_datasets):
-
             dataset_config: Property
             if dataset_config.dali_type in ["decord"]:
-                videos = list_data_batch[head_id]["videos"]       # [B, C, T, H, W]
+                videos = list_data_batch[head_id]["videos"]  # [B, C, T, H, W]
                 labels = list_data_batch[head_id]["labels"].view(-1)
-                frame_indices = list_data_batch[head_id]["indices"]   # [B, seq_len]
+                frame_indices = list_data_batch[head_id]["indices"]  # [B, seq_len]
                 total_frames = list_data_batch[head_id]["total_frames"]  # [B, 1] or [B]
 
                 bs, C, T, H, W = videos.shape
                 target_frames = 64
 
-                interpolated_indices = interpolate_frame_indices(
-                    frame_indices,
-                    total_frames.view(-1),
-                    target_frames
-                )
+                interpolated_indices = interpolate_frame_indices(frame_indices, total_frames.view(-1), target_frames)
 
                 seq_len = frame_indices.shape[1]
                 frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
@@ -551,12 +530,11 @@ def main():
                 visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
 
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-
                     output = backbone_ddp_compiled(videos, visible_index)
                     if hasattr(output, "pooler_output"):
                         head_embedding = output.pooler_output
                     else:
-                        head_embedding  = output["head_output"]
+                        head_embedding = output["head_output"]
 
                 head_embedding = head_embedding.float()
                 list_embedding.append(head_embedding)
@@ -570,7 +548,7 @@ def main():
                 visible_indices = list_data_batch[head_id]["video_visible_indices"].long()  # [16, >=2048]
 
                 bs = visible_indices.shape[0]  # 16
-                out = visible_indices[:, :args.target_num].clone()  # [16, 2048]
+                out = visible_indices[:, : args.target_num].clone()  # [16, 2048]
                 n1, n2 = int(bs * 0.5), int(bs * 0.875)  # n1=8, n2=14
 
                 idx_range = torch.arange(bs).cuda()  # [16]
@@ -580,14 +558,16 @@ def main():
 
                 # mask_residual: select first args.target_num patches
                 if mask_residual.any():
-                    out[mask_residual] = visible_indices[mask_residual, :args.target_num]  # [8, 2048]
+                    out[mask_residual] = visible_indices[mask_residual, : args.target_num]  # [8, 2048]
 
                 # mask_frame_sampling: sample 8 frames from 64, get all patches per frame
                 FRAMES = 64
                 if mask_frame_sampling.any():
                     nB = mask_frame_sampling.sum().item()  # 6
                     # frames: sample 1 frame from each of 8 bins (each bin has 8 frames)
-                    frames = torch.arange(args.num_frames).cuda() * (FRAMES // args.num_frames) + torch.randint(FRAMES // args.num_frames, (nB, args.num_frames)).cuda()  # [6, 8], values in [0,7], [8,15], ..., [56,63]
+                    frames = (
+                        torch.arange(args.num_frames).cuda() * (FRAMES // args.num_frames) + torch.randint(FRAMES // args.num_frames, (nB, args.num_frames)).cuda()
+                    )  # [6, 8], values in [0,7], [8,15], ..., [56,63]
                     # sel_b: for each frame, get all 256 patches
                     out[mask_frame_sampling] = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)  # [6, 8*256] = [6, 2048]
 
@@ -614,9 +594,8 @@ def main():
                     combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)  # [14, 3, 8, 224, 224]
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        combined_head_output = backbone_ddp_compiled(combined_head_input, vis_idx)  # input: [14, 3, 8, 224, 224], vis_idx: [14, 2048]
+                        combined_head_output = backbone_ddp_compiled(combined_head_input, visible_indices=vis_idx)  # input: [14, 3, 8, 224, 224], vis_idx: [14, 2048]
                     combined_head_output = (combined_head_output.pooler_output if hasattr(combined_head_output, "pooler_output") else combined_head_output["head_output"]).float()  # [14, D]
-
 
                 if mask_collage.any():
                     coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)  # [2]
@@ -626,9 +605,7 @@ def main():
                     head_subset = head_input[coll_idx]  # [2, 3, 64, 224, 224]
 
                     if head_subset.dim() != 5 or head_subset.size(2) != FRAMES:
-                        raise RuntimeError(
-                            f"collage branch expects head_subset shape [nC, C, {FRAMES}, H, W], got {tuple(head_subset.shape)}"
-                        )
+                        raise RuntimeError(f"collage branch expects head_subset shape [nC, C, {FRAMES}, H, W], got {tuple(head_subset.shape)}")
 
                     nC = head_subset.size(0)  # 2
                     Cf = head_subset.size(1)  # 3
@@ -648,7 +625,7 @@ def main():
                     if hasattr(collage_head_output, "pooler_output"):
                         collage_head_output = collage_head_output.pooler_output
                     else:
-                        collage_head_output  = collage_head_output["head_output"]
+                        collage_head_output = collage_head_output["head_output"]
                     collage_head_output = collage_head_output.float()  # [2, D]
 
                 D = combined_head_output.size(1)  # embedding dimension
@@ -665,12 +642,11 @@ def main():
                 head_input = list_data_batch[head_id]["pixel_values"]
                 list_batch_sizes.append(head_input.size(0))
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-
                     output = backbone_ddp_compiled(head_input)
                     if hasattr(output, "pooler_output"):
                         head_embedding = output.pooler_output
                     else:
-                        head_embedding  = output["head_output"]
+                        head_embedding = output["head_output"]
                 head_embedding = head_embedding.float()
 
                 list_embedding.append(head_embedding)
@@ -687,14 +663,12 @@ def main():
             label_select = dataset_config.label_select
             random_diff = dataset_config.random_diff
             loss_weight = args.list_loss_weights[head_id]
-            head_label = head_label[
-                :, label_select : label_select + random_diff
-            ]
+            head_label = head_label[:, label_select : label_select + random_diff]
             head_loss = pfc(head_embedding, head_label, random_diff) * loss_weight
             list_loss.append(head_loss)
             list_loss_float.append(head_loss.item())
 
-        is_accumulation_step = (global_step % args.backward_passes_per_step != 0)
+        is_accumulation_step = global_step % args.backward_passes_per_step != 0
         scaled_loss = sum(list_loss) / args.backward_passes_per_step
 
         if is_accumulation_step:
@@ -716,7 +690,7 @@ def main():
             lr_scheduler=lr_scheduler,
             list_loss_float=list_loss_float,
             batch_size=args.batch_size,
-            num_samples=num_samples
+            num_samples=num_samples,
         )
 
         global_step += 1
@@ -736,12 +710,7 @@ def main():
                 keep_num=20,
             )
             # Also save in HuggingFace format
-            save_hf_checkpoint(
-                args.output,
-                backbone,
-                global_step=global_step,
-                image_size=args.image_size[0]
-            )
+            save_hf_checkpoint(args.output, backbone, global_step=global_step, image_size=args.image_size[0])
 
         if global_step > args.total_steps:
             save_checkpoint(
@@ -755,12 +724,7 @@ def main():
                 keep_num=20,
             )
             # Also save final model in HuggingFace format
-            save_hf_checkpoint(
-                args.output,
-                backbone,
-                global_step=global_step,
-                image_size=args.image_size[0]
-            )
+            save_hf_checkpoint(args.output, backbone, global_step=global_step, image_size=args.image_size[0])
             logger.info(f"Training completed at step {global_step}")
             exit()
 
@@ -784,7 +748,7 @@ class BatchEndCallBack(object):
         list_head_names: List[str],
         output: str,
         total_steps: int,
-        tb_writer = None,
+        tb_writer=None,
     ):
         self.frequent: int = frequent
         self.list_head_names: List[str] = list_head_names
@@ -843,23 +807,14 @@ class BatchEndCallBack(object):
                     speed_total = float("inf")
 
                 header = f"rank {speed:.2f} total {speed_total:.2f} its/s lr: {lr_scheduler.get_last_lr()[0]:.8f} "
-                progress = f"step: {global_step}/{self.total_steps} ({global_step/self.total_steps*100:.2f}%) "
+                progress = f"step: {global_step}/{self.total_steps} ({global_step / self.total_steps * 100:.2f}%) "
                 time_info = f"remain: {remaining_time_hours:.2f} hours"
 
                 loss_str_format = ""
                 for head_id, name in enumerate(self.list_head_names):
-
                     if rank == 0 and self.tb_writer:
-                        self.tb_writer.add_scalar(
-                            f"loss/{name}",
-                            self.list_loss_metric[head_id].avg,
-                            global_step
-                        )
-                        self.tb_writer.add_scalar(
-                            f"lr/{name}",
-                            lr_scheduler.get_last_lr()[head_id + 1],
-                            global_step
-                        )
+                        self.tb_writer.add_scalar(f"loss/{name}", self.list_loss_metric[head_id].avg, global_step)
+                        self.tb_writer.add_scalar(f"lr/{name}", lr_scheduler.get_last_lr()[head_id + 1], global_step)
 
                         self.tb_writer.add_scalar(
                             f"samples vs. loss/{name}",
@@ -921,7 +876,6 @@ def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, r
     max_key_len = max(len(k) for k, _ in sorted_items) if sorted_items else 0
     col_width = max(20, max_key_len)
     for k, v in sorted_items:
-
         vs = str(v)
         if len(vs) > 300:
             vs = vs[:297] + "..."
@@ -930,7 +884,6 @@ def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, r
 
     # ---------- TensorBoard logging ----------
     if writer is not None:
-
         md_lines = ["| Argument | Value |", "|----------|-------|"]
         for k, v in sorted_items:
             vs = str(v).replace("|", "\\|")
@@ -938,6 +891,7 @@ def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, r
                 vs = vs[:497] + "..."
             md_lines.append(f"| {k} | {vs} |")
         writer.add_text("markdown_table", "\n".join(md_lines), global_step=0)
+
 
 if __name__ == "__main__":
     main()
