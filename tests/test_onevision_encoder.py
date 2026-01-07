@@ -159,9 +159,9 @@ class TestVideoRotaryEmbedding:
         patches_per_frame = 16  # 4x4 spatial patches
         target_frames = 64
 
-        # Simulate interpolated indices in [0, 63] range
-        # For 8 sampled frames from a video, spread across 64 target frames
-        interpolated_t = torch.tensor([0, 9, 18, 27, 36, 45, 54, 63], device=device)  # [num_frames]
+        # Simulate interpolated indices in [0, target_frames-1] range
+        # For num_frames sampled frames from a video, spread across target_frames
+        interpolated_t = torch.linspace(0, target_frames - 1, num_frames, dtype=torch.long, device=device)
 
         # Spatial positions for each frame (4x4 grid)
         h_ids = torch.arange(4, device=device).repeat_interleave(4)  # [0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3]

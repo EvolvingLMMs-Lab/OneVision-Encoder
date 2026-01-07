@@ -244,6 +244,9 @@ def get_feature(
                     # ===> Compute patch_positions for RoPE with temporal scaling to [0, 64) <===
                     # Calculate spatial grid dimensions (assume square patches)
                     patches_per_side = int(math.sqrt(frame_tokens))  # e.g., 14 for 196 tokens
+                    assert patches_per_side * patches_per_side == frame_tokens, (
+                        f"frame_tokens must be a perfect square, got {frame_tokens}"
+                    )
 
                     # Temporal positions: use interpolated_indices (already in [0, target_frames-1])
                     # Shape: [bs, seq_len] -> expand to [bs, seq_len * frame_tokens]
