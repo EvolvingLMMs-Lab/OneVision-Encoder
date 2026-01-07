@@ -59,6 +59,7 @@ class TestVideoRotaryEmbedding:
         )
         model = OneVisionEncoderModel(config)
 
+        batch_size = 2
         t, h, w = 2, 4, 4
 
         # Get frequencies using forward method
@@ -72,27 +73,30 @@ class TestVideoRotaryEmbedding:
         t_ids = torch.arange(t, device=device).repeat_interleave(h * w)
         h_ids = torch.arange(h, device=device).repeat_interleave(w).repeat(t)
         w_ids = torch.arange(w, device=device).repeat(h).repeat(t)
-        patch_positions = torch.stack([t_ids, h_ids, w_ids], dim=-1)
+        patch_positions_2d = torch.stack([t_ids, h_ids, w_ids], dim=-1)  # [seq_len, 3]
 
-        # Get frequencies using forward_from_positions method
-        freqs_from_positions = model.video_rope.forward_from_positions(patch_positions)
+        # Create batched input [batch_size, seq_len, 3]
+        patch_positions_3d = patch_positions_2d.unsqueeze(0).expand(batch_size, -1, -1)
 
-        # Both should have the same shape
-        assert freqs_forward.shape == freqs_from_positions.shape, (
-            f"Shape mismatch: forward={freqs_forward.shape}, forward_from_positions={freqs_from_positions.shape}"
-        )
+        # Get frequencies using forward_from_positions method (requires 3D input)
+        freqs_from_positions = model.video_rope.forward_from_positions(patch_positions_3d)
 
-        # Both should produce identical values
-        assert torch.allclose(freqs_forward, freqs_from_positions, rtol=1e-5, atol=1e-5), (
-            f"Value mismatch between forward and forward_from_positions. "
-            f"Max difference: {(freqs_forward - freqs_from_positions).abs().max().item()}"
-        )
+        # freqs_forward is [seq_len, half], freqs_from_positions is [batch_size, seq_len, half]
+        # Check consistency for each batch element
+        for b in range(batch_size):
+            assert freqs_forward.shape == freqs_from_positions[b].shape, (
+                f"Shape mismatch: forward={freqs_forward.shape}, forward_from_positions={freqs_from_positions[b].shape}"
+            )
+
+            assert torch.allclose(freqs_forward, freqs_from_positions[b], rtol=1e-5, atol=1e-5), (
+                f"Value mismatch between forward and forward_from_positions. "
+                f"Max difference: {(freqs_forward - freqs_from_positions[b]).abs().max().item()}"
+            )
 
     def test_forward_from_positions_batched(self):
         """Test batched forward_from_positions with 3D input [batch_size, seq_len, 3].
 
-        This test verifies that forward_from_positions correctly handles batched inputs
-        and produces the same result as calling it on each batch element separately.
+        This test verifies that forward_from_positions correctly handles batched inputs.
         """
         config = OneVisionEncoderConfig(
             hidden_size=128,
@@ -118,25 +122,19 @@ class TestVideoRotaryEmbedding:
         # Create batched input [batch_size, seq_len, 3]
         patch_positions_3d = patch_positions_2d.unsqueeze(0).expand(batch_size, -1, -1)
 
-        # Get frequencies using 2D input
-        freqs_2d = model.video_rope.forward_from_positions(patch_positions_2d)  # [seq_len, half]
-
         # Get frequencies using 3D batched input
-        freqs_3d = model.video_rope.forward_from_positions(patch_positions_3d)  # [batch_size, seq_len, half]
+        freqs_3d = model.video_rope.forward_from_positions(patch_positions_3d)
 
-        # Check shapes
-        assert freqs_2d.shape == (seq_len, model.video_rope.half), (
-            f"2D shape mismatch: expected ({seq_len}, {model.video_rope.half}), got {freqs_2d.shape}"
-        )
+        # Check shape
         assert freqs_3d.shape == (batch_size, seq_len, model.video_rope.half), (
             f"3D shape mismatch: expected ({batch_size}, {seq_len}, {model.video_rope.half}), got {freqs_3d.shape}"
         )
 
-        # Check that each batch element matches the 2D result
-        for b in range(batch_size):
-            assert torch.allclose(freqs_2d, freqs_3d[b], rtol=1e-5, atol=1e-5), (
-                f"Batch {b} value mismatch. Max diff: {(freqs_2d - freqs_3d[b]).abs().max().item()}"
-            )
+        # Since both batches have the same positions, their frequencies should be identical
+        assert torch.allclose(freqs_3d[0], freqs_3d[1], rtol=1e-5, atol=1e-5), (
+            f"Batch elements should be identical when positions are the same. "
+            f"Max diff: {(freqs_3d[0] - freqs_3d[1]).abs().max().item()}"
+        )
 
     def test_forward_from_positions_temporal_scaling(self):
         """Test that temporal positions in [0, 64) range produce valid RoPE frequencies.
