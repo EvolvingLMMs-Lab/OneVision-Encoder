@@ -6,18 +6,20 @@ from dataset.registry import DATASET_REGISTRY
 
 from .properties import Property
 
+
 logger = logging.getLogger(__file__)
 
 rank = int(os.getenv("RANK", "0"))
 local_rank = int(os.getenv("LOCAL_RANK", "0"))
 world_size = int(os.getenv("WORLD_SIZE", "1"))
 
+
 @DATASET_REGISTRY.register()
 def onevision_encoder_si_dry_run():
-    """Dry run configuration for onevision encoder SI dataset. 
-    
+    """Dry run configuration for onevision encoder SI dataset.
+
     This function creates a minimal configuration with no actual data prefixes,
-    useful for testing and debugging without loading real datasets. 
+    useful for testing and debugging without loading real datasets.
 
     Returns:
         Property: Dataset property configuration with empty prefixes and basic settings.
@@ -39,17 +41,17 @@ def onevision_encoder_si_dry_run():
 @DATASET_REGISTRY.register()
 def onevision_encoder_si_ssd():
     """Configure onevision encoder SI dataset from SSD storage.
-    
+
     This function loads COYO-700M and LAION datasets from SSD storage and distributes
     the data prefixes across 8 target cards.  Each card is assigned specific prefixes
-    based on the local rank, ensuring even distribution of data shards. 
-    
+    based on the local rank, ensuring even distribution of data shards.
+
     The function handles cases where the number of prefixes doesn't divide evenly
-    by the target card count, allocating extra cards to the first few prefixes. 
+    by the target card count, allocating extra cards to the first few prefixes.
 
     Returns:
         Property: Dataset property configuration with assigned prefixes and shard information.
-        
+
     Raises:
         RuntimeError: If no .rec files are found matching the specified patterns.
     """
@@ -79,7 +81,7 @@ def onevision_encoder_si_ssd():
     # Calculate the starting card index for each prefix in card space ([0..target_cards-1])
     start_indices = []
     acc = 0
-    for s in group_sizes: 
+    for s in group_sizes:
         start_indices.append(acc)
         acc += s
 
@@ -92,13 +94,13 @@ def onevision_encoder_si_ssd():
     for i, start in enumerate(start_indices):
         if group_sizes[i] == 0:
             continue
-        if start <= card_index < start + group_sizes[i]: 
+        if start <= card_index < start + group_sizes[i]:
             prefix_idx = i
             break
 
     # If not found (possible case: num_prefix > target_cards and current card_index falls after unassigned prefixes)
     # In this case, we assign the card to the last prefix that has allocation (safe fallback)
-    if prefix_idx is None: 
+    if prefix_idx is None:
         # Find the nearest prefix with group_sizes > 0 (should exist since target_cards > 0)
         for i in range(num_prefix - 1, -1, -1):
             if group_sizes[i] > 0:
@@ -132,11 +134,11 @@ def onevision_encoder_si_ssd():
 
 @DATASET_REGISTRY.register()
 def onevision_encoder_si_cfs_single_node():
-    """Configure onevision encoder SI dataset from CFS storage. 
-    
+    """Configure onevision encoder SI dataset from CFS storage.
+
     This function loads COYO-400M and LAION-260M datasets from CFS storage and assigns
-    all data prefixes to workers based on global rank distribution. 
-    
+    all data prefixes to workers based on global rank distribution.
+
     WARNING: This is NOT a recommended approach as it can cause severe data imbalance.
     """
     patterns = [
@@ -147,7 +149,6 @@ def onevision_encoder_si_cfs_single_node():
     all_files = [f for pattern in patterns for f in glob.glob(pattern)]
     all_files = [x.replace(".rec", "") for x in all_files]
     all_files = sorted(all_files)
-
 
     return Property(
         num_classes=2000000,
@@ -165,19 +166,19 @@ def onevision_encoder_si_cfs_single_node():
 
 @DATASET_REGISTRY.register()
 def onevision_encoder_ocr_ssd():
-    """Configure onevision encoder OCR dataset from SSD storage. 
-    
+    """Configure onevision encoder OCR dataset from SSD storage.
+
     This function loads OCR-labeled datasets (Obelics and Zero250M) from SSD storage
     and distributes the data prefixes across 8 target cards. Each card is assigned
     specific prefixes based on the local rank, ensuring even distribution of data shards.
-    
+
     Similar to onevision_encoder_si_ssd, this handles uneven prefix distribution
     and supports cyclical mapping for cases with more than 8 GPUs.
 
     Returns:
         Property: Dataset property configuration with assigned prefixes, OCR data type,
                  and shard information.
-        
+
     Raises:
         RuntimeError: If no .rec files are found matching the specified patterns.
     """
@@ -207,7 +208,7 @@ def onevision_encoder_ocr_ssd():
     # Calculate the starting card index for each prefix in card space ([0..target_cards-1])
     start_indices = []
     acc = 0
-    for s in group_sizes:  
+    for s in group_sizes:
         start_indices.append(acc)
         acc += s
 
@@ -220,13 +221,13 @@ def onevision_encoder_ocr_ssd():
     for i, start in enumerate(start_indices):
         if group_sizes[i] == 0:
             continue
-        if start <= card_index < start + group_sizes[i]: 
+        if start <= card_index < start + group_sizes[i]:
             prefix_idx = i
             break
 
     # If not found (possible case: num_prefix > target_cards and current card_index falls after unassigned prefixes)
     # In this case, we assign the card to the last prefix that has allocation (safe fallback)
-    if prefix_idx is None:  
+    if prefix_idx is None:
         # Find the nearest prefix with group_sizes > 0 (should exist since target_cards > 0)
         for i in range(num_prefix - 1, -1, -1):
             if group_sizes[i] > 0:
@@ -259,51 +260,18 @@ def onevision_encoder_ocr_ssd():
 
 
 @DATASET_REGISTRY.register()
-def configs_for_onevision_encoder_versions_0_0_2_add_pandas70M_filtered():
-    """Configure onevision encoder with Pandas70M filtered dataset (version 0.0.2).
-    
-    This function sets up a video dataset configuration using the Decord data loader. 
-    The dataset is designed for distributed training with up to 128 workers.
-    Currently configured with placeholder path that should be updated with actual data location.
-
-    Returns:
-        Property: Dataset property configuration for Pandas70M filtered video data
-                 with Decord data type. 
-        
-    Raises:
-        AssertionError: If world_size exceeds 128.
-    """
-    assert world_size <= 128
-
-    list_mp4_label_path = ""
-    # with open(list_mp4_label, "r", encoding="utf-8") as f:
-        # lines = f.readlines()
-
-    # lines = [x.strip().split(",")[0] for x in lines]
-    return Property(
-        name="configs_for_onevision_encoder_versions_0_0_2_add_pandas70M_filtered",
-        prefixes=[list_mp4_label_path],
-        num_classes=400000,
-        num_examples=1269187 * 128,
-        num_shards=1,
-        shard_id=0,
-        dali_type="decord",
-    )
-
-
-@DATASET_REGISTRY.register()
-def configs_for_onevision_encoder_versions_0_0_2_square_with_index_filtered():
+def onevision_encoder_video_codec():
     """Configure onevision encoder with square indexed filtered dataset (version 0.0.2).
-    
+
     This function sets up a video dataset configuration using the Decord residual data loader.
     The dataset uses square aspect ratio frames with indexing for efficient access.
-    Designed for distributed training with up to 128 workers. 
-    Currently configured with placeholder path that should be updated with actual data location. 
+    Designed for distributed training with up to 128 workers.
+    Currently configured with placeholder path that should be updated with actual data location.
 
     Returns:
         Property: Dataset property configuration for square indexed video data
                  with Decord residual data type.
-        
+
     Raises:
         AssertionError: If world_size exceeds 128.
     """
@@ -311,7 +279,7 @@ def configs_for_onevision_encoder_versions_0_0_2_square_with_index_filtered():
     list_mp4_label_path = f"train_how_to_100m_panda70m_k710_square_with_index_filtered_split_128/part_{rank:03d}"
 
     return Property(
-        name="configs_for_onevision_encoder_versions_0_0_2_square_with_index_filtered",
+        name="onevision_encoder_video_codec",
         prefixes=[list_mp4_label_path],
         num_classes=400000,
         num_examples=1629324 * 128,

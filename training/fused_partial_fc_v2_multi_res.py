@@ -30,9 +30,7 @@ class CombinedMarginLoss(torch.nn.Module):
             with torch.no_grad():
                 dirty = logits > self.interclass_filtering_threshold
                 dirty = dirty.float()
-                mask = torch.ones(
-                    [index_positive.size(0), logits.size(1)], device=logits.device
-                )
+                mask = torch.ones([index_positive.size(0), logits.size(1)], device=logits.device)
                 mask.scatter_(1, labels[index_positive], 0)
                 dirty[index_positive] *= mask
                 tensor_mul = 1 - dirty
@@ -58,9 +56,7 @@ class CombinedMarginLoss(torch.nn.Module):
                 target_logit.arccos_()
                 logits.arccos_()
                 final_target_logit = target_logit + self.m2
-                logits[index_positive, labels[index_positive].view(-1)] = (
-                    final_target_logit
-                )
+                logits[index_positive, labels[index_positive].view(-1)] = final_target_logit
                 logits.cos_()
             logits = logits * self.s
 
@@ -117,9 +113,7 @@ class PartialFC_V2(torch.nn.Module):
             The rate of negative centers participating in the calculation, default is 1.0.
         """
         super(PartialFC_V2, self).__init__()
-        assert (
-            distributed.is_initialized()
-        ), "must initialize distributed before create this"
+        assert distributed.is_initialized(), "must initialize distributed before create this"
         self.rank = distributed.get_rank()
         self.world_size = distributed.get_world_size()
 
@@ -129,9 +123,7 @@ class PartialFC_V2(torch.nn.Module):
         self.sample_num_feat: int = sample_num_feat
         self.fp16 = fp16
         self.is_normlize = is_normlize
-        self.num_local: int = num_classes // self.world_size + int(
-            self.rank < num_classes % self.world_size
-        )
+        self.num_local: int = num_classes // self.world_size + int(self.rank < num_classes % self.world_size)
         self.class_start: int = num_classes // self.world_size * self.rank + min(
             self.rank, num_classes % self.world_size
         )
@@ -140,9 +132,7 @@ class PartialFC_V2(torch.nn.Module):
 
         self.is_updated: bool = True
         self.init_weight_update: bool = True
-        self.weight = torch.nn.Parameter(
-            torch.normal(0, 0.01, (self.num_local, embedding_size))
-        )
+        self.weight = torch.nn.Parameter(torch.normal(0, 0.01, (self.num_local, embedding_size)))
 
         # margin_loss
         if isinstance(margin_loss, Callable):
@@ -200,8 +190,8 @@ class PartialFC_V2(torch.nn.Module):
         distributed.all_gather(_gathered_bs, batch_size_pt)  # list of [1]-shape tensors
 
         # Get batch size and maximum for each rank using tensors (.item() captured by capture_scalar_outputs)
-        sizes = torch.stack(_gathered_bs).squeeze(-1)   # [world_size], int64
-        max_batch_size = sizes.max()                    # 0-dim tensor (int64)
+        sizes = torch.stack(_gathered_bs).squeeze(-1)  # [world_size], int64
+        max_batch_size = sizes.max()  # 0-dim tensor (int64)
 
         # Pad features to the maximum size
         pad_n = int((max_batch_size - local_embeddings.size(0)).item())
@@ -219,21 +209,18 @@ class PartialFC_V2(torch.nn.Module):
         labels = torch.cat(_gather_labels)
 
         # Remove padding
-        sizes_list = [int(s.item()) for s in sizes]            # python ints (captured)
-        m = int(max_batch_size.item())                         # python int (captured)
+        sizes_list = [int(s.item()) for s in sizes]  # python ints (captured)
+        m = int(max_batch_size.item())  # python int (captured)
         _all_embeddings = [feat[:sz] for feat, sz in zip(embeddings.split(m), sizes_list)]
-        _all_labels     = [feat[:sz] for feat, sz in zip(labels.split(m), sizes_list)]
+        _all_labels = [feat[:sz] for feat, sz in zip(labels.split(m), sizes_list)]
         embeddings = torch.cat(_all_embeddings, dim=0)
         labels = torch.cat(_all_labels, dim=0)
         ########################### added by multi-res ###########################
 
-
         total_batch_size = labels.size(0)
 
         labels = labels.view(-1, 1)
-        index_positive = (self.class_start <= labels) & (
-            labels < self.class_start + self.num_local
-        )
+        index_positive = (self.class_start <= labels) & (labels < self.class_start + self.num_local)
         labels[~index_positive] = -1
         labels[index_positive] -= self.class_start
 
@@ -248,7 +235,6 @@ class PartialFC_V2(torch.nn.Module):
         labels_5 = labels[:, 5:6].clone()
         labels_6 = labels[:, 6:7].clone()
         labels_7 = labels[:, 7:8].clone()
-
 
         index_positive_0 = index_positive[:, 0:1].clone()
         index_positive_1 = index_positive[:, 1:2].clone()
@@ -323,8 +309,22 @@ class PartialFC_V2(torch.nn.Module):
         logits_7 = self.margin_softmax(logits_7, labels_7)
 
         loss = self.dist_cross_entropy_multi_fused(
-            logits_0, logits_1, logits_2, logits_3, logits_4, logits_5, logits_6, logits_7,
-            labels_0, labels_1, labels_2, labels_3, labels_4, labels_5, labels_6, labels_7
+            logits_0,
+            logits_1,
+            logits_2,
+            logits_3,
+            logits_4,
+            logits_5,
+            logits_6,
+            logits_7,
+            labels_0,
+            labels_1,
+            labels_2,
+            labels_3,
+            labels_4,
+            labels_5,
+            labels_6,
+            labels_7,
         )
         return loss
 
@@ -376,13 +376,32 @@ class FusedDistCrossEntropyFunc(torch.autograd.Function):
         max_logits_6, _ = torch.max(logits_6, dim=1, keepdim=True)
         max_logits_7, _ = torch.max(logits_7, dim=1, keepdim=True)
 
-        chunk_max_logits = torch.cat([max_logits_0, max_logits_1, max_logits_2, max_logits_3, max_logits_4, max_logits_5, max_logits_6, max_logits_7], dim=0)
+        chunk_max_logits = torch.cat(
+            [
+                max_logits_0,
+                max_logits_1,
+                max_logits_2,
+                max_logits_3,
+                max_logits_4,
+                max_logits_5,
+                max_logits_6,
+                max_logits_7,
+            ],
+            dim=0,
+        )
         # local to global
         distributed.all_reduce(chunk_max_logits, distributed.ReduceOp.MAX)
         # print(len(torch.split(chunk_max_logits, max_logits_0.size(0), dim=0)))
-        max_logits_0, max_logits_1, max_logits_2, max_logits_3, max_logits_4, max_logits_5, max_logits_6, max_logits_7 = torch.split(
-            chunk_max_logits, max_logits_0.size(0), dim=0
-        )
+        (
+            max_logits_0,
+            max_logits_1,
+            max_logits_2,
+            max_logits_3,
+            max_logits_4,
+            max_logits_5,
+            max_logits_6,
+            max_logits_7,
+        ) = torch.split(chunk_max_logits, max_logits_0.size(0), dim=0)
         logits_0.sub_(max_logits_0).exp_()
         logits_1.sub_(max_logits_1).exp_()
         logits_2.sub_(max_logits_2).exp_()
@@ -404,13 +423,30 @@ class FusedDistCrossEntropyFunc(torch.autograd.Function):
         sum_logits_exp_7 = torch.sum(logits_7, dim=1, keepdim=True)
 
         chunk_sum_logits_exp = torch.cat(
-            [sum_logits_exp_0, sum_logits_exp_1, sum_logits_exp_2, sum_logits_exp_3, sum_logits_exp_4, sum_logits_exp_5, sum_logits_exp_6, sum_logits_exp_7], dim=0
+            [
+                sum_logits_exp_0,
+                sum_logits_exp_1,
+                sum_logits_exp_2,
+                sum_logits_exp_3,
+                sum_logits_exp_4,
+                sum_logits_exp_5,
+                sum_logits_exp_6,
+                sum_logits_exp_7,
+            ],
+            dim=0,
         )
 
         distributed.all_reduce(chunk_sum_logits_exp, distributed.ReduceOp.SUM)
-        sum_logits_exp_0, sum_logits_exp_1, sum_logits_exp_2, sum_logits_exp_3, sum_logits_exp_4, sum_logits_exp_5, sum_logits_exp_6, sum_logits_exp_7 = torch.split(
-            chunk_sum_logits_exp, sum_logits_exp_0.size(0), dim=0
-        )
+        (
+            sum_logits_exp_0,
+            sum_logits_exp_1,
+            sum_logits_exp_2,
+            sum_logits_exp_3,
+            sum_logits_exp_4,
+            sum_logits_exp_5,
+            sum_logits_exp_6,
+            sum_logits_exp_7,
+        ) = torch.split(chunk_sum_logits_exp, sum_logits_exp_0.size(0), dim=0)
 
         # local to global
         # distributed.all_reduce(sum_logits_exp, distributed.ReduceOp.SUM)
@@ -436,36 +472,18 @@ class FusedDistCrossEntropyFunc(torch.autograd.Function):
         loss_6 = torch.zeros(batch_size, 1, device="cuda")
         loss_7 = torch.zeros(batch_size, 1, device="cuda")
 
-        loss_0[index_positive_0] = logits_0[index_positive_0].gather(
-            1, label_0[index_positive_0]
-        )
-        loss_1[index_positive_1] = logits_1[index_positive_1].gather(
-            1, label_1[index_positive_1]
-        )
-        loss_2[index_positive_2] = logits_2[index_positive_2].gather(
-            1, label_2[index_positive_2]
-        )
-        loss_3[index_positive_3] = logits_3[index_positive_3].gather(
-            1, label_3[index_positive_3]
-        )
-        loss_4[index_positive_4] = logits_4[index_positive_4].gather(
-            1, label_4[index_positive_4]
-        )
-        loss_5[index_positive_5] = logits_5[index_positive_5].gather(
-            1, label_5[index_positive_5]
-        )
-        loss_6[index_positive_6] = logits_6[index_positive_6].gather(
-            1, label_6[index_positive_6]
-        )
-        loss_7[index_positive_7] = logits_7[index_positive_7].gather(
-            1, label_7[index_positive_7]
-        )
+        loss_0[index_positive_0] = logits_0[index_positive_0].gather(1, label_0[index_positive_0])
+        loss_1[index_positive_1] = logits_1[index_positive_1].gather(1, label_1[index_positive_1])
+        loss_2[index_positive_2] = logits_2[index_positive_2].gather(1, label_2[index_positive_2])
+        loss_3[index_positive_3] = logits_3[index_positive_3].gather(1, label_3[index_positive_3])
+        loss_4[index_positive_4] = logits_4[index_positive_4].gather(1, label_4[index_positive_4])
+        loss_5[index_positive_5] = logits_5[index_positive_5].gather(1, label_5[index_positive_5])
+        loss_6[index_positive_6] = logits_6[index_positive_6].gather(1, label_6[index_positive_6])
+        loss_7[index_positive_7] = logits_7[index_positive_7].gather(1, label_7[index_positive_7])
 
         chunk_loss = torch.cat([loss_0, loss_1, loss_2, loss_3, loss_4, loss_5, loss_6, loss_7], dim=0)
         distributed.all_reduce(chunk_loss, distributed.ReduceOp.SUM)
-        loss_0, loss_1, loss_2, loss_3, loss_4, loss_5, loss_6, loss_7 = torch.split(
-            chunk_loss, loss_0.size(0), dim=0
-        )
+        loss_0, loss_1, loss_2, loss_3, loss_4, loss_5, loss_6, loss_7 = torch.split(chunk_loss, loss_0.size(0), dim=0)
 
         loss_0 = loss_0.clamp_min_(1e-30).log_().mean() * (-1)
         loss_1 = loss_1.clamp_min_(1e-30).log_().mean() * (-1)
@@ -546,30 +564,14 @@ class FusedDistCrossEntropyFunc(torch.autograd.Function):
         ) = ctx.saved_tensors
 
         batch_size = logits_0.size(0)
-        one_hot_0 = torch.zeros(
-            size=[index_positive_0.size(0), logits_0.size(1)], device="cuda"
-        )
-        one_hot_1 = torch.zeros(
-            size=[index_positive_1.size(0), logits_1.size(1)], device="cuda"
-        )
-        one_hot_2 = torch.zeros(
-            size=[index_positive_2.size(0), logits_2.size(1)], device="cuda"
-        )
-        one_hot_3 = torch.zeros(
-            size=[index_positive_3.size(0), logits_3.size(1)], device="cuda"
-        )
-        one_hot_4 = torch.zeros(
-            size=[index_positive_4.size(0), logits_4.size(1)], device="cuda"
-        )
-        one_hot_5 = torch.zeros(
-            size=[index_positive_5.size(0), logits_5.size(1)], device="cuda"
-        )
-        one_hot_6 = torch.zeros(
-            size=[index_positive_6.size(0), logits_6.size(1)], device="cuda"
-        )
-        one_hot_7 = torch.zeros(
-            size=[index_positive_7.size(0), logits_7.size(1)], device="cuda"
-        )
+        one_hot_0 = torch.zeros(size=[index_positive_0.size(0), logits_0.size(1)], device="cuda")
+        one_hot_1 = torch.zeros(size=[index_positive_1.size(0), logits_1.size(1)], device="cuda")
+        one_hot_2 = torch.zeros(size=[index_positive_2.size(0), logits_2.size(1)], device="cuda")
+        one_hot_3 = torch.zeros(size=[index_positive_3.size(0), logits_3.size(1)], device="cuda")
+        one_hot_4 = torch.zeros(size=[index_positive_4.size(0), logits_4.size(1)], device="cuda")
+        one_hot_5 = torch.zeros(size=[index_positive_5.size(0), logits_5.size(1)], device="cuda")
+        one_hot_6 = torch.zeros(size=[index_positive_6.size(0), logits_6.size(1)], device="cuda")
+        one_hot_7 = torch.zeros(size=[index_positive_7.size(0), logits_7.size(1)], device="cuda")
         one_hot_0.scatter_(1, label_0[index_positive_0], 1)
         one_hot_1.scatter_(1, label_1[index_positive_1], 1)
         one_hot_2.scatter_(1, label_2[index_positive_2], 1)
@@ -646,22 +648,22 @@ class DistCrossEntropy(torch.nn.Module):
         label_7,
     ):
         return FusedDistCrossEntropyFunc.apply(
-        logits_0,
-        logits_1,
-        logits_2,
-        logits_3,
-        logits_4,
-        logits_5,
-        logits_6,
-        logits_7,
-        label_0,
-        label_1,
-        label_2,
-        label_3,
-        label_4,
-        label_5,
-        label_6,
-        label_7,
+            logits_0,
+            logits_1,
+            logits_2,
+            logits_3,
+            logits_4,
+            logits_5,
+            logits_6,
+            logits_7,
+            label_0,
+            label_1,
+            label_2,
+            label_3,
+            label_4,
+            label_5,
+            label_6,
+            label_7,
         )
 
 
@@ -682,13 +684,9 @@ class AllGatherFunc(torch.autograd.Function):
 
         dist_ops = [
             (
-                distributed.reduce(
-                    grad_out, rank, distributed.ReduceOp.SUM, async_op=True
-                )
+                distributed.reduce(grad_out, rank, distributed.ReduceOp.SUM, async_op=True)
                 if i == rank
-                else distributed.reduce(
-                    grad_list[i], i, distributed.ReduceOp.SUM, async_op=True
-                )
+                else distributed.reduce(grad_list[i], i, distributed.ReduceOp.SUM, async_op=True)
             )
             for i in range(distributed.get_world_size())
         ]

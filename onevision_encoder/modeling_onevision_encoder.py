@@ -563,8 +563,8 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
     def forward(
         self,
         pixel_values: torch.Tensor,
-        patch_postions: Optional[torch.Tensor] = None,
         visible_indices: Optional[torch.Tensor] = None,
+        patch_postions: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
