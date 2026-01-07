@@ -3,7 +3,6 @@ import math
 import os
 import time
 import warnings
-from typing import dict
 
 import torch
 import torch.nn.functional as F
@@ -14,12 +13,13 @@ from timm.models.layers import trunc_normal_
 from torch import distributed, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
-from transformers import AutoModel
 
 # Ensure custom models and layers are registered
 import model_factory
 from dataloader.ap_dataloader_dali import get_dali_dataloader
 from model_factory.layers import Siglip2MultiheadAttentionPoolingHead
+from transformers import AutoModel
+
 
 warnings.filterwarnings("ignore")
 
