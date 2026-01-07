@@ -165,23 +165,24 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
         Compute rotary position embeddings from explicit patch positions.
 
         Args:
-            patch_positions: [seq_len, 3] tensor with [t, h, w] positions for each patch
+            patch_positions: [batch_size, seq_len, 3] tensor with [t, h, w] positions for each patch
 
         Returns:
-            freqs: [seq_len, half] tensor of position frequencies
+            freqs: [batch_size, seq_len, half] tensor of position frequencies
         """
         device = patch_positions.device
         inv_t = self.inv_freq_t.to(device=device)
         inv_h = self.inv_freq_h.to(device=device)
         inv_w = self.inv_freq_w.to(device=device)
 
-        t_pos = patch_positions[:, 0].float()
-        h_pos = patch_positions[:, 1].float()
-        w_pos = patch_positions[:, 2].float()
+        t_pos = patch_positions[..., 0].float()  # [batch_size, seq_len]
+        h_pos = patch_positions[..., 1].float()  # [batch_size, seq_len]
+        w_pos = patch_positions[..., 2].float()  # [batch_size, seq_len]
 
-        ft = torch.outer(t_pos, inv_t)
-        fh = torch.outer(h_pos, inv_h)
-        fw = torch.outer(w_pos, inv_w)
+        # Use einsum for batched outer product: [batch_size, seq_len] x [dim] -> [batch_size, seq_len, dim]
+        ft = torch.einsum("bs,d->bsd", t_pos, inv_t)
+        fh = torch.einsum("bs,d->bsd", h_pos, inv_h)
+        fw = torch.einsum("bs,d->bsd", w_pos, inv_w)
 
         return torch.cat([ft, fh, fw], dim=-1)
 

@@ -6,9 +6,10 @@ This module contains tests to verify:
 """
 
 import hashlib
+
+import numpy as np
 import pytest
 import torch
-import numpy as np
 from PIL import Image
 
 
@@ -18,8 +19,9 @@ DEFAULT_STD = [0.26862954, 0.26130258, 0.27577711]
 DEFAULT_IMAGE_SIZE = 448
 
 
-def manual_center_crop_preprocess(image: Image.Image, size: int = DEFAULT_IMAGE_SIZE,
-                                  mean: list = None, std: list = None) -> torch.Tensor:
+def manual_center_crop_preprocess(
+    image: Image.Image, size: int = DEFAULT_IMAGE_SIZE, mean: list = None, std: list = None
+) -> torch.Tensor:
     """
     Manual center-crop preprocessing for images (CLIP-style).
 
@@ -86,20 +88,18 @@ class TestCodeConsistency:
     def local_modeling_path(self):
         """Path to local modeling file."""
         import os
+
         return os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "onevision_encoder",
-            "modeling_onevision_encoder.py"
+            os.path.dirname(os.path.dirname(__file__)), "onevision_encoder", "modeling_onevision_encoder.py"
         )
 
     @pytest.fixture
     def local_config_path(self):
         """Path to local configuration file."""
         import os
+
         return os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "onevision_encoder",
-            "configuration_onevision_encoder.py"
+            os.path.dirname(os.path.dirname(__file__)), "onevision_encoder", "configuration_onevision_encoder.py"
         )
 
     def _read_file_content(self, path: str) -> str:
@@ -111,7 +111,6 @@ class TestCodeConsistency:
         """Compute SHA256 hash of file content."""
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-
     def test_modeling_file_consistency(self, local_modeling_path):
         """Test consistency between local and remote modeling file.
 
@@ -122,8 +121,7 @@ class TestCodeConsistency:
             from huggingface_hub import hf_hub_download
 
             remote_path = hf_hub_download(
-                repo_id="lmms-lab-encoder/onevision-encoder-large",
-                filename="modeling_onevision_encoder.py"
+                repo_id="lmms-lab-encoder/onevision-encoder-large", filename="modeling_onevision_encoder.py"
             )
 
             local_content = self._read_file_content(local_modeling_path)
@@ -133,13 +131,10 @@ class TestCodeConsistency:
             remote_hash = self._compute_file_hash(remote_content)
 
             assert local_hash == remote_hash, (
-                f"Modeling files do not match!\n"
-                f"Local hash: {local_hash}\n"
-                f"Remote hash: {remote_hash}"
+                f"Modeling files do not match!\nLocal hash: {local_hash}\nRemote hash: {remote_hash}"
             )
         except Exception as e:
             pytest.skip(f"Could not download from HuggingFace: {e}")
-
 
     def test_config_file_consistency(self, local_config_path):
         """Test consistency between local and remote configuration file.
@@ -151,8 +146,7 @@ class TestCodeConsistency:
             from huggingface_hub import hf_hub_download
 
             remote_path = hf_hub_download(
-                repo_id="lmms-lab-encoder/onevision-encoder-large",
-                filename="configuration_onevision_encoder.py"
+                repo_id="lmms-lab-encoder/onevision-encoder-large", filename="configuration_onevision_encoder.py"
             )
 
             local_content = self._read_file_content(local_config_path)
@@ -162,9 +156,7 @@ class TestCodeConsistency:
             remote_hash = self._compute_file_hash(remote_content)
 
             assert local_hash == remote_hash, (
-                f"Configuration files do not match!\n"
-                f"Local hash: {local_hash}\n"
-                f"Remote hash: {remote_hash}"
+                f"Configuration files do not match!\nLocal hash: {local_hash}\nRemote hash: {remote_hash}"
             )
         except Exception as e:
             pytest.skip(f"Could not download from HuggingFace: {e}")
@@ -173,12 +165,8 @@ class TestCodeConsistency:
         """Test that local files exist and are readable."""
         import os
 
-        assert os.path.exists(local_modeling_path), (
-            f"Local modeling file not found: {local_modeling_path}"
-        )
-        assert os.path.exists(local_config_path), (
-            f"Local config file not found: {local_config_path}"
-        )
+        assert os.path.exists(local_modeling_path), f"Local modeling file not found: {local_modeling_path}"
+        assert os.path.exists(local_config_path), f"Local config file not found: {local_config_path}"
 
         # Verify files are readable
         modeling_content = self._read_file_content(local_modeling_path)
@@ -219,17 +207,14 @@ class TestPreprocessingConsistency:
         tensor = manual_center_crop_preprocess(sample_image)
 
         assert tensor.shape == (1, 3, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE), (
-            f"Expected shape (1, 3, {DEFAULT_IMAGE_SIZE}, {DEFAULT_IMAGE_SIZE}), "
-            f"got {tensor.shape}"
+            f"Expected shape (1, 3, {DEFAULT_IMAGE_SIZE}, {DEFAULT_IMAGE_SIZE}), got {tensor.shape}"
         )
 
     def test_manual_preprocess_dtype(self, sample_image):
         """Test that manual preprocessing produces float tensor."""
         tensor = manual_center_crop_preprocess(sample_image)
 
-        assert tensor.dtype == torch.float32, (
-            f"Expected dtype torch.float32, got {tensor.dtype}"
-        )
+        assert tensor.dtype == torch.float32, f"Expected dtype torch.float32, got {tensor.dtype}"
 
     def test_manual_preprocess_custom_size(self, sample_image):
         """Test manual preprocessing with custom size."""
@@ -255,7 +240,6 @@ class TestPreprocessingConsistency:
         assert not torch.isnan(tensor).any(), "Tensor contains NaN values"
         assert not torch.isinf(tensor).any(), "Tensor contains Inf values"
 
-
     def test_preprocessing_consistency_with_auto_processor(self, sample_image):
         """Test consistency between manual preprocessing and AutoImageProcessor.
 
@@ -268,8 +252,7 @@ class TestPreprocessingConsistency:
 
             # Load the AutoImageProcessor from HuggingFace
             preprocessor = AutoImageProcessor.from_pretrained(
-                "lmms-lab-encoder/onevision-encoder-large",
-                trust_remote_code=True
+                "lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True
             )
 
             # Process with AutoImageProcessor
@@ -298,7 +281,6 @@ class TestPreprocessingConsistency:
         except Exception as e:
             pytest.skip(f"Could not load AutoImageProcessor: {e}")
 
-
     def test_preprocessing_consistency_with_clip_processor(self, sample_image):
         """Test consistency between CLIP Processor and AutoImageProcessor.
 
@@ -311,14 +293,12 @@ class TestPreprocessingConsistency:
 
             # Load the AutoImageProcessor from HuggingFace onevision-encoder-large
             auto_preprocessor = AutoImageProcessor.from_pretrained(
-                "lmms-lab-encoder/onevision-encoder-large",
-                trust_remote_code=True
+                "lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True
             )
 
             # Load the CLIP CLIPImageProcessor with same parameters
             clip_preprocessor = CLIPImageProcessor.from_pretrained(
-                "lmms-lab-encoder/onevision-encoder-large",
-                trust_remote_code=True
+                "lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True
             )
 
             # Process with AutoImageProcessor
@@ -422,9 +402,7 @@ class TestModelInputConsistency:
         # Check output shape
         # 448/16 = 28 patches per dimension, 28*28 = 784 total patches
         expected_seq_len = (DEFAULT_IMAGE_SIZE // small_config.patch_size) ** 2
-        assert output.last_hidden_state.shape == (
-            1, expected_seq_len, small_config.hidden_size
-        ), (
+        assert output.last_hidden_state.shape == (1, expected_seq_len, small_config.hidden_size), (
             f"Unexpected output shape: {output.last_hidden_state.shape}"
         )
 
@@ -452,9 +430,7 @@ class TestModelInputConsistency:
 
         # Check output shape for batch
         expected_seq_len = (DEFAULT_IMAGE_SIZE // small_config.patch_size) ** 2
-        assert output.last_hidden_state.shape == (
-            2, expected_seq_len, small_config.hidden_size
-        ), (
+        assert output.last_hidden_state.shape == (2, expected_seq_len, small_config.hidden_size), (
             f"Unexpected batch output shape: {output.last_hidden_state.shape}"
         )
 
