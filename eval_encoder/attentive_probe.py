@@ -3,7 +3,6 @@ import math
 import os
 import time
 import warnings
-from typing import dict
 
 import torch
 import torch.nn.functional as F
@@ -14,12 +13,13 @@ from timm.models.layers import trunc_normal_
 from torch import distributed, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
-from transformers import AutoModel
 
 # Ensure custom models and layers are registered
 import model_factory
 from dataloader.ap_dataloader_dali import get_dali_dataloader
 from model_factory.layers import Siglip2MultiheadAttentionPoolingHead
+from transformers import AutoModel
+
 
 warnings.filterwarnings("ignore")
 
@@ -201,7 +201,32 @@ def get_feature(
                     visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
-                    enc_out = model(videos, visible_index)
+                    # ===> Compute patch_positions for RoPE with temporal scaling to [0, 64) <===
+                    # Calculate spatial grid dimensions (assume square patches)
+                    patches_per_side = int(math.sqrt(frame_tokens))  # e.g., 14 for 196 tokens
+                    assert patches_per_side * patches_per_side == frame_tokens, (
+                        f"frame_tokens must be a perfect square, got {frame_tokens}"
+                    )
+                    seq_len = frame_indices.shape[1]  # Number of frames sampled
+
+                    # Temporal positions: use interpolated_indices (already in [0, target_frames-1])
+                    # Shape: [bs, seq_len] -> expand to [bs, seq_len * frame_tokens]
+                    t_positions = interpolated_indices.unsqueeze(-1).expand(-1, -1, frame_tokens).reshape(bs, -1)
+
+                    # Spatial positions: h and w within each frame
+                    # per is [0, 1, 2, ..., frame_tokens-1]
+                    h_per_patch = per // patches_per_side  # [0,0,...,0,1,1,...,1,...,patches_per_side-1]
+                    w_per_patch = per % patches_per_side  # [0,1,...,patches_per_side-1,0,1,...,patches_per_side-1,...]
+
+                    # Expand spatial positions for all frames and batches
+                    # Shape: [frame_tokens] -> [bs, seq_len * frame_tokens]
+                    h_positions = h_per_patch.unsqueeze(0).unsqueeze(0).expand(bs, seq_len, -1).reshape(bs, -1)
+                    w_positions = w_per_patch.unsqueeze(0).unsqueeze(0).expand(bs, seq_len, -1).reshape(bs, -1)
+
+                    # Stack to create patch_positions: [bs, seq_len * frame_tokens, 3]
+                    patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
+
+                    enc_out = model(videos, patch_positions, visible_index)
                     if hasattr(enc_out, "last_hidden_state"):
                         outputs = enc_out.last_hidden_state
                     else:
