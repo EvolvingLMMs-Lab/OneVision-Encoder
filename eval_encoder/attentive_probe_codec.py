@@ -241,7 +241,28 @@ def get_feature(
                     visible_index = (interpolated_indices.unsqueeze(-1) * frame_tokens + per).reshape(bs, -1)
                     visible_index = visible_index.clamp_max(target_frames * frame_tokens - 1)
 
-                    enc_out = model(padded_videos, visible_index)
+                    # ===> Compute patch_positions for RoPE with temporal scaling to [0, 64) <===
+                    # Calculate spatial grid dimensions (assume square patches)
+                    patches_per_side = int(math.sqrt(frame_tokens))  # e.g., 14 for 196 tokens
+
+                    # Temporal positions: use interpolated_indices (already in [0, target_frames-1])
+                    # Shape: [bs, seq_len] -> expand to [bs, seq_len * frame_tokens]
+                    t_positions = interpolated_indices.unsqueeze(-1).expand(-1, -1, frame_tokens).reshape(bs, -1)
+
+                    # Spatial positions: h and w within each frame
+                    # per is [0, 1, 2, ..., frame_tokens-1]
+                    h_per_patch = per // patches_per_side  # [0,0,...,0,1,1,...,1,...,patches_per_side-1]
+                    w_per_patch = per % patches_per_side  # [0,1,...,patches_per_side-1,0,1,...,patches_per_side-1,...]
+
+                    # Expand spatial positions for all frames and batches
+                    # Shape: [frame_tokens] -> [bs, seq_len * frame_tokens]
+                    h_positions = h_per_patch.unsqueeze(0).unsqueeze(0).expand(bs, seq_len, -1).reshape(bs, -1)
+                    w_positions = w_per_patch.unsqueeze(0).unsqueeze(0).expand(bs, seq_len, -1).reshape(bs, -1)
+
+                    # Stack to create patch_positions: [bs, seq_len * frame_tokens, 3]
+                    patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
+
+                    enc_out = model(padded_videos, patch_positions, visible_index)
                     if hasattr(enc_out, "last_hidden_state"):
                         outputs = enc_out.last_hidden_state
                     else:

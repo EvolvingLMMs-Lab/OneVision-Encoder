@@ -88,6 +88,115 @@ class TestVideoRotaryEmbedding:
             f"Max difference: {(freqs_forward - freqs_from_positions).abs().max().item()}"
         )
 
+    def test_forward_from_positions_batched(self):
+        """Test batched forward_from_positions with 3D input [batch_size, seq_len, 3].
+
+        This test verifies that forward_from_positions correctly handles batched inputs
+        and produces the same result as calling it on each batch element separately.
+        """
+        config = OneVisionEncoderConfig(
+            hidden_size=128,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            patch_size=16,
+            image_size=64,
+        )
+        model = OneVisionEncoderModel(config)
+
+        batch_size = 2
+        t, h, w = 2, 4, 4
+        seq_len = t * h * w
+
+        device = model.video_rope.inv_freq_t.device
+
+        # Create patch positions for dense grid (same for both batches in this test)
+        t_ids = torch.arange(t, device=device).repeat_interleave(h * w)
+        h_ids = torch.arange(h, device=device).repeat_interleave(w).repeat(t)
+        w_ids = torch.arange(w, device=device).repeat(h).repeat(t)
+        patch_positions_2d = torch.stack([t_ids, h_ids, w_ids], dim=-1)  # [seq_len, 3]
+
+        # Create batched input [batch_size, seq_len, 3]
+        patch_positions_3d = patch_positions_2d.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Get frequencies using 2D input
+        freqs_2d = model.video_rope.forward_from_positions(patch_positions_2d)  # [seq_len, half]
+
+        # Get frequencies using 3D batched input
+        freqs_3d = model.video_rope.forward_from_positions(patch_positions_3d)  # [batch_size, seq_len, half]
+
+        # Check shapes
+        assert freqs_2d.shape == (seq_len, model.video_rope.half), (
+            f"2D shape mismatch: expected ({seq_len}, {model.video_rope.half}), got {freqs_2d.shape}"
+        )
+        assert freqs_3d.shape == (batch_size, seq_len, model.video_rope.half), (
+            f"3D shape mismatch: expected ({batch_size}, {seq_len}, {model.video_rope.half}), got {freqs_3d.shape}"
+        )
+
+        # Check that each batch element matches the 2D result
+        for b in range(batch_size):
+            assert torch.allclose(freqs_2d, freqs_3d[b], rtol=1e-5, atol=1e-5), (
+                f"Batch {b} value mismatch. Max diff: {(freqs_2d - freqs_3d[b]).abs().max().item()}"
+            )
+
+    def test_forward_from_positions_temporal_scaling(self):
+        """Test that temporal positions in [0, 64) range produce valid RoPE frequencies.
+
+        This test simulates the chunk_wise_sampling use case where interpolated frame
+        indices are scaled to the range [0, target_frames) where target_frames=64.
+        """
+        config = OneVisionEncoderConfig(
+            hidden_size=128,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            patch_size=16,
+            image_size=64,
+        )
+        model = OneVisionEncoderModel(config)
+
+        device = model.video_rope.inv_freq_t.device
+        batch_size = 2
+        num_frames = 8  # sampled frames
+        patches_per_frame = 16  # 4x4 spatial patches
+        target_frames = 64
+
+        # Simulate interpolated indices in [0, 63] range
+        # For 8 sampled frames from a video, spread across 64 target frames
+        interpolated_t = torch.tensor([0, 9, 18, 27, 36, 45, 54, 63], device=device)  # [num_frames]
+
+        # Spatial positions for each frame (4x4 grid)
+        h_ids = torch.arange(4, device=device).repeat_interleave(4)  # [0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3]
+        w_ids = torch.arange(4, device=device).repeat(4)  # [0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
+
+        # Build patch_positions [batch_size, seq_len, 3] for chunk_wise_sampling
+        seq_len = num_frames * patches_per_frame
+        t_positions = interpolated_t.unsqueeze(-1).expand(-1, patches_per_frame).reshape(-1)  # [seq_len]
+        h_positions = h_ids.unsqueeze(0).expand(num_frames, -1).reshape(-1)  # [seq_len]
+        w_positions = w_ids.unsqueeze(0).expand(num_frames, -1).reshape(-1)  # [seq_len]
+
+        patch_positions_2d = torch.stack([t_positions, h_positions, w_positions], dim=-1)  # [seq_len, 3]
+        patch_positions_3d = patch_positions_2d.unsqueeze(0).expand(batch_size, -1, -1)  # [batch_size, seq_len, 3]
+
+        # Get frequencies
+        freqs = model.video_rope.forward_from_positions(patch_positions_3d)
+
+        # Verify shape
+        assert freqs.shape == (batch_size, seq_len, model.video_rope.half), (
+            f"Shape mismatch: expected ({batch_size}, {seq_len}, {model.video_rope.half}), got {freqs.shape}"
+        )
+
+        # Verify that temporal positions scaled to [0, 64) don't cause any issues
+        # (no NaN/Inf values)
+        assert torch.isfinite(freqs).all(), "RoPE frequencies contain NaN or Inf values"
+
+        # Verify temporal dimension contribution
+        # For the same spatial position but different temporal positions,
+        # the temporal part of freqs should differ
+        frame_0_patch_0 = freqs[0, 0, :]  # t=0
+        frame_7_patch_0 = freqs[0, 7 * patches_per_frame, :]  # t=63
+        assert not torch.allclose(frame_0_patch_0, frame_7_patch_0), (
+            "RoPE frequencies should differ for different temporal positions"
+        )
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
