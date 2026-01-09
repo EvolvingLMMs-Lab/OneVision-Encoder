@@ -64,7 +64,7 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --num_frames 8 \
   --image_size_video 224 \
   --embedding_size 1024 \
-  --list_batch_sizes 8 8 \
+  --list_batch_sizes 10 10 \
   --lr 0.00005 \
   --warmup_ratio 0.001 \
   --list_datasets onevision_encoder_si_cfs_single_node onevision_encoder_video_codec  \
@@ -76,4 +76,6 @@ torchrun --master_addr $master_addr --master_port $master_port \
   --num_sampled_data 1280000000 \
   --finetune_backbone 1 \
   --backward_passes_per_step 4 \
-  --num_tokens_per_frame 256
+  --num_tokens_per_frame 256 \
+  --residual_ratio 0.1 \
+  --frame_sampling_ratio 0.8
