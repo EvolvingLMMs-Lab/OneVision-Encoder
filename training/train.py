@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 import torch
@@ -15,12 +15,12 @@ from torch.utils.tensorboard import SummaryWriter
 import dataset
 import model_factory
 from dataset import DATASET_REGISTRY, Property
-from onevision_encoder import OneVisionEncoderConfig, OneVisionEncoderModel
+from onevision_encoder import OneVisionEncoderModel
 from training.checkpoint_utils import load_checkpoint, save_checkpoint
 from training.fused_partial_fc_v2_multi_res import CombinedMarginLoss, PartialFC_V2
 from training.lr_scheduler import PolynomialLRWarmup
 from transformers import CLIPImageProcessor
-
+from torchvision.utils import save_image
 
 torch._dynamo.config.optimize_ddp = False
 
@@ -110,6 +110,11 @@ parser.add_argument("--num_tokens_per_frame", type=int, default=256, help="Numbe
 parser.add_argument("--enable_multi_frame", type=int, default=1, help="Enable multi-frame training (0/1)")
 parser.add_argument("--multi_frame_list", nargs="+", type=int, default=[8], help="List of frame counts to use in multi-frame training")
 parser.add_argument("--base_num_frames", type=int, default=8, help="Base frame count for batch size calculation")
+
+# Add these new arguments for batch strategy ratios
+parser.add_argument("--residual_ratio", type=float, default=0.4, help="Ratio of batch for residual strategy (n1/bs)")
+parser.add_argument("--frame_sampling_ratio", type=float, default=0.4, help="Cumulative ratio for frame sampling strategy (n2/bs)")
+# Note: collage ratio is implicit (1. 0 - frame_sampling_ratio)
 
 args = parser.parse_args()
 
@@ -290,7 +295,7 @@ def main():
 
     dict_pfc_modules = {}
     list_module_pfc = []
-    parameters: List[dict] = [
+    parameters: list[dict] = [
         {"params": backbone_parameters},
     ]
 
@@ -375,6 +380,7 @@ def main():
         )
 
     backbone_ddp = wrap_ddp(backbone)
+    # backbone_ddp_compiled = backbone_ddp
     backbone_ddp_compiled = torch.compile(backbone_ddp)
 
     # Get patch_size from backbone config (outside of training loop for efficiency)
@@ -389,27 +395,8 @@ def main():
     list_dali_dataloader = []
     list_head_names = []
     for head_id, dataset_config in enumerate(args.list_datasets):
-        if dataset_config.dali_type == "decord":
-            from dataloader.data_decord_video_sampling_frame import get_dali_dataloader
-
-            train_iter = get_dali_dataloader(
-                data_root_path="",
-                data_csv_path=dataset_config.prefixes[0],
-                mode="train",
-                dali_num_threads=2,
-                dali_py_num_workers=4 // 1,
-                decord_num_threads=1,
-                batch_size=args.list_batch_sizes_adjusted[head_id],
-                input_size=args.image_size_video[0],
-                sequence_length=args.num_frames,
-                seed=0 + rank,
-                shard_id=dataset_config.shard_id,
-                num_shards=dataset_config.num_shards,
-            )
-            logger.info(f"[head_id={head_id}] Video dataloader: batch_size={args.list_batch_sizes_adjusted[head_id]}, num_frames={args.num_frames}")
-
-        elif dataset_config.dali_type == "decord_residual":
-            from dataloader.data_decord_llava_vit import get_dali_dataloader
+        if dataset_config.dali_type == "decord_residual":
+            from dataloader.data_decord_codec import get_dali_dataloader
 
             train_iter = get_dali_dataloader(
                 data_root_path="",
@@ -511,132 +498,129 @@ def main():
         list_batch_sizes = []
         for head_id, dataset_config in enumerate(args.list_datasets):
             dataset_config: Property
-            if dataset_config.dali_type in ["decord"]:
-                videos = list_data_batch[head_id]["videos"]  # [B, C, T, H, W]
-                labels = list_data_batch[head_id]["labels"].view(-1)
-                frame_indices = list_data_batch[head_id]["indices"]  # [B, seq_len]
-                total_frames = list_data_batch[head_id]["total_frames"]  # [B, 1] or [B]
-
-                bs, C, T, H, W = videos.shape
-                target_frames = 64
-
-                interpolated_indices = interpolate_frame_indices(frame_indices, total_frames.view(-1), target_frames)
-
-                seq_len = frame_indices.shape[1]
-                frame_idx_expanded = interpolated_indices.view(bs, 1, seq_len, 1, 1).expand(bs, C, seq_len, H, W)
-
-                per = torch.arange(args.num_tokens_per_frame, device="cuda")
-                visible_index = (interpolated_indices.unsqueeze(-1) * args.num_tokens_per_frame + per).reshape(bs, -1)
-                visible_index = visible_index.clamp_max(target_frames * args.num_tokens_per_frame - 1)
-
-                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    output = backbone_ddp_compiled(videos, visible_index)
-                    if hasattr(output, "pooler_output"):
-                        head_embedding = output.pooler_output
-                    else:
-                        head_embedding = output["head_output"]
-
-                head_embedding = head_embedding.float()
-                list_embedding.append(head_embedding)
-
-            elif dataset_config.dali_type in ["decord_residual"]:
-                # Example: bs=16, target_num=2048 (8 frames × 256 tokens/frame), num_tokens_per_frame=256
+            if dataset_config.dali_type in ["decord_residual"]:
+                # Example: bs=8, target_num=2048 (8 frames × 256 tokens/frame), num_tokens_per_frame=256
                 # H=W=224, patch_size=14, Hp=Wp=16, total_patches_per_frame=256, T=64 frames, total_patches=16384
 
-                head_input = list_data_batch[head_id]["videos"]  # [16, 3, 64, 224, 224]
+                head_input = list_data_batch[head_id]["videos"]  # [8, 3, 64, 224, 224]
                 list_batch_sizes.append(head_input.size(0))
-                visible_indices = list_data_batch[head_id]["video_visible_indices"].long()  # [16, >=2048]
+                visible_indices = list_data_batch[head_id]["video_visible_indices"].long()  # [8, >=2048]
 
-                bs = visible_indices.shape[0]  # 16
-                out = visible_indices[:, : args.target_num].clone()  # [16, 2048]
-                n1, n2 = int(bs * 0.5), int(bs * 0.875)  # n1=8, n2=14
+                bs = visible_indices.shape[0]  # 8
+                out = visible_indices[:, : args.target_num].clone()  # [8, 2048]
+                n1 = int(bs * args.residual_ratio)  # n1 controls residual samples
+                n2 = n1 + int(bs * args.frame_sampling_ratio)  # n2 controls frame_sampling samples
+                # n3 (collage) is implicit: bs - n2
 
-                idx_range = torch.arange(bs).cuda()  # [16]
-                mask_residual = idx_range < n1  # [16], first 8 samples are True
-                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)  # [16], samples 8-13 are True
-                mask_collage = idx_range >= n2  # [16], samples 14-15 are True
+                idx_range = torch.arange(bs).cuda()  # [8]
+                mask_residual = idx_range < n1  # first n1 samples use residual strategy
+                mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)  # samples [n1, n2) use frame sampling
+                mask_collage = idx_range >= n2  # samples [n2, bs) use collage strategy
 
                 # mask_residual: select first args.target_num patches
                 if mask_residual.any():
-                    out[mask_residual] = visible_indices[mask_residual, : args.target_num]  # [8, 2048]
+                    out[mask_residual] = visible_indices[mask_residual, :]  # [4, 2048]
 
                 # mask_frame_sampling: sample 8 frames from 64, get all patches per frame
                 FRAMES = 64
                 if mask_frame_sampling.any():
-                    nB = mask_frame_sampling.sum().item()  # 6
+                    nB = mask_frame_sampling.sum().item()  # 3
                     # frames: sample 1 frame from each of 8 bins (each bin has 8 frames)
                     frames = (
                         torch.arange(args.num_frames).cuda() * (FRAMES // args.num_frames) + torch.randint(FRAMES // args.num_frames, (nB, args.num_frames)).cuda()
-                    )  # [6, 8], values in [0,7], [8,15], ..., [56,63]
+                    )  # [3, 8], values in [0,7], [8,15], .. ., [56,63]
                     # sel_b: for each frame, get all 256 patches
-                    out[mask_frame_sampling] = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)  # [6, 8*256] = [6, 2048]
+                    out[mask_frame_sampling] = (frames.unsqueeze(-1) * args.num_tokens_per_frame + torch.arange(args.num_tokens_per_frame).cuda()).reshape(nB, -1)  # [3, 8*256] = [3, 2048]
 
-                combined_mask = mask_residual | mask_frame_sampling  # [16], first 14 samples are True
+                combined_mask = mask_residual | mask_frame_sampling  # [8], first 7 samples are True
                 if combined_mask.any():
-                    combined_idx = combined_mask.nonzero(as_tuple=False).squeeze(1)  # [14]
-                    video = head_input[combined_idx]  # [14, 3, 64, 224, 224]
-                    vis_idx = out[combined_idx]  # [14, 2048]
+                    combined_idx = combined_mask.nonzero(as_tuple=False).squeeze(1)  # [7]
+                    video = head_input[combined_idx]  # [7, 3, 64, 224, 224]
+                    vis_idx = out[combined_idx]  # [7, 2048]
 
-                    n, C, T, H, W = video.shape  # n=14, C=3, T=64, H=224, W=224
+                    n, C, T, H, W = video.shape  # n=7, C=3, T=64, H=224, W=224
                     Hp, Wp = H // patch_size, W // patch_size  # Hp=16, Wp=16
 
                     # Patchify: [n, C, T, H, W] -> [n, C, T*Hp*Wp, p, p]
-                    # [14, 3, 64, 224, 224] -> [14, 3, 64, 16, 14, 16, 14] -> [14, 3, 64, 16, 16, 14, 14] -> [14, 3, 16384, 14, 14]
-                    patches = video.view(n, C, T, Hp, patch_size, Wp, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T * Hp * Wp, patch_size, patch_size)  # [14, 3, 16384, 14, 14]
+                    # [7, 3, 64, 224, 224] -> [7, 3, 64, 16, 14, 16, 14] -> [7, 3, 64, 16, 16, 14, 14] -> [7, 3, 16384, 14, 14]
+                    patches = video.view(n, C, T, Hp, patch_size, Wp, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T * Hp * Wp, patch_size, patch_size)  # [7, 3, 16384, 14, 14]
 
                     # Select patches by vis_idx
-                    idx = vis_idx[:, None, :, None, None].expand(-1, C, -1, patch_size, patch_size)  # [14, 3, 2048, 14, 14]
-                    selected = torch.gather(patches, 2, idx)  # [14, 3, 2048, 14, 14]
+                    idx = vis_idx[:, None, :, None, None].expand(-1, C, -1, patch_size, patch_size)  # [7, 3, 2048, 14, 14]
+                    selected = torch.gather(patches, 2, idx)  # [7, 3, 2048, 14, 14]
 
                     # Unpatchify: [n, C, target_num, p, p] -> [n, C, T', H, W]
                     T_new = args.target_num // (Hp * Wp)  # 2048 // 256 = 8
                     num_patches = T_new * Hp * Wp  # 8 * 256 = 2048
-                    combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)  # [14, 3, 8, 224, 224]
+                    combined_head_input = selected.view(n, C, T_new, Hp, Wp, patch_size, patch_size).permute(0, 1, 2, 3, 5, 4, 6).reshape(n, C, T_new, H, W)  # [7, 3, 8, 224, 224]
+
+                    if rank == 0 and global_step < 20:
+                        try:
+                            # Create denormalization parameters
+                            vis_mean = torch.tensor(CLIP_MEAN, device=combined_head_input.device).view(1, 3, 1, 1, 1)
+                            vis_std = torch.tensor(CLIP_STD, device=combined_head_input.device).view(1, 3, 1, 1, 1)
+                            # Take up to 8 samples, clone and detach
+                            vis_input = combined_head_input.detach().clone()
+
+                            # Denormalize: input is (x - mean) / std -> x = input * std + mean
+                            vis_input = vis_input * vis_std + vis_mean
+                            vis_input = torch.clamp(vis_input, 0, 1)
+
+                            # Reshape [B, C, T, H, W] -> [B, T, C, H, W] -> [B*T, C, H, W]
+                            vb, vc, vt, vh, vw = vis_input.shape
+                            vis_input = vis_input.permute(0, 2, 1, 3, 4).reshape(-1, vc, vh, vw)
+
+                            # Save grid. nrow=vt means one row per video sequence
+                            vis_path = os.path.join(args.output, f"train_vis_step_{global_step:03d}.jpg")
+                            save_image(vis_input, vis_path, nrow=vt)
+                            logger.info(f"Saved visualization to {vis_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to save visualization: {e}")
 
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        combined_head_output = backbone_ddp_compiled(combined_head_input, visible_indices=vis_idx)  # input: [14, 3, 8, 224, 224], vis_idx: [14, 2048]
-                    combined_head_output = (combined_head_output.pooler_output if hasattr(combined_head_output, "pooler_output") else combined_head_output["head_output"]).float()  # [14, D]
+                        combined_head_output = backbone_ddp_compiled(combined_head_input, visible_indices=vis_idx)  # input: [7, 3, 8, 224, 224], vis_idx: [7, 2048]
+                    combined_head_output = (combined_head_output.pooler_output if hasattr(combined_head_output, "pooler_output") else combined_head_output["head_output"]).float()  # [7, D]
 
                 if mask_collage.any():
-                    coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)  # [2]
-                    nC = coll_idx.numel()  # 2
+                    coll_idx = torch.nonzero(mask_collage, as_tuple=False).squeeze(1)  # [1]
+                    nC = coll_idx.numel()  # 1
                     FRAMES = 64
 
-                    head_subset = head_input[coll_idx]  # [2, 3, 64, 224, 224]
+                    head_subset = head_input[coll_idx]  # [1, 3, 64, 224, 224]
 
                     if head_subset.dim() != 5 or head_subset.size(2) != FRAMES:
                         raise RuntimeError(f"collage branch expects head_subset shape [nC, C, {FRAMES}, H, W], got {tuple(head_subset.shape)}")
 
-                    nC = head_subset.size(0)  # 2
+                    nC = head_subset.size(0)  # 1
                     Cf = head_subset.size(1)  # 3
                     Hf = head_subset.size(3)  # 224
                     Wf = head_subset.size(4)  # 224
                     avg = FRAMES // args.num_frames  # 64 // 8 = 8
                     base = torch.arange(args.num_frames).cuda() * avg  # [0, 8, 16, 24, 32, 40, 48, 56]
-                    offs = torch.randint(avg, (nC, args.num_frames)).cuda()  # [2, 8], values in [0, 7]
-                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [2, 8], values in [0, 63]
-                    idx_expand = frames_idx.view(nC, 1, args.num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf)  # [2, 3, 8, 224, 224]
-                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [2, 3, 8, 224, 224]
-                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [2, 8, 3, 224, 224]
-                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.num_frames)]  # 8 x [2, 3, 224, 224]
-                    grid = torch.cat(grid_rows, dim=-2)  # [2, 3, 1792, 224] (1792 = 224 * 8)
+                    offs = torch.randint(avg, (nC, args.num_frames)).cuda()  # [1, 8], values in [0, 7]
+                    frames_idx = (base.unsqueeze(0) + offs).long().clamp(max=FRAMES - 1)  # [1, 8], values in [0, 63]
+                    idx_expand = frames_idx.view(nC, 1, args.num_frames, 1, 1).expand(-1, Cf, -1, Hf, Wf)  # [1, 3, 8, 224, 224]
+                    sel_frames = torch.gather(head_subset, 2, idx_expand)  # [1, 3, 8, 224, 224]
+                    sel_frames = sel_frames.permute(0, 2, 1, 3, 4)  # [1, 8, 3, 224, 224]
+                    grid_rows = [sel_frames[:, i, :, :, :] for i in range(args.num_frames)]  # 8 x [1, 3, 224, 224]
+                    grid = torch.cat(grid_rows, dim=-2)  # [1, 3, 1792, 224] (1792 = 224 * 8)
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                        collage_head_output = backbone_ddp_compiled(grid)  # input: [2, 3, 1792, 224]
+                        collage_head_output = backbone_ddp_compiled(grid)  # input: [1, 3, 1792, 224]
                     if hasattr(collage_head_output, "pooler_output"):
                         collage_head_output = collage_head_output.pooler_output
                     else:
                         collage_head_output = collage_head_output["head_output"]
-                    collage_head_output = collage_head_output.float()  # [2, D]
+                    collage_head_output = collage_head_output.float()  # [1, D]
 
                 D = combined_head_output.size(1)  # embedding dimension
 
-                head_embedding_full = torch.zeros(bs, D, dtype=torch.float32).cuda()  # [16, D]
+                head_embedding_full = torch.zeros(bs, D, dtype=torch.float32).cuda()  # [8, D]
                 if combined_mask.any():
-                    head_embedding_full[combined_idx] = combined_head_output  # head_embedding_full[0:14] = [14, D]
+                    head_embedding_full[combined_idx] = combined_head_output  # head_embedding_full[0:7] = [7, D]
                 if mask_collage.any():
-                    head_embedding_full[coll_idx] = collage_head_output  # head_embedding_full[14:16] = [2, D]
+                    head_embedding_full[coll_idx] = collage_head_output  # head_embedding_full[7] = [1, D]
 
-                list_embedding.append(head_embedding_full)  # [16, D]
+                list_embedding.append(head_embedding_full)  # [8, D]
 
             elif dataset_config.dali_type in ["origin", "ocr"]:
                 head_input = list_data_batch[head_id]["pixel_values"]
@@ -745,13 +729,13 @@ class BatchEndCallBack(object):
     def __init__(
         self,
         frequent: int,
-        list_head_names: List[str],
+        list_head_names: list[str],
         output: str,
         total_steps: int,
         tb_writer=None,
     ):
         self.frequent: int = frequent
-        self.list_head_names: List[str] = list_head_names
+        self.list_head_names: list[str] = list_head_names
         self.output: str = output
         self.total_steps: int = total_steps
 
@@ -776,7 +760,7 @@ class BatchEndCallBack(object):
         self,
         global_step: int,
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
-        list_loss_float: List[float],
+        list_loss_float: list[float],
         batch_size: int,
         num_samples=None,
     ):
@@ -864,7 +848,7 @@ def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, r
     if rank != 0:
         return
 
-    args_dict: Dict[str, Any] = vars(args) if not isinstance(args, dict) else args
+    args_dict: dict[str, Any] = vars(args) if not isinstance(args, dict) else args
 
     sorted_items = sorted(args_dict.items(), key=lambda x: x[0])
 

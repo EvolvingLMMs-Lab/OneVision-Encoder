@@ -53,7 +53,7 @@ class DALIWarper:
 class VideoExternalSource:
     def __init__(self, mode: str, source_params: Dict[str, Any]):
         self.mode = mode
-        self.file_list: List[Tuple[str, int]] = source_params["file_list"]
+        self.file_list: List[Tuple[str, int]]   = source_params["file_list"]
         self.num_shards: int = source_params["num_shards"]
         self.shard_id: int = source_params["shard_id"]
         self.batch_size: int = source_params["batch_size"]
@@ -91,8 +91,8 @@ class VideoExternalSource:
         num_frames = len(vr)
         frame_indices = self._get_frame_indices(num_frames)
         video_data = vr.get_batch(frame_indices).asnumpy()
-        if self.use_rgb:
-            video_data = video_data[:, :, :, ::-1]
+        # if self.use_rgb:
+        #     video_data = video_data[:, :, :, ::-1]
         # Return video_data, indices, total_frames and file_name
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
@@ -134,40 +134,40 @@ def preprocess_videos(videos, mode, input_size, mean, std):
         output_layout="FHWC",
     )
 
-    if mode == "train":
+    # if mode == "train":
         # Brightness/contrast
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
-            videos = fn.brightness_contrast(
-                videos,
-                contrast=fn.random.uniform(range=(0.6, 1.4)),
-                brightness=fn.random.uniform(range=(-0.125, 0.125)),
-                device="gpu",
-            )
+        # if fn.random.coin_flip(dtype=types.BOOL, probability=0.2):
+        #     videos = fn.brightness_contrast(
+        #         videos,
+        #         contrast=fn.random.uniform(range=(0.6, 1.4)),
+        #         brightness=fn.random.uniform(range=(-0.125, 0.125)),
+        #         device="gpu",
+        #     )
 
-        # Saturation
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
-            videos = fn.saturation(
-                videos,
-                saturation=fn.random.uniform(range=[0.6, 1.4]),
-                device="gpu",
-            )
+        # # Saturation
+        # if fn.random.coin_flip(dtype=types.BOOL, probability=0.2):
+        #     videos = fn.saturation(
+        #         videos,
+        #         saturation=fn.random.uniform(range=[0.6, 1.4]),
+        #         device="gpu",
+        #     )
 
-        # Hue
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.8):
-            videos = fn.hue(
-                videos,
-                hue=fn.random.uniform(range=[-0.2, 0.2]),
-                device="gpu",
-            )
+        # # Hue
+        # if fn.random.coin_flip(dtype=types.BOOL, probability=0.2):
+        #     videos = fn.hue(
+        #         videos,
+        #         hue=fn.random.uniform(range=[-0.2, 0.2]),
+        #         device="gpu",
+        #     )
 
-        # Color space conversion
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.1):
-            videos = fn.color_space_conversion(
-                videos,
-                image_type=types.RGB,
-                output_type=types.BGR,
-                device="gpu",
-            )
+        # # Color space conversion
+        # if fn.random.coin_flip(dtype=types.BOOL, probability=0.1):
+        #     videos = fn.color_space_conversion(
+        #         videos,
+        #         image_type=types.RGB,
+        #         output_type=types.BGR,
+        #         device="gpu",
+        #     )
 
     # Unified normalization to FLOAT / CFHW
     videos = fn.crop_mirror_normalize(
