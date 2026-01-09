@@ -91,8 +91,6 @@ class VideoExternalSource:
         num_frames = len(vr)
         frame_indices = self._get_frame_indices(num_frames)
         video_data = vr.get_batch(frame_indices).asnumpy()
-        if self.use_rgb:
-            video_data = video_data[:, :, :, ::-1]
         # Return video_data, indices, total_frames and file_name
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
