@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 import decord
 import numpy as np
@@ -9,7 +9,9 @@ import nvidia.dali.types as types
 from nvidia.dali.pipeline import pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
 
+
 logger = logging.getLogger(__file__)
+
 
 # ----------------------------------------------------------------------------
 # 1. DALI Iterator Wrapper (modified - returns indices, total_frames and video_visible_indices)
@@ -19,14 +21,14 @@ class DALIWarper:
         self.iter = dali_iter
         self.steps_per_epoch = steps_per_epoch
 
-    def __next__(self) -> Dict[str, object]:
+    def __next__(self) -> dict[str, object]:
         data_dict = self.iter.__next__()[0]
         return {
             "videos": data_dict["videos"],
             "labels": data_dict["labels"],
             "indices": data_dict["indices"],
             "total_frames": data_dict["total_frames"],
-            "video_visible_indices": data_dict["video_visible_indices"]
+            "video_visible_indices": data_dict["video_visible_indices"],
         }
 
     def __iter__(self):
@@ -37,6 +39,7 @@ class DALIWarper:
 
     def reset(self):
         self.iter.reset()
+
 
 # ----------------------------------------------------------------------------
 # 2. DALI External Source for Video Data (modified - returns indices, total_frames and video_visible_indices)
@@ -81,8 +84,6 @@ class VideoExternalSource:
         num_frames = len(vr)
         frame_indices = self._get_frame_indices(num_frames)
         video_data = vr.get_batch(frame_indices).asnumpy()
-        if self.use_rgb:
-            video_data = video_data[:, :, :, ::-1]
         return video_data, np.array(frame_indices, dtype=np.int64), num_frames
 
     def _get_valid_sample(self, sample_idx: int, depth=0) -> tuple:
@@ -118,11 +119,12 @@ class VideoExternalSource:
         sample_idx = self.perm[idx_in_shard + self.shard_offset]
         return self._get_valid_sample(sample_idx, depth=0)
 
+
 # ----------------------------------------------------------------------------
 # 3. DALI Pipeline Definition (modified - handles indices, total_frames and video_visible_indices)
 # ----------------------------------------------------------------------------
 @pipeline_def(enable_conditionals=True)
-def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
+def dali_video_pipeline(mode: str, source_params: dict[str, Any]):
     input_size = source_params["input_size"]
     mean = source_params["mean"]
     std = source_params["std"]
@@ -134,7 +136,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
         batch=False,
         parallel=True,
         dtype=[types.UINT8, types.INT64, types.INT64, types.INT64, types.INT16],
-        layout=["FHWC", "C", "C", "C", "C"]
+        layout=["FHWC", "C", "C", "C", "C"],
     )
 
     videos = videos.gpu()
@@ -145,42 +147,9 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
 
     # Directly resize to input_size, since video is already 256x256 square
     videos = fn.resize(videos, resize_x=input_size, resize_y=input_size, antialias=True, interp_type=types.INTERP_CUBIC)
-
-    if mode == "train":
-        # Brightness/contrast
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
-            videos = fn.brightness_contrast(
-                videos,
-                contrast=fn.random.uniform(range=(0.6, 1.4)),
-                brightness=fn.random.uniform(range=(-0.125, 0.125)),
-                device="gpu",
-            )
-        # Saturation
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
-            videos = fn.saturation(
-                videos,
-                saturation=fn.random.uniform(range=[0.6, 1.4]),
-                device="gpu",
-            )
-        # Hue
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.3):
-            videos = fn.hue(
-                videos,
-                hue=fn.random.uniform(range=[-0.2, 0.2]),
-                device="gpu",
-            )
-
-        # Color space conversion
-        if fn.random.coin_flip(dtype=types.BOOL, probability=0.1):
-            videos = fn.color_space_conversion(
-                videos,
-                image_type=types.RGB,
-                output_type=types.BGR,
-                device="gpu",
-            )
-
     videos = fn.crop_mirror_normalize(videos, dtype=types.FLOAT, output_layout="CFHW", mean=[m * 255.0 for m in mean], std=[s * 255.0 for s in std])
     return videos, labels, indices, total_frames, video_visible_indices
+
 
 # ----------------------------------------------------------------------------
 # 4. Main Dataloader Function (modified - output_map adds indices, total_frames and video_visible_indices)
@@ -194,14 +163,14 @@ def get_dali_dataloader(
     input_size: int = 224,
     short_side_size: int = 224,
     use_rgb: bool = True,
-    mean: List[float] = [0.48145466, 0.4578275, 0.40821073],
-    std: List[float] = [0.26862954, 0.26130258, 0.27577711],
+    mean: list[float] = [0.48145466, 0.4578275, 0.40821073],
+    std: list[float] = [0.26862954, 0.26130258, 0.27577711],
     dali_num_threads: int = 4,
     dali_py_num_workers: int = 8,
     decord_num_threads: int = 2,
     seed: int = 0,
-    shard_id = None,
-    num_shards = None,
+    shard_id=None,
+    num_shards=None,
 ) -> DALIWarper:
     print(f"[{mode} loader] Reading for: {data_csv_path}")
     file_list = []
@@ -222,25 +191,33 @@ def get_dali_dataloader(
         shard_id = rank
 
     source_params = {
-        "num_shards": num_shards, "shard_id": shard_id, "file_list": file_list,
-        "batch_size": batch_size, "sequence_length": sequence_length, "seed": seed + rank,
-        "use_rgb": use_rgb, "input_size": input_size,
-        "mean": mean, "std": std,
+        "num_shards": num_shards,
+        "shard_id": shard_id,
+        "file_list": file_list,
+        "batch_size": batch_size,
+        "sequence_length": sequence_length,
+        "seed": seed + rank,
+        "use_rgb": use_rgb,
+        "input_size": input_size,
+        "mean": mean,
+        "std": std,
         "decord_num_threads": decord_num_threads,
     }
 
     pipe = dali_video_pipeline(
-        batch_size=batch_size, num_threads=dali_num_threads, device_id=local_rank,
-        seed=seed + rank, py_num_workers=dali_py_num_workers, py_start_method="forkserver",
-        prefetch_queue_depth=8, mode=mode, source_params=source_params,
+        batch_size=batch_size,
+        num_threads=dali_num_threads,
+        device_id=local_rank,
+        seed=seed + rank,
+        py_num_workers=dali_py_num_workers,
+        py_start_method="forkserver",
+        prefetch_queue_depth=8,
+        mode=mode,
+        source_params=source_params,
     )
     pipe.build()
 
-    dali_iter = DALIGenericIterator(
-        pipelines=[pipe],
-        output_map=["videos", "labels", "indices", "total_frames", "video_visible_indices"],
-        auto_reset=True
-    )
+    dali_iter = DALIGenericIterator(pipelines=[pipe], output_map=["videos", "labels", "indices", "total_frames", "video_visible_indices"], auto_reset=True)
     steps_per_epoch = len(file_list) // batch_size // num_shards
     dataloader = DALIWarper(dali_iter=dali_iter, steps_per_epoch=steps_per_epoch)
 
