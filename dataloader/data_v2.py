@@ -1,4 +1,6 @@
+import logging
 import os
+import random
 
 import nvidia.dali
 import nvidia.dali.fn as fn
@@ -6,15 +8,13 @@ import nvidia.dali.types as types
 import torch
 from nvidia.dali.pipeline import Pipeline
 from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-import random
-import logging
+
+
 logger = logging.getLogger(__name__)
 
 
 class MultiRecDALIWarper(object):
-    def __init__(
-        self, list_prefix, batch_size, image_size, workers, shard_id, num_shards
-    ):
+    def __init__(self, list_prefix, batch_size, image_size, workers, shard_id, num_shards):
         self.list_prefix = list_prefix
         self.batch_size = batch_size
         self.image_size = image_size
@@ -90,10 +90,7 @@ class SyntheticDataIter(object):
 
     def __next__(self):
         # return self.tensor_data, self.tensor_label
-        return {
-            "pixel_values": self.tensor_data,
-            "labels": self.tensor_label
-        }
+        return {"pixel_values": self.tensor_data, "labels": self.tensor_label}
 
     def __iter__(self):
         return self
@@ -113,19 +110,13 @@ class DALIWarperV2(object):
         tensor_label = data_dict["label"].long().cuda()
 
         if self.label_select is None:
-            return {
-                "pixel_values": tensor_data,
-                "labels": tensor_label
-            }
+            return {"pixel_values": tensor_data, "labels": tensor_label}
         else:
             if tensor_label.size(1) > 1:
                 tensor_label: torch.Tensor = tensor_label[:, int(self.label_select)]
             else:
                 tensor_label: torch.Tensor = tensor_label[:, 0]
-            return {
-                "pixel_values": tensor_data,
-                "labels": tensor_label
-            }
+            return {"pixel_values": tensor_data, "labels": tensor_label}
 
     def __iter__(self):
         return self

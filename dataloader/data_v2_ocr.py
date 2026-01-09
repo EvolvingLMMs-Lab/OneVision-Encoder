@@ -1,4 +1,5 @@
 import os
+import random
 
 import nvidia.dali
 import nvidia.dali.fn as fn
@@ -6,13 +7,10 @@ import nvidia.dali.types as types
 import torch
 from nvidia.dali.pipeline import Pipeline
 from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-import random
 
 
 class MultiRecDALIWarper(object):
-    def __init__(
-        self, list_prefix, batch_size, image_size, workers, shard_id, num_shards
-    ):
+    def __init__(self, list_prefix, batch_size, image_size, workers, shard_id, num_shards):
         self.list_prefix = list_prefix
         self.batch_size = batch_size
         self.image_size = image_size
@@ -106,19 +104,13 @@ class DALIWarperV2(object):
         tensor_label = data_dict["label"].long().cuda()
 
         if self.label_select is None:
-            return {
-                "pixel_values": tensor_data,
-                "labels": tensor_label
-            }
+            return {"pixel_values": tensor_data, "labels": tensor_label}
         else:
             if tensor_label.size(1) > 1:
                 tensor_label: torch.Tensor = tensor_label[:, int(self.label_select)]
             else:
                 tensor_label: torch.Tensor = tensor_label[:, 0]
-            return {
-                "pixel_values": tensor_data,
-                "labels": tensor_label
-            }
+            return {"pixel_values": tensor_data, "labels": tensor_label}
             # return tensor_data, tensor_label
 
     def __iter__(self):
@@ -137,6 +129,7 @@ class DALIWarperV2(object):
 
 local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 
+
 def dali_dataloader(
     prefix,
     batch_size,
@@ -149,9 +142,8 @@ def dali_dataloader(
     seed=1437,
     num_shards=None,
     shard_id=None,
-    max_side=336
+    max_side=336,
 ):
-
     if num_shards is None:
         num_shards = int(os.environ.get("WORLD_SIZE", "1"))
     if shard_id is None:
@@ -195,8 +187,14 @@ def dali_dataloader(
             interp_type=types.INTERP_TRIANGULAR,
         )
         images = fn.crop_mirror_normalize(
-            images.gpu(), dtype=types.FLOAT, output_layout="CHW", crop=(image_size[0], image_size[1]),
-            mean=mean, std=std, mirror=False,)
+            images.gpu(),
+            dtype=types.FLOAT,
+            output_layout="CHW",
+            crop=(image_size[0], image_size[1]),
+            mean=mean,
+            std=std,
+            mirror=False,
+        )
 
         pipe.set_outputs(images, labels)
     pipe.build()
@@ -212,24 +210,13 @@ if __name__ == "__main__":
     import cv2
     import numpy as np
 
-    loader =  dali_dataloader(
-    "/data_4/coyo_ocr_v0/train_00",
-    4,
-    [336, 336],
-    workers=4,
-    is_training=True,
-    mean=[0, 0, 0],
-    std=[1, 1, 1],
-    label_select=None,
-    seed=1437,
-    num_shards=None,
-    shard_id=None,
-    max_side=336)
+    loader = dali_dataloader(
+        "/data_4/coyo_ocr_v0/train_00", 4, [336, 336], workers=4, is_training=True, mean=[0, 0, 0], std=[1, 1, 1], label_select=None, seed=1437, num_shards=None, shard_id=None, max_side=336
+    )
 
     image_list = []
     big_img = np.zeros((3360, 3360, 3), dtype=np.uint8)
     for image, label in loader:
-
         print(label)
         image = image[0].permute(1, 2, 0).cpu().numpy()
         image_list.append(image)
@@ -239,5 +226,5 @@ if __name__ == "__main__":
     for i in range(100):
         row = i // 10
         col = i % 10
-        big_img[row * 336:(row + 1) * 336, col * 336:(col + 1) * 336] = image_list[i]
+        big_img[row * 336 : (row + 1) * 336, col * 336 : (col + 1) * 336] = image_list[i]
     cv2.imwrite("output_big_image.jpg", big_img[:, :, ::-1])

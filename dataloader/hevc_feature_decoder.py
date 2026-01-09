@@ -1,17 +1,20 @@
-import os
-import cv2
-import time
-import subprocess as sp
-import math
 import argparse
-import numpy as np
+import hashlib
 import json
+import math
+import os
+import subprocess as sp
+import time
+
 # try:
 #     from .ffprobe import ffprobe  # when imported as a package module
 # except ImportError:  # when run as a standalone script
 #     from ffprobe import ffprobe
-from typing import Optional, Dict, Any
-import hashlib
+from typing import Any, Dict, Optional
+
+import cv2
+import numpy as np
+
 
 def ffprobe(filename):
     """get metadata by using ffprobe
@@ -28,40 +31,13 @@ def ffprobe(filename):
        about the passed-in source video.
     """
     # Call ffprobe for streams
-    streams_cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-show_streams",
-        "-select_streams", "v:0",
-        "-print_format", "json",
-        filename
-    ]
-    packets_cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-show_packets",
-        "-select_streams", "v:0",
-        "-print_format", "json",
-        filename
-    ]
-    result_streams = sp.run(
-        streams_cmd,
-        stdout=sp.PIPE,
-        stderr=sp.PIPE,
-        text=True,
-        check=True
-    )
-    result_packets = sp.run(
-        packets_cmd,
-        stdout=sp.PIPE,
-        stderr=sp.PIPE,
-        text=True,
-        check=True
-    )
+    streams_cmd = ["ffprobe", "-v", "error", "-show_streams", "-select_streams", "v:0", "-print_format", "json", filename]
+    packets_cmd = ["ffprobe", "-v", "error", "-show_packets", "-select_streams", "v:0", "-print_format", "json", filename]
+    result_streams = sp.run(streams_cmd, stdout=sp.PIPE, stderr=sp.PIPE, text=True, check=True)
+    result_packets = sp.run(packets_cmd, stdout=sp.PIPE, stderr=sp.PIPE, text=True, check=True)
     viddict = json.loads(result_streams.stdout)
     packets = json.loads(result_packets.stdout)
     return viddict, packets
-
 
 
 def viz_mv_to_hsv(mvx: np.ndarray, mvy: np.ndarray) -> np.ndarray:
@@ -77,25 +53,26 @@ def viz_mv_to_hsv(mvx: np.ndarray, mvy: np.ndarray) -> np.ndarray:
     # If looks like quarter-res, upsample to full size using nearest
     full_H = getattr(viz_mv_to_hsv, "_full_H", None)
     full_W = getattr(viz_mv_to_hsv, "_full_W", None)
-    if full_H is not None and full_W is not None and (H*4 == full_H and W*4 == full_W):
+    if full_H is not None and full_W is not None and (H * 4 == full_H and W * 4 == full_W):
         mvx_u = cv2.resize(mvx, (full_W, full_H), interpolation=cv2.INTER_NEAREST)
         mvy_u = cv2.resize(mvy, (full_W, full_H), interpolation=cv2.INTER_NEAREST)
     else:
         mvx_u, mvy_u = mvx, mvy
 
     ang = np.arctan2(-mvy_u, mvx_u)  # y-down image coords
-    ang = (ang + np.pi) / (2*np.pi)  # [0,1]
+    ang = (ang + np.pi) / (2 * np.pi)  # [0,1]
     mag = np.sqrt(mvx_u**2 + mvy_u**2)
     s = np.percentile(mag, 95) if np.isfinite(mag).all() else 1.0
     s = max(s, 1e-6)
     mag = np.clip(mag / s, 0, 1)
 
     hsv = np.zeros((mvx_u.shape[0], mvx_u.shape[1], 3), dtype=np.uint8)
-    hsv[..., 0] = (ang * 179).astype(np.uint8)   # OpenCV Hue in [0,179]
+    hsv[..., 0] = (ang * 179).astype(np.uint8)  # OpenCV Hue in [0,179]
     hsv[..., 1] = 255
     hsv[..., 2] = (mag * 255).astype(np.uint8)
     bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     return bgr
+
 
 def viz_residual(res: np.ndarray, signed: bool = True) -> np.ndarray:
     """
@@ -104,19 +81,19 @@ def viz_residual(res: np.ndarray, signed: bool = True) -> np.ndarray:
     If signed=False, show magnitude via COLORMAP_TURBO.
     Returns BGR uint8 image.
     """
-    if res.ndim == 3 and res.shape[0] in (1,3):
+    if res.ndim == 3 and res.shape[0] in (1, 3):
         # CHW -> HWC
         if res.shape[0] == 1:
             res = res[0]
         else:
-            res = res.transpose(1,2,0)
+            res = res.transpose(1, 2, 0)
     if res.ndim == 2:
         img = res.astype(np.float32)
         if signed:
-            img = (img - 128.0)  # center
+            img = img - 128.0  # center
             a = np.percentile(np.abs(img), 95)
             a = max(a, 1.0)
-            img = (img + a) / (2*a)  # [-a,a] -> [0,1]
+            img = (img + a) / (2 * a)  # [-a,a] -> [0,1]
         else:
             a = np.percentile(img, 95)
             a = max(a, 1.0)
@@ -130,11 +107,11 @@ def viz_residual(res: np.ndarray, signed: bool = True) -> np.ndarray:
         raise ValueError(f"Unexpected residual shape for viz: {res.shape}")
     return vis
 
-_HEVC_FEAT_DECODER = os.environ.get('HEVC_FEAT_DECODER', 'hevc')
 
-_FFMPEG_SUPPORTED_DECODERS = [ext.encode() for ext in [
-    ".mp4", ".mkv", ".mov", ".hevc", ".h265", ".265"
-]]
+_HEVC_FEAT_DECODER = os.environ.get("HEVC_FEAT_DECODER", "hevc")
+
+_FFMPEG_SUPPORTED_DECODERS = [ext.encode() for ext in [".mp4", ".mkv", ".mov", ".hevc", ".h265", ".265"]]
+
 
 def _parse_fraction(frac: Optional[str]) -> float:
     if not frac or frac == "0/0":
@@ -142,7 +119,8 @@ def _parse_fraction(frac: Optional[str]) -> float:
     try:
         if "/" in frac:
             a, b = frac.split("/")
-            a = float(a.strip()); b = float(b.strip())
+            a = float(a.strip())
+            b = float(b.strip())
             return 0.0 if b == 0 else a / b
         return float(frac)
     except Exception:
@@ -228,13 +206,11 @@ class HevcFeatureReader:
             # print(filename)
             raise NameError("Expect a yuv420p input.")
 
-        assert str.encode(self.extension).lower() in _FFMPEG_SUPPORTED_DECODERS, (
-                "Unknown decoder extension: " + self.extension.lower()
-        )
+        assert str.encode(self.extension).lower() in _FFMPEG_SUPPORTED_DECODERS, "Unknown decoder extension: " + self.extension.lower()
 
         # FPS / time base estimation (best-effort from ffprobe)
         avg_fps = _get(viddict, "avg_frame_rate", "@avg_frame_rate")
-        r_fps   = _get(viddict, "r_frame_rate", "@r_frame_rate")
+        r_fps = _get(viddict, "r_frame_rate", "@r_frame_rate")
         self.fps = _parse_fraction(avg_fps) or _parse_fraction(r_fps) or 0.0
         self.time_base = (1.0 / self.fps) if self.fps > 0 else None
 
@@ -247,10 +223,7 @@ class HevcFeatureReader:
 
         # Verify external HEVC feature decoder binary exists and is executable
         if not os.path.isfile(_HEVC_FEAT_DECODER) or not os.access(_HEVC_FEAT_DECODER, os.X_OK):
-            raise FileNotFoundError(
-                f"HEVC feature decoder not found or not executable at '{_HEVC_FEAT_DECODER}'.\n"
-                f"Set env HEVC_FEAT_DECODER to the correct binary path."
-            )
+            raise FileNotFoundError(f"HEVC feature decoder not found or not executable at '{_HEVC_FEAT_DECODER}'.\nSet env HEVC_FEAT_DECODER to the correct binary path.")
 
         self.DEVNULL = open(os.devnull, "wb")
 
@@ -269,9 +242,11 @@ class HevcFeatureReader:
             self._proc.stdout.close()
             self._terminate(0.2)
         self._proc = None
-        if hasattr(self, 'DEVNULL') and self.DEVNULL:
-            try: self.DEVNULL.close()
-            except Exception: pass
+        if hasattr(self, "DEVNULL") and self.DEVNULL:
+            try:
+                self.DEVNULL.close()
+            except Exception:
+                pass
             self.DEVNULL = None
 
     def _terminate(self, timeout=1.0):
@@ -298,9 +273,7 @@ class HevcFeatureReader:
         pvMV_size = (self.width >> 2) * (self.height >> 2) * 2
         pvOFF_size = (self.width >> 2) * (self.height >> 2)
         pvSize_size = (self.width >> 3) * (self.height >> 3)
-        pvOffset = (3 * self.width * self.height >> 2) - (
-                pvMV_size * 5 + pvOFF_size * 2
-        )
+        pvOffset = (3 * self.width * self.height >> 2) - (pvMV_size * 5 + pvOFF_size * 2)
         assert self._proc is not None
 
         # Helper to ensure full buffer is read; if not, raise early with helpful msg
@@ -308,43 +281,24 @@ class HevcFeatureReader:
             buf = self._proc.stdout.read(num_bytes)
             if buf is None or len(buf) != num_bytes:
                 self._terminate()
-                raise RuntimeError(
-                    f"Short read from decoder. Expected {num_bytes} bytes, got {0 if buf is None else len(buf)}."
-                )
+                raise RuntimeError(f"Short read from decoder. Expected {num_bytes} bytes, got {0 if buf is None else len(buf)}.")
             return buf
 
         try:
-
             arr_YUV420 = np.frombuffer(
                 _read_exact(self.pvY_size + self.pvU_size + self.pvV_size),
                 dtype=np.uint8,
             )
-            arr_MVX_L0 = np.frombuffer(
-                _read_exact(pvMV_size), dtype=np.int16
-            )
-            arr_MVY_L0 = np.frombuffer(
-                _read_exact(pvMV_size), dtype=np.int16
-            )
-            arr_MVX_L1 = np.frombuffer(
-                _read_exact(pvMV_size), dtype=np.int16
-            )
-            arr_MVY_L1 = np.frombuffer(
-                _read_exact(pvMV_size), dtype=np.int16
-            )
+            arr_MVX_L0 = np.frombuffer(_read_exact(pvMV_size), dtype=np.int16)
+            arr_MVY_L0 = np.frombuffer(_read_exact(pvMV_size), dtype=np.int16)
+            arr_MVX_L1 = np.frombuffer(_read_exact(pvMV_size), dtype=np.int16)
+            arr_MVY_L1 = np.frombuffer(_read_exact(pvMV_size), dtype=np.int16)
 
-            arr_REF_OFF_L0 = np.frombuffer(
-                _read_exact(pvOFF_size), dtype=np.uint8
-            )
-            arr_REF_OFF_L1 = np.frombuffer(
-                _read_exact(pvOFF_size), dtype=np.uint8
-            )
-            arr_Size = np.frombuffer(_read_exact(pvMV_size), dtype=np.uint8)[
-                       :pvSize_size
-                       ]
+            arr_REF_OFF_L0 = np.frombuffer(_read_exact(pvOFF_size), dtype=np.uint8)
+            arr_REF_OFF_L1 = np.frombuffer(_read_exact(pvOFF_size), dtype=np.uint8)
+            arr_Size = np.frombuffer(_read_exact(pvMV_size), dtype=np.uint8)[:pvSize_size]
             _ = _read_exact(pvOffset)
-            arr_meta = np.frombuffer(
-                _read_exact(self.pvY_size >> 2), dtype=np.uint8
-            )
+            arr_meta = np.frombuffer(_read_exact(self.pvY_size >> 2), dtype=np.uint8)
             arr_YUV420_residual = np.frombuffer(
                 _read_exact(self.pvY_size + self.pvU_size + self.pvV_size),
                 dtype=np.uint8,
@@ -355,9 +309,7 @@ class HevcFeatureReader:
         except Exception as e:
             print(e)
             self._terminate()
-            raise RuntimeError(
-                "Failed to decode video. video information: ", self.viddict
-            )
+            raise RuntimeError("Failed to decode video. video information: ", self.viddict)
 
         return (
             arr_meta,
@@ -372,20 +324,18 @@ class HevcFeatureReader:
             arr_YUV420_residual,
         )
 
-    def _is_i_like(self, frame_type: int, ref_off_L0: np.ndarray, ref_off_L1: np.ndarray,
-                   mv_x_L0: np.ndarray, mv_y_L0: np.ndarray,
-                   mv_x_L1: np.ndarray, mv_y_L1: np.ndarray) -> bool:
+    def _is_i_like(self, frame_type: int, ref_off_L0: np.ndarray, ref_off_L1: np.ndarray, mv_x_L0: np.ndarray, mv_y_L0: np.ndarray, mv_x_L1: np.ndarray, mv_y_L1: np.ndarray) -> bool:
         """
         Heuristic: consider a frame 'I-like' if (a) decoder marks it as I/IDR (common encoders use 0 or 1),
         OR (b) no references + near-zero MVs.
         L0 only (single-ref, no B-frames).
         """
-        STRICT_I = int(os.environ.get('UMT_HEVC_STRICT_I', '0')) != 0
+        STRICT_I = int(os.environ.get("UMT_HEVC_STRICT_I", "0")) != 0
         try:
             # Use env var to override I types, default '0'
-            _itypes_env = os.environ.get('UMT_HEVC_I_TYPES', '0')
+            _itypes_env = os.environ.get("UMT_HEVC_I_TYPES", "0")
             try:
-                _itypes = {int(x) for x in _itypes_env.replace(' ', '').split(',') if x != ''}
+                _itypes = {int(x) for x in _itypes_env.replace(" ", "").split(",") if x != ""}
             except Exception:
                 _itypes = {0}
             if int(frame_type) in _itypes:
@@ -396,7 +346,7 @@ class HevcFeatureReader:
             # In strict mode, do NOT use the fallback; rely only on frame_type flag.
             return False
         # Fallback: no references and tiny motion (use L0 only)
-        no_ref = (ref_off_L0.max() == 0)
+        no_ref = ref_off_L0.max() == 0
         mv_max = max(np.abs(mv_x_L0).max(), np.abs(mv_y_L0).max())
         return bool(no_ref and mv_max == 0)
 
@@ -425,16 +375,14 @@ class HevcFeatureReader:
         ) = self._read_frame_data()
 
         frame_type = arr_meta[2]
-        quadtree_stru = arr_meta[1024: 1024 + self.nb_ctus * 12]
+        quadtree_stru = arr_meta[1024 : 1024 + self.nb_ctus * 12]
 
         all_yuv_data = arr_YUV420.reshape(self.height + (self.height >> 1), self.width)
-        all_yuv_data_residual = arr_YUV420_residual.reshape(
-            self.height + (self.height >> 1), self.width
-        )
+        all_yuv_data_residual = arr_YUV420_residual.reshape(self.height + (self.height >> 1), self.width)
 
-        if int(os.environ.get('UMT_HEVC_Y_ONLY', '1')) != 0:
-            y = all_yuv_data[:self.height, :self.width]
-            y_res = all_yuv_data_residual[:self.height, :self.width]
+        if int(os.environ.get("UMT_HEVC_Y_ONLY", "1")) != 0:
+            y = all_yuv_data[: self.height, : self.width]
+            y_res = all_yuv_data_residual[: self.height, : self.width]
             rgb = y
             residual = y_res
         else:
@@ -442,7 +390,7 @@ class HevcFeatureReader:
             residual = cv2.cvtColor(all_yuv_data_residual, cv2.COLOR_YUV420p2BGR)
 
         # Optionally suppress I-frame RGB payload (student side takes I-RGB via decord)
-        _SUPPRESS_I = int(os.environ.get('UMT_HEVC_SUPPRESS_I_RGB', '0')) != 0
+        _SUPPRESS_I = int(os.environ.get("UMT_HEVC_SUPPRESS_I_RGB", "0")) != 0
 
         mv_x_L0 = arr_MVX_L0.reshape(self.height >> 2, self.width >> 2)
         mv_y_L0 = arr_MVY_L0.reshape(self.height >> 2, self.width >> 2)
@@ -454,8 +402,7 @@ class HevcFeatureReader:
         size = arr_Size.reshape(self.height >> 3, self.width >> 3)
 
         # ---- meta info (GOP / timestamp / cache key) ----
-        is_i_frame = self._is_i_like(frame_type, ref_off_L0, ref_off_L1,
-                                     mv_x_L0, mv_y_L0, mv_x_L1, mv_y_L1)
+        is_i_frame = self._is_i_like(frame_type, ref_off_L0, ref_off_L1, mv_x_L0, mv_y_L0, mv_x_L1, mv_y_L1)
         # Suppress I-frame RGB if requested
         if _SUPPRESS_I and bool(is_i_frame):
             # Replace RGB with a zero image of the same shape to avoid expensive usage downstream.
@@ -483,7 +430,7 @@ class HevcFeatureReader:
                 self._pos_in_gop = 0
             else:
                 # Continue within current GOP (if _pos_in_gop not yet initialized, start from 0)
-                self._pos_in_gop = (0 if self._pos_in_gop < 0 else self._pos_in_gop + 1)
+                self._pos_in_gop = 0 if self._pos_in_gop < 0 else self._pos_in_gop + 1
 
         # timestamp estimation
         ts = (self._frame_index * self.time_base) if self.time_base is not None else None
@@ -498,19 +445,19 @@ class HevcFeatureReader:
             ft_str = "NA"
 
         # optional I cache key (Y-only) to help upper layers deduplicate compute
-        if int(os.environ.get('UMT_HEVC_Y_ONLY', '1')) != 0:
+        if int(os.environ.get("UMT_HEVC_Y_ONLY", "1")) != 0:
             i_cache_key = self._i_cache_key_from_y(rgb) if is_i_frame else None
         else:
             # if using BGR, derive key from its Y channel approximation
-            y_tmp = cv2.cvtColor(rgb, cv2.COLOR_BGR2YUV)[:,:,0] if (isinstance(rgb, np.ndarray) and rgb.ndim==3) else rgb
+            y_tmp = cv2.cvtColor(rgb, cv2.COLOR_BGR2YUV)[:, :, 0] if (isinstance(rgb, np.ndarray) and rgb.ndim == 3) else rgb
             i_cache_key = self._i_cache_key_from_y(y_tmp) if is_i_frame else None
 
         # Per-frame tiny hash (8x8 downsample of Y channel) for alignment debugging
         try:
-            if int(os.environ.get('UMT_HEVC_Y_ONLY', '1')) != 0:
-                _y_small = cv2.resize(all_yuv_data[:self.height, :self.width], (8, 8), interpolation=cv2.INTER_AREA)
+            if int(os.environ.get("UMT_HEVC_Y_ONLY", "1")) != 0:
+                _y_small = cv2.resize(all_yuv_data[: self.height, : self.width], (8, 8), interpolation=cv2.INTER_AREA)
             else:
-                _y_small = cv2.resize(cv2.cvtColor(rgb, cv2.COLOR_BGR2YUV)[:,:,0], (8, 8), interpolation=cv2.INTER_AREA)
+                _y_small = cv2.resize(cv2.cvtColor(rgb, cv2.COLOR_BGR2YUV)[:, :, 0], (8, 8), interpolation=cv2.INTER_AREA)
             _frame_hash = hashlib.md5(_y_small.tobytes()).hexdigest()
         except Exception:
             _frame_hash = None
@@ -567,7 +514,6 @@ class HevcFeatureReader:
     def getDecodeOrder(self):
         return self.decode_order
 
-
     # ----------- Fast-path: extract first GOP as tensors for student model ----------- #
     def _upsample_mv_to_hw(self, mv):
         """
@@ -581,7 +527,7 @@ class HevcFeatureReader:
         H, W = self.height, self.width
         return cv2.resize(mv, (W, H), interpolation=cv2.INTER_NEAREST)
 
-    def _normalize_mv_and_res(self, mvx, mvy, res, mode='percentile', pct=95, signed_res=True):
+    def _normalize_mv_and_res(self, mvx, mvy, res, mode="percentile", pct=95, signed_res=True):
         """
         Normalize MV and residual arrays for model input.
         Args:
@@ -596,20 +542,20 @@ class HevcFeatureReader:
         # Normalize MV
         mvx = mvx.astype(np.float32)
         mvy = mvy.astype(np.float32)
-        if mode == 'percentile':
+        if mode == "percentile":
             s = np.percentile(np.abs(np.concatenate([mvx.flatten(), mvy.flatten()])), pct)
             s = max(s, 1.0)
             mvx_norm = np.clip(mvx / s, -1.0, 1.0)
             mvy_norm = np.clip(mvy / s, -1.0, 1.0)
             mvx_norm = (mvx_norm + 1) / 2  # [0,1]
             mvy_norm = (mvy_norm + 1) / 2
-        elif mode == 'fixed':
+        elif mode == "fixed":
             # Assume 127 is reasonable max
             mvx_norm = np.clip(mvx / 127.0, -1.0, 1.0)
             mvy_norm = np.clip(mvy / 127.0, -1.0, 1.0)
             mvx_norm = (mvx_norm + 1) / 2
             mvy_norm = (mvy_norm + 1) / 2
-        elif mode == 'log1p':
+        elif mode == "log1p":
             mvx_norm = np.log1p(np.abs(mvx)) * np.sign(mvx)
             mvy_norm = np.log1p(np.abs(mvy)) * np.sign(mvy)
             # rescale to [-1,1] then [0,1]
@@ -626,20 +572,19 @@ class HevcFeatureReader:
         res = res.astype(np.float32)
         if signed_res:
             # Assume residual is centered around 0 and ranges roughly [-255, 255].
-            max_val = np.percentile(np.abs(res), pct) if mode == 'percentile' else 255.0
+            max_val = np.percentile(np.abs(res), pct) if mode == "percentile" else 255.0
             max_val = max(max_val, 1.0)
             res_norm = np.clip(res / max_val, -1.0, 1.0)
         else:
             # If treating as magnitude only, map absolute values to [0,1]
-            max_val = np.percentile(res, pct) if mode == 'percentile' else 255.0
+            max_val = np.percentile(res, pct) if mode == "percentile" else 255.0
             max_val = max(max_val, 1.0)
             res_norm = np.clip(res / max_val, 0.0, 1.0)
         return mvx_norm, mvy_norm, res_norm
 
-
-    def read_first_gop_tensors(self, gop_size=12, need_i_rgb=True, mv_level='L0',
-                               upsample_mv=True, norm_mode='percentile', mv_pct=95, signed_res=True,
-                               across_gops=True, collect_mv_from_all=False, across_gop=None):
+    def read_first_gop_tensors(
+        self, gop_size=12, need_i_rgb=True, mv_level="L0", upsample_mv=True, norm_mode="percentile", mv_pct=95, signed_res=True, across_gops=True, collect_mv_from_all=False, across_gop=None
+    ):
         """
         Quickly read the first GOP (gop_id=0) and return stacked numpy tensors for student input.
         Returns:
@@ -666,20 +611,20 @@ class HevcFeatureReader:
         p_res = []
         p_metas = []
         H, W = self.height, self.width
-        y_only = int(os.environ.get('UMT_HEVC_Y_ONLY', '1')) != 0
+        y_only = int(os.environ.get("UMT_HEVC_Y_ONLY", "1")) != 0
         n_col = 1 if y_only else 3
         n_res_col = 1 if y_only else 3
         n_i_col = 1 if y_only else 3
         n_p_col = n_res_col
         n_mv_ch = 2
         n_frames = 0
-        DEBUG = int(os.environ.get('UMT_HEVC_DEBUG', '0')) != 0
-        _dbg_count = 0       # limit per-frame add logs
-        _scan_count = 0      # limit per-frame scan logs
+        DEBUG = int(os.environ.get("UMT_HEVC_DEBUG", "0")) != 0
+        _dbg_count = 0  # limit per-frame add logs
+        _scan_count = 0  # limit per-frame scan logs
         try:
             for frame_tuple, meta in self.nextFrameEx():
                 # GOP handling
-                gop_id = meta.get('gop_id', 0)
+                gop_id = meta.get("gop_id", 0)
                 if across_gops:
                     if gop_id != 0 and DEBUG and _scan_count < 6:
                         print(f"[HEVC-DBG] gop change: gop_id={gop_id} at idx={meta.get('frame_index')} (ignored)")
@@ -692,7 +637,7 @@ class HevcFeatureReader:
                 if n_frames >= gop_size:
                     break
 
-                is_i = bool(meta.get('is_i_frame', False))
+                is_i = bool(meta.get("is_i_frame", False))
                 (
                     frame_type,
                     quadtree_stru,
@@ -713,8 +658,8 @@ class HevcFeatureReader:
                         _refmax = int(np.max(ref_off_L0))
                     except Exception:
                         _mvmax, _refmax = -1.0, -1
-                    _ft_id = meta.get('frame_type')
-                    _ft_str = meta.get('frame_type_str')
+                    _ft_id = meta.get("frame_type")
+                    _ft_str = meta.get("frame_type_str")
                     print(f"[HEVC-DBG] scan idx={meta.get('frame_index')} g={gop_id} type={_ft_str}({_ft_id}) is_i={is_i} mvmax={_mvmax:.3f} refmaxL0={_refmax}")
                     _scan_count += 1
 
@@ -733,9 +678,9 @@ class HevcFeatureReader:
                     else:
                         if residual.ndim == 3:
                             res = cv2.cvtColor(residual, cv2.COLOR_BGR2RGB)
-                            res = res.transpose(2,0,1)
+                            res = res.transpose(2, 0, 1)
                         else:
-                            res = np.stack([residual]*3,axis=0)
+                            res = np.stack([residual] * 3, axis=0)
                     p_mv_x.append(mvx)
                     p_mv_y.append(mvy)
                     p_res.append(res)
@@ -755,9 +700,9 @@ class HevcFeatureReader:
                         else:
                             if rgb.ndim == 3:
                                 rgb_img = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
-                                i_frames.append(rgb_img.transpose(2,0,1))
+                                i_frames.append(rgb_img.transpose(2, 0, 1))
                             else:
-                                i_frames.append(np.stack([rgb]*3,axis=0))
+                                i_frames.append(np.stack([rgb] * 3, axis=0))
                         i_metas.append(meta)
                 else:
                     _collect_mv_res()
@@ -773,19 +718,19 @@ class HevcFeatureReader:
             if y_only:
                 # [Ti, 1, H, W]
                 if i_arr.ndim == 3:
-                    i_arr = i_arr[:,None,:,:]
+                    i_arr = i_arr[:, None, :, :]
                 elif i_arr.shape[1] != 1:
-                    i_arr = i_arr[:,None,:,:]
+                    i_arr = i_arr[:, None, :, :]
             else:
                 if i_arr.ndim == 4 and i_arr.shape[1] == 3:
                     pass
                 elif i_arr.ndim == 4 and i_arr.shape[-1] == 3:
-                    i_arr = i_arr.transpose(0,3,1,2)
+                    i_arr = i_arr.transpose(0, 3, 1, 2)
                 elif i_arr.ndim == 3:
-                    i_arr = np.stack([i_arr]*3,axis=1)
-            tensors['I'] = i_arr
+                    i_arr = np.stack([i_arr] * 3, axis=1)
+            tensors["I"] = i_arr
         else:
-            tensors['I'] = np.zeros((0, n_i_col, H, W), dtype=np.uint8)
+            tensors["I"] = np.zeros((0, n_i_col, H, W), dtype=np.uint8)
         if p_mv_x:
             mvx_arr = np.stack(p_mv_x, axis=0)  # [Tp, H, W]
             mvy_arr = np.stack(p_mv_y, axis=0)
@@ -794,22 +739,21 @@ class HevcFeatureReader:
             if res_arr.ndim == 4:
                 pass
             elif res_arr.ndim == 3:
-                res_arr = res_arr[:,None,:,:]
-            tensors['MV'] = mv_arr
-            tensors['R'] = res_arr
+                res_arr = res_arr[:, None, :, :]
+            tensors["MV"] = mv_arr
+            tensors["R"] = res_arr
         else:
-            tensors['MV'] = np.zeros((0, 2, H, W), dtype=np.float32)
-            tensors['R'] = np.zeros((0, n_res_col, H, W), dtype=np.float32)
+            tensors["MV"] = np.zeros((0, 2, H, W), dtype=np.float32)
+            tensors["R"] = np.zeros((0, n_res_col, H, W), dtype=np.float32)
 
         # Normalize in-place
-        if tensors['MV'].shape[0] > 0:
-            mvx = tensors['MV'][:,0]
-            mvy = tensors['MV'][:,1]
-            res = tensors['R']
-            mvx_norm, mvy_norm, res_norm = self._normalize_mv_and_res(
-                mvx, mvy, res, mode=norm_mode, pct=mv_pct, signed_res=signed_res)
-            tensors['MV'] = np.stack([mvx_norm, mvy_norm], axis=1)
-            tensors['R'] = res_norm
+        if tensors["MV"].shape[0] > 0:
+            mvx = tensors["MV"][:, 0]
+            mvy = tensors["MV"][:, 1]
+            res = tensors["R"]
+            mvx_norm, mvy_norm, res_norm = self._normalize_mv_and_res(mvx, mvy, res, mode=norm_mode, pct=mv_pct, signed_res=signed_res)
+            tensors["MV"] = np.stack([mvx_norm, mvy_norm], axis=1)
+            tensors["R"] = res_norm
         # I-frames: optional normalization (keep as uint8 or normalize if requested)
         # (No normalization for I-frames here; can add if needed)
 
@@ -823,10 +767,8 @@ if __name__ == "__main__":
     parser.add_argument("--frames", type=int, default=2, help="Number of frames to read for sanity check")
     parser.add_argument("--out", type=str, default="hevc_debug", help="Output folder for dumps")
     parser.add_argument("--parallel", type=int, default=1, help="Parallel factor for decoder")
-    parser.add_argument("--y-only", type=int, choices=[0,1], default=None,
-                        help="Override env UMT_HEVC_Y_ONLY for this run (1=Y-plane only, 0=decode BGR).")
-    parser.add_argument("--viz-normalized", action="store_true",
-                        help="Also visualize MV/Residual after model normalization (uses read_first_gop_tensors).")
+    parser.add_argument("--y-only", type=int, choices=[0, 1], default=None, help="Override env UMT_HEVC_Y_ONLY for this run (1=Y-plane only, 0=decode BGR).")
+    parser.add_argument("--viz-normalized", action="store_true", help="Also visualize MV/Residual after model normalization (uses read_first_gop_tensors).")
     args = parser.parse_args()
 
     if args.y_only is not None:
@@ -847,34 +789,26 @@ if __name__ == "__main__":
 
         # Use a separate reader because read_first_gop_tensors() closes its own process
         rdr_norm = HevcFeatureReader(args.video, nb_frames=args.frames, n_parallel=args.parallel)
-        tensors, metas = rdr_norm.read_first_gop_tensors(
-            gop_size=args.frames,
-            need_i_rgb=True,
-            mv_level='L0',
-            upsample_mv=True,
-            norm_mode='percentile',
-            mv_pct=95,
-            signed_res=True
-        )
+        tensors, metas = rdr_norm.read_first_gop_tensors(gop_size=args.frames, need_i_rgb=True, mv_level="L0", upsample_mv=True, norm_mode="percentile", mv_pct=95, signed_res=True)
         rdr_norm.close()
 
         # --- MV (normalized): tensors['MV'] in [0,1]; convert to [-1,1] for direction-aware HSV ---
-        if tensors['MV'].shape[0] > 0:
-            Tp = tensors['MV'].shape[0]
-            for t in range(min(args.frames-1, Tp)):
-                mvx = tensors['MV'][t, 0] * 2.0 - 1.0
-                mvy = tensors['MV'][t, 1] * 2.0 - 1.0
+        if tensors["MV"].shape[0] > 0:
+            Tp = tensors["MV"].shape[0]
+            for t in range(min(args.frames - 1, Tp)):
+                mvx = tensors["MV"][t, 0] * 2.0 - 1.0
+                mvy = tensors["MV"][t, 1] * 2.0 - 1.0
                 mv_img = viz_mv_to_hsv(mvx.astype(np.float32), mvy.astype(np.float32))
                 cv2.imwrite(os.path.join(args.out, f"{t:05d}_mv_L0_hsv.NORM.png"), mv_img)
                 # Save arrays for inspection
-                np.save(os.path.join(args.out, f"{t:05d}_mvx_norm.npy"), tensors['MV'][t, 0])
-                np.save(os.path.join(args.out, f"{t:05d}_mvy_norm.npy"), tensors['MV'][t, 1])
+                np.save(os.path.join(args.out, f"{t:05d}_mvx_norm.npy"), tensors["MV"][t, 0])
+                np.save(os.path.join(args.out, f"{t:05d}_mvy_norm.npy"), tensors["MV"][t, 1])
 
         # --- Residual (normalized): tensors['R'] in [-1,1]; map to 0..255 for visualization and apply colormap ---
-        if tensors['R'].shape[0] > 0:
-            Rp = tensors['R'].shape[0]
-            for t in range(min(args.frames-1, Rp)):
-                r = tensors['R'][t]  # [C,H,W] or [H,W]
+        if tensors["R"].shape[0] > 0:
+            Rp = tensors["R"].shape[0]
+            for t in range(min(args.frames - 1, Rp)):
+                r = tensors["R"][t]  # [C,H,W] or [H,W]
                 if r.ndim == 3 and r.shape[0] == 1:
                     r_img = r[0]
                 elif r.ndim == 3 and r.shape[0] == 3:
@@ -889,7 +823,6 @@ if __name__ == "__main__":
                 cv2.imwrite(os.path.join(args.out, f"{t:05d}_residual_viz.NORM.png"), r_vis)
                 # Save array for inspection
                 np.save(os.path.join(args.out, f"{t:05d}_residual_norm.npy"), r)
-
 
     for i, item in enumerate(rdr.nextFrameEx()):
         if i >= args.frames:
@@ -909,7 +842,9 @@ if __name__ == "__main__":
             residual,
         ) = frame_tuple
 
-        print(f"[hevc] frame#{i} type={meta['frame_type_str']}({int(frame_type)}) gop={meta['gop_id']} ts={meta['timestamp']} rgb={rgb.shape} residual={residual.shape} mvL0=({mv_x_L0.shape},{mv_y_L0.shape}) size={size.shape}")
+        print(
+            f"[hevc] frame#{i} type={meta['frame_type_str']}({int(frame_type)}) gop={meta['gop_id']} ts={meta['timestamp']} rgb={rgb.shape} residual={residual.shape} mvL0=({mv_x_L0.shape},{mv_y_L0.shape}) size={size.shape}"
+        )
         mvmaxL0 = max(np.abs(mv_x_L0).max(), np.abs(mv_y_L0).max())
         refmaxL0 = int(np.max(ref_off_L0))
         print(f"[hevc] mvmaxL0={mvmaxL0} refmaxL0={refmaxL0}")
