@@ -1,4 +1,5 @@
 import os
+import random
 
 import nvidia.dali
 import nvidia.dali.fn as fn
@@ -6,13 +7,10 @@ import nvidia.dali.types as types
 import torch
 from nvidia.dali.pipeline import Pipeline
 from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-import random
 
 
 class MultiRecDALIWarper(object):
-    def __init__(
-        self, list_prefix, batch_size, image_size, workers, shard_id, num_shards
-    ):
+    def __init__(self, list_prefix, batch_size, image_size, workers, shard_id, num_shards):
         self.list_prefix = list_prefix
         self.batch_size = batch_size
         self.image_size = image_size
@@ -112,10 +110,7 @@ class DALIWarperV2(object):
                 tensor_label: torch.Tensor = tensor_label[:, int(self.label_select)]
             else:
                 tensor_label: torch.Tensor = tensor_label[:, 0]
-            return {
-                "pixel_values": tensor_data,
-                "labels": tensor_label
-            }
+            return {"pixel_values": tensor_data, "labels": tensor_label}
 
     def __iter__(self):
         return self
@@ -145,7 +140,6 @@ def dali_dataloader(
     num_shards=None,
     shard_id=None,
 ):
-
     if num_shards is None:
         num_shards = int(os.environ.get("WORLD_SIZE", "1"))
     if shard_id is None:

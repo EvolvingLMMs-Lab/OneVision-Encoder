@@ -666,8 +666,7 @@ def main():
             opt.step()
             opt.zero_grad()
 
-            # fix: lr update should only happen after opt.step(), not every micro-batch
-            lr_scheduler.step()
+        lr_scheduler.step()
 
         batch_end_callback(
             global_step=global_step,
