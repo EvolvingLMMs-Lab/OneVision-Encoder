@@ -217,7 +217,49 @@ preprocessor = AutoImageProcessor.from_pretrained(
 
 ### Codec Input
 
-Add codec-style input documentation for temporal saliency-based patch selection.
+For codec-style temporal saliency-based patch selection, use `patch_positions` to specify the 3D coordinates (temporal, height, width) of selected patches:
+
+```python
+import torch
+import math
+
+# Assume we have selected patches from multiple frames
+num_frames = 16           # Number of sampled frames
+frame_tokens = 256        # Tokens per frame (e.g., 16x16 patches)
+target_frames = 64        # Target temporal dimension for RoPE
+patches_per_side = int(math.sqrt(frame_tokens))  # e.g., 16
+
+device = "cuda"  # or "cpu"
+
+# Example: frame_indices indicates which frames were sampled (shape: [B, num_frames])
+frame_indices = torch.linspace(0, target_frames - 1, num_frames).long().to(device).unsqueeze(0)  # [1, 16]
+
+# Build patch_positions: [B, num_frames * frame_tokens, 3] where each position is (t, h, w)
+bs = 1
+per = torch.arange(frame_tokens, device=device)
+
+# Temporal positions: frame index for each patch
+t_positions = frame_indices.unsqueeze(-1).expand(-1, -1, frame_tokens).reshape(bs, -1)
+
+# Spatial positions: h and w within each frame's patch grid
+h_positions = (per // patches_per_side).unsqueeze(0).unsqueeze(0).expand(bs, num_frames, -1).reshape(bs, -1)
+w_positions = (per % patches_per_side).unsqueeze(0).unsqueeze(0).expand(bs, num_frames, -1).reshape(bs, -1)
+
+# Stack to create patch_positions: [B, num_frames * frame_tokens, 3]
+patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
+
+# Video inference with patch_positions
+with torch.no_grad():
+    outputs = model(video, patch_positions=patch_positions)
+    # outputs.last_hidden_state: [B, num_patches, hidden_size]
+```
+
+The `patch_positions` tensor has shape `[batch_size, num_patches, 3]` where each position contains:
+- `t`: Temporal frame index (0 to target_frames-1)
+- `h`: Height position in the patch grid (0 to patches_per_side-1)  
+- `w`: Width position in the patch grid (0 to patches_per_side-1)
+
+This enables flexible sparse patch selection for codec-style video understanding.
 
 ---
 
