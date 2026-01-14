@@ -71,7 +71,7 @@ Input: [B, C, T, H, W] → e.g., [1, 3, 16, 224, 224]
                Flatten: [B, T × H_patches × W_patches, hidden_size]
                         e.g., [1, 16 × 16 × 16, 1024] = [1, 4096, 1024]
                              ↓
-                    Build visible_indices for temporal mapping
+                    Build patch_positions for temporal mapping
                              ↓
                     3D RoPE Position Encoding with frame positions
                              ↓
@@ -80,24 +80,35 @@ Input: [B, C, T, H, W] → e.g., [1, 3, 16, 224, 224]
                Output: [B, num_visible_patches, hidden_size]
 ```
 
-**The `visible_indices` mechanism:**
+**The `patch_positions` mechanism:**
 
-The `visible_indices` tensor maps actual frame positions to a virtual temporal grid (e.g., 64 virtual frames), enabling proper temporal position encoding even with sparse frame sampling:
+The `patch_positions` tensor provides explicit 3D position coordinates `[t, h, w]` for each patch, enabling proper temporal position encoding even with sparse frame sampling. Each patch is mapped to a position in a virtual temporal grid (e.g., 64 virtual frames):
 
 ```python
 # Example: 16 frames sampled from a video, mapped to 64 virtual frame positions
 num_frames = 16          # Actual number of sampled frames
-frame_tokens = 256       # Patches per frame (16×16 for 224×224 with patch_size=14)
+patches_per_side = 16    # Patches per side (16×16 for 224×224 with patch_size=14)
+frame_tokens = patches_per_side * patches_per_side  # 256 patches per frame
 target_frames = 64       # Virtual temporal grid size (model's RoPE temporal dimension)
+seq_len = num_frames * frame_tokens  # Total number of patches
 
 # Map 16 actual frames to positions in the 64-frame virtual grid
 frame_pos = torch.linspace(0, target_frames - 1, num_frames).long()
 # frame_pos = [0, 4, 8, 12, 17, 21, 25, 29, 34, 38, 42, 46, 51, 55, 59, 63]
 
-# Build visible_indices: each frame's patches get position encoding based on frame_pos
-visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + 
-                   torch.arange(frame_tokens)).reshape(1, -1)
-# Shape: [1, 4096] (16 frames × 256 patches)
+# Build temporal positions: each frame's patches get the same temporal position
+t_positions = frame_pos.unsqueeze(-1).expand(-1, frame_tokens).reshape(-1)  # [seq_len]
+
+# Build spatial positions: h and w within each frame
+h_ids = torch.arange(patches_per_side).repeat_interleave(patches_per_side)  # [0,0,...,0,1,1,...,15]
+w_ids = torch.arange(patches_per_side).repeat(patches_per_side)  # [0,1,...,15,0,1,...,15]
+h_positions = h_ids.unsqueeze(0).expand(num_frames, -1).reshape(-1)  # [seq_len]
+w_positions = w_ids.unsqueeze(0).expand(num_frames, -1).reshape(-1)  # [seq_len]
+
+# Build patch_positions: [batch_size, seq_len, 3] with [t, h, w] for each patch
+patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)  # [seq_len, 3]
+patch_positions = patch_positions.unsqueeze(0)  # [1, seq_len, 3] for batch_size=1
+# Shape: [1, 4096, 3] (16 frames × 256 patches, with 3D coordinates)
 ```
 
 This enables the model to understand temporal relationships even when frames are not densely sampled.
