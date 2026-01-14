@@ -171,26 +171,35 @@ with torch.no_grad():
     # outputs.last_hidden_state: [B, num_patches, hidden_size]
     # outputs.pooler_output: [B, hidden_size]
 
-# Video inference: [B, C, T, H, W] with visible_indices
+# Video inference: [B, C, T, H, W] with patch_positions
+import math
 num_frames, frame_tokens, target_frames = 16, 256, 64
+patches_per_side = int(math.sqrt(frame_tokens))  # 16 for 256 tokens
 # Load video frames and preprocess each frame (replace with your video frame paths)
 frames = [Image.open(f"path/to/frame_{i}.jpg") for i in range(num_frames)]
 video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_values"]
 # Reshape from [T, C, H, W] to [B, C, T, H, W]
 video = video_pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4).to("cuda")
 
-# Build visible_indices for temporal sampling
-frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
-visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_tokens).cuda()).reshape(1, -1)
-# visible_indices example (with 256 tokens per frame):
-#   Frame 0 (pos=0):  indices [0, 1, 2, ..., 255]
-#   Frame 1 (pos=4):  indices [1024, 1025, 1026, ..., 1279]
-#   Frame 2 (pos=8):  indices [2048, 2049, 2050, ..., 2303]
-#   ...
-#   Frame 15 (pos=63): indices [16128, 16129, ..., 16383]
+# Build patch_positions for temporal sampling: [B, num_frames * frame_tokens, 3]
+# Each position is (t, h, w) where t is temporal index, h/w are spatial patch coordinates
+frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()  # [num_frames]
+per = torch.arange(frame_tokens).cuda()  # [frame_tokens]
+
+# Temporal positions: frame index for each patch
+t_positions = frame_pos.unsqueeze(-1).expand(-1, frame_tokens).reshape(1, -1)  # [1, num_frames * frame_tokens]
+# Spatial positions: h and w within each frame's patch grid
+h_positions = (per // patches_per_side).unsqueeze(0).expand(num_frames, -1).reshape(1, -1)
+w_positions = (per % patches_per_side).unsqueeze(0).expand(num_frames, -1).reshape(1, -1)
+# Stack to create patch_positions: [B, num_frames * frame_tokens, 3]
+patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
+# patch_positions example (with 256 tokens per frame, 16x16 patch grid):
+#   patch_positions[0, 0:4, :]   -> [[0, 0, 0], [0, 0, 1], [0, 0, 2], [0, 0, 3]]  # Frame 0 (t=0), first 4 patches
+#   patch_positions[0, 256:260, :] -> [[4, 0, 0], [4, 0, 1], [4, 0, 2], [4, 0, 3]]  # Frame 1 (t=4, since 16 frames map to 64 positions)
+#   Each [t, h, w] represents: t=temporal frame index (0-63), h=row in patch grid, w=column in patch grid
 
 with torch.no_grad():
-    outputs = model(video, visible_indices=visible_indices)
+    outputs = model(video, patch_positions=patch_positions)
 ```
 
 ### Loading from Source Code  
