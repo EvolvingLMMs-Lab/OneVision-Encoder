@@ -171,26 +171,31 @@ with torch.no_grad():
     # outputs.last_hidden_state: [B, num_patches, hidden_size]
     # outputs.pooler_output: [B, hidden_size]
 
-# Video inference: [B, C, T, H, W] with visible_indices
+# Video inference: [B, C, T, H, W] with patch_positions
+import math
 num_frames, frame_tokens, target_frames = 16, 256, 64
+patches_per_side = int(math.sqrt(frame_tokens))  # 16 for 256 tokens
 # Load video frames and preprocess each frame (replace with your video frame paths)
 frames = [Image.open(f"path/to/frame_{i}.jpg") for i in range(num_frames)]
 video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_values"]
 # Reshape from [T, C, H, W] to [B, C, T, H, W]
 video = video_pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4).to("cuda")
 
-# Build visible_indices for temporal sampling
-frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()
-visible_indices = (frame_pos.unsqueeze(-1) * frame_tokens + torch.arange(frame_tokens).cuda()).reshape(1, -1)
-# visible_indices example (with 256 tokens per frame):
-#   Frame 0 (pos=0):  indices [0, 1, 2, ..., 255]
-#   Frame 1 (pos=4):  indices [1024, 1025, 1026, ..., 1279]
-#   Frame 2 (pos=8):  indices [2048, 2049, 2050, ..., 2303]
-#   ...
-#   Frame 15 (pos=63): indices [16128, 16129, ..., 16383]
+# Build patch_positions for temporal sampling: [B, num_frames * frame_tokens, 3]
+# Each position is (t, h, w) where t is temporal index, h/w are spatial patch coordinates
+frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()  # [num_frames]
+per = torch.arange(frame_tokens).cuda()  # [frame_tokens]
+
+# Temporal positions: frame index for each patch
+t_positions = frame_pos.unsqueeze(-1).expand(-1, frame_tokens).reshape(1, -1)  # [1, num_frames * frame_tokens]
+# Spatial positions: h and w within each frame's patch grid
+h_positions = (per // patches_per_side).unsqueeze(0).expand(num_frames, -1).reshape(1, -1)
+w_positions = (per % patches_per_side).unsqueeze(0).expand(num_frames, -1).reshape(1, -1)
+# Stack to create patch_positions: [B, num_frames * frame_tokens, 3]
+patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
 
 with torch.no_grad():
-    outputs = model(video, visible_indices=visible_indices)
+    outputs = model(video, patch_positions=patch_positions)
 ```
 
 ### Loading from Source Code  
@@ -217,49 +222,7 @@ preprocessor = AutoImageProcessor.from_pretrained(
 
 ### Codec Input
 
-For codec-style temporal saliency-based patch selection, use `patch_positions` to specify the 3D coordinates (temporal, height, width) of selected patches:
-
-```python
-import torch
-import math
-
-# Assume we have selected patches from multiple frames
-num_frames = 16           # Number of sampled frames
-frame_tokens = 256        # Tokens per frame (e.g., 16x16 patches)
-target_frames = 64        # Target temporal dimension for RoPE
-patches_per_side = int(math.sqrt(frame_tokens))  # e.g., 16
-
-device = "cuda"  # or "cpu"
-
-# Example: frame_indices indicates which frames were sampled (shape: [B, num_frames])
-frame_indices = torch.linspace(0, target_frames - 1, num_frames).long().to(device).unsqueeze(0)  # [1, 16]
-
-# Build patch_positions: [B, num_frames * frame_tokens, 3] where each position is (t, h, w)
-bs = 1
-per = torch.arange(frame_tokens, device=device)
-
-# Temporal positions: frame index for each patch
-t_positions = frame_indices.unsqueeze(-1).expand(-1, -1, frame_tokens).reshape(bs, -1)
-
-# Spatial positions: h and w within each frame's patch grid
-h_positions = (per // patches_per_side).unsqueeze(0).unsqueeze(0).expand(bs, num_frames, -1).reshape(bs, -1)
-w_positions = (per % patches_per_side).unsqueeze(0).unsqueeze(0).expand(bs, num_frames, -1).reshape(bs, -1)
-
-# Stack to create patch_positions: [B, num_frames * frame_tokens, 3]
-patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
-
-# Video inference with patch_positions
-with torch.no_grad():
-    outputs = model(video, patch_positions=patch_positions)
-    # outputs.last_hidden_state: [B, num_patches, hidden_size]
-```
-
-The `patch_positions` tensor has shape `[batch_size, num_patches, 3]` where each position contains:
-- `t`: Temporal frame index (0 to target_frames-1)
-- `h`: Height position in the patch grid (0 to patches_per_side-1)  
-- `w`: Width position in the patch grid (0 to patches_per_side-1)
-
-This enables flexible sparse patch selection for codec-style video understanding.
+Add codec-style input documentation for temporal saliency-based patch selection.
 
 ---
 
