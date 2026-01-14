@@ -193,6 +193,10 @@ h_positions = (per // patches_per_side).unsqueeze(0).expand(num_frames, -1).resh
 w_positions = (per % patches_per_side).unsqueeze(0).expand(num_frames, -1).reshape(1, -1)
 # Stack to create patch_positions: [B, num_frames * frame_tokens, 3]
 patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
+# patch_positions example (with 256 tokens per frame, 16x16 patch grid):
+#   patch_positions[0, 0:4, :]   -> [[0, 0, 0], [0, 0, 1], [0, 0, 2], [0, 0, 3]]  # Frame 0 (t=0), first 4 patches
+#   patch_positions[0, 256:260, :] -> [[4, 0, 0], [4, 0, 1], [4, 0, 2], [4, 0, 3]]  # Frame 1 (t=4, since 16 frames map to 64 positions)
+#   Each [t, h, w] represents: t=temporal frame index (0-63), h=row in patch grid, w=column in patch grid
 
 with torch.no_grad():
     outputs = model(video, patch_positions=patch_positions)
