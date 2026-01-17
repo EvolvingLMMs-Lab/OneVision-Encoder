@@ -8,11 +8,12 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 # Model configuration
 MODEL_FAMILY="ov_encoder_codec"
 MODEL_NAME="ov_encoder_large"
-MODEL_WEIGHT=$1
+MODEL_WEIGHT="/ckpts/onevision-encoder-large"
 FRAMES_TOKEN_NUM=256
 EMBEDDING_SIZE=1024
 NUM_FRAMES=64
-K_keep=4096
+K_KEEP=4096
+CACHE_DIR="/dataset/"
 REPORT_DIR_SUFFIX="_4kpatches_codec"
 
 DEFAULT_DATASETS=(
