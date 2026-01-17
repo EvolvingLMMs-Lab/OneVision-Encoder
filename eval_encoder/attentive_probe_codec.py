@@ -606,7 +606,8 @@ def evaluate(
 def get_model(args: argparse.Namespace) -> nn.Module:
 
     if args.model_name == "ov_encoder_large":
-        model = AutoModel.from_pretrained(
+        from onevision_encoder import OneVisionEncoderModel
+        model = OneVisionEncoderModel.from_pretrained(
             args.model_weight,
             trust_remote_code=True,
             attn_implementation="flash_attention_2")
