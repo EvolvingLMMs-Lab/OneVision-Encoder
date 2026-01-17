@@ -362,6 +362,7 @@ def main():
         lr_scheduler,
         None,
         args.list_head_names,
+        optimizer=opt,  # Pass optimizer for proper resume with AdamW moments
     )
     if result is not None:
         global_step = result["global_step"]
@@ -691,6 +692,7 @@ def main():
                 global_step=global_step,
                 list_head_names=args.list_head_names,
                 keep_num=20,
+                optimizer=opt,  # Save optimizer state for proper resume
             )
             # Also save in HuggingFace format
             save_hf_checkpoint(args.output, backbone, global_step=global_step, image_size=args.image_size[0])
@@ -705,6 +707,7 @@ def main():
                 global_step=global_step,
                 list_head_names=args.list_head_names,
                 keep_num=20,
+                optimizer=opt,  # Save optimizer state for proper resume
             )
             # Also save final model in HuggingFace format
             save_hf_checkpoint(args.output, backbone, global_step=global_step, image_size=args.image_size[0])
