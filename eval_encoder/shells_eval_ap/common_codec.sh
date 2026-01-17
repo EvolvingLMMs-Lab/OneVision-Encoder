@@ -63,6 +63,7 @@ get_epochs() {
 #   - NUM_FRAMES: number of frames (optional, not passed if unset)
 #   - DATASETS: dataset array (optional, uses DEFAULT_DATASETS if unset/empty)
 #   - REPORT_DIR_SUFFIX: report directory suffix (optional, e.g. "_16frames")
+#   - K_KEEP: number of top-K patches to keep as visible (default 2048)
 # ============================================================================
 run_attentive_probe_codec() {
     # Set default values
@@ -70,6 +71,10 @@ run_attentive_probe_codec() {
     FRAMES_TOKEN_NUM="${FRAMES_TOKEN_NUM:-196}"
     EMBEDDING_SIZE="${EMBEDDING_SIZE:-768}"
     REPORT_DIR_SUFFIX="${REPORT_DIR_SUFFIX:-}"
+    K_KEEP="${K_KEEP:-}"
+    CACHE_DIR="${CACHE_DIR:-}"
+    STATIC_FRAME="${STATIC_FRAME:-4}"
+    FALLBACK="${FALLBACK:-1}"
 
     # Use custom datasets or default datasets
     if [[ -z "${DATASETS+x}" ]] || [[ ${#DATASETS[@]} -eq 0 ]]; then
@@ -83,7 +88,8 @@ run_attentive_probe_codec() {
     for DATASET in "${DATASETS[@]}"; do
         BATCH_SIZE=$(get_batch_size "$DATASET")
         EPOCHS=$(get_epochs "$DATASET")
-
+        # Get codec-specific parameters for this dataset
+        get_codec_params "$DATASET"
         echo "DATASET=$DATASET, BATCH_SIZE=$BATCH_SIZE"
 
         echo "========================================================"
@@ -106,12 +112,12 @@ run_attentive_probe_codec() {
             EXTRA_ARGS="${EXTRA_ARGS} --num_frames ${NUM_FRAMES}"
         fi
 
-        # Add --mv_use_inconsistency for all datasets except diving48
-        if [[ "$DATASET" != "diving48" ]]; then
+        # Add --mv_use_inconsistency for all datasets except diving48 k400
+        if [[ "$DATASET" != "diving48" || "$dataset" == "perception_test" || "$dataset" == "k400" || "$dataset" == "charadesego" ]]; then
             EXTRA_ARGS="${EXTRA_ARGS} --mv_use_inconsistency"
         fi
 
-        torchrun --nproc_per_node 8 --master_port 15555 \
+        torchrun --nproc_per_node 8 --master_port 15557 \
             attentive_probe_codec.py \
             --eval_freq 1 \
             --default_lr_list 0.0001 \
@@ -126,6 +132,10 @@ run_attentive_probe_codec() {
             --save_report "${SAVE_DIR}" \
             --frames_token_num ${FRAMES_TOKEN_NUM} \
             --embedding_size ${EMBEDDING_SIZE} \
+            --K_keep ${K_KEEP} \
+            --cache_dir ${CACHE_DIR} \
+            --static_uniform_frames ${STATIC_FRAME} \
+            --static_fallback ${FALLBACK} \
             ${EXTRA_ARGS}
 
         echo "Finished testing ${DATASET}"
