@@ -131,8 +131,8 @@ We train the model on a mixed dataset comprising 740K samples from LLaVA-OneVisi
 
 > [!IMPORTANT]
 > **Transformers Version Compatibility:**
-> - ✅ **`transformers==4.53.1`** (Recommended): Works with `AutoModel.from_pretrained()` 
-> - ⚠️ **`transformers>=5.0.0`**: Not currently supported. We are actively working on a fix.
+> - ✅ **`transformers>=4.53.1`**: Fully supported, including `transformers>=5.0.0`
+> - The model now includes `auto_map` configuration for compatibility with all transformers versions
 
 
 > **Note:** This model supports native resolution input. For optimal performance:
@@ -141,7 +141,7 @@ We train the model on a mixed dataset comprising 740K samples from LLaVA-OneVisi
 >
 > Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large).
 
-### Using AutoModel (Recommended: transformers==4.53.1)
+### Using AutoModel
 
 ```python
 from transformers import AutoModel, AutoImageProcessor
