@@ -21,6 +21,15 @@
 
 </div>
 
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png">
+    <img alt="OneVision Encoder Method Overview" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png" width="900" style="max-width: 100%;">
+  </picture>
+</p>
+
 ## 📖 Table of Contents
 
 - [Introduction](#-introduction)
@@ -52,16 +61,6 @@ Coupled with global contrastive learning over a 2M-scale concept memory bank, On
 - **Global Contrastive Learning**: Trained with a 2M concept bank for better-separated semantic clusters.
 - **Native Resolution Support**: Supports native resolution input without tiling or cropping.
 - **Open Training Data & Pipeline**: In addition to the model and code, we will open-source the curated training dataset and the full data processing pipeline.
-
-### Method Overview
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png">
-    <img alt="OneVision Encoder Method Overview" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/method_github_light.png" width="900" style="max-width: 100%;">
-  </picture>
-</p>
 
 ### Video Processing Pipeline
 
