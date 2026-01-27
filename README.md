@@ -57,10 +57,8 @@ Coupled with global contrastive learning over a 2M-scale concept memory bank, On
 
 - **Unified Vision Foundation**: A single base model for consistent understanding of images, videos, and OCR.
 - **Codec-Style Patch Selection**: Instead of sampling sparse frames densely (all patches from few frames), OneVision Encoder samples dense frames sparsely (important patches from many frames).
-- **3D Rotary Position Embedding**: Uses a 4:6:6 split for temporal, height, and width dimensions to capture spatiotemporal relationships.
+- **3D Rotary Position && Native Resolution**: Uses a 4:6:6 split for temporal, height, and width dimensions to capture spatiotemporal relationships. Supports native resolution input without tiling or cropping.
 - **Global Contrastive Learning**: Trained with a 2M concept bank for better-separated semantic clusters.
-- **Native Resolution Support**: Supports native resolution input without tiling or cropping.
-- **Open Training Data & Pipeline**: In addition to the model and code, we will open-source the curated training dataset and the full data processing pipeline.
 
 ### Video Processing Pipeline
 
