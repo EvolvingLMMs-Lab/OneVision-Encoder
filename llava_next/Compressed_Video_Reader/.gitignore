@@ -1,0 +1,6 @@
+cmake-*
+.idea/
+build/
+dist/
+*.so
+*.egg-info/

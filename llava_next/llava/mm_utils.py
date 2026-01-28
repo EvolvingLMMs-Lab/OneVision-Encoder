@@ -8,9 +8,6 @@ import torch
 from transformers import StoppingCriteria
 from llava.constants import IMAGE_TOKEN_INDEX
 
-# PIL 10.0.0+ removed ANTIALIAS, use Resampling.LANCZOS instead
-LANCZOS = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.ANTIALIAS
-
 
 def resize_and_center_crop(image, shortest_edge_length):
     # Calculate new dimensions and resize
@@ -21,7 +18,7 @@ def resize_and_center_crop(image, shortest_edge_length):
     else:
         new_width = shortest_edge_length
         new_height = int(shortest_edge_length / aspect_ratio)
-    resized_image = image.resize((new_width, new_height), LANCZOS)
+    resized_image = image.resize((new_width, new_height), Image.ANTIALIAS)
 
     # Calculate the position and perform the center crop
     left = (new_width - shortest_edge_length) / 2
@@ -52,7 +49,7 @@ def auto_pad_images(image, grid_params):
         resize_height = int(resize_width / input_aspect_ratio)
     else:
         resize_width = int(resize_height * input_aspect_ratio)
-    resized_image = image.resize((resize_width, resize_height), LANCZOS)
+    resized_image = image.resize((resize_width, resize_height), Image.ANTIALIAS)
 
     # Step 5: Pad the resized image if necessary to match the target resolution
     pad_width = target_resolution[0] - resize_width
@@ -100,11 +97,17 @@ def process_highres_image_crop_split(image, data_args, processor=None):
 
 def process_highres_image(image, processor, grid_pinpoints):
     grid_params = [int(x) for x in grid_pinpoints.split(",")]
+    width_height = max(image.size)
+    fit_grid_params = [x for x in grid_params if x >= width_height]
+    if len(fit_grid_params) == 0:
+        select_size = max(grid_params)
+    else:
+        select_size = min(fit_grid_params)
+    # FIXME: always select the 448
     select_size = max(grid_params)
     image_padded = expand2square(image, tuple(int(x * 255) for x in processor.image_mean))
 
-    # Create global view by resizing original image (preserves aspect ratio info)
-    # and local patches from padded square image for detail
+    # FIXME: this seems to be a bug that it always resizes instead of padding
     image_original_resize = image.resize((processor.size["shortest_edge"], processor.size["shortest_edge"]))
     image_padded = image_padded.resize((select_size, select_size))
     image_patches = extract_patches(image_padded, patch_size=processor.size["shortest_edge"], overlap_ratio=0)
@@ -117,6 +120,7 @@ def smart_resize(
     width: int, 
     patch_size: int = 16,
     min_pixels: int = 32 * 32,
+    max_pixels: int = 1600*1600
 ):
     """
     Rescales the image dimensions so that:
@@ -149,7 +153,12 @@ def smart_resize(
     h_bar = max(patch_size, h_bar)
     w_bar = max(patch_size, w_bar)
     
-    if h_bar * w_bar < min_pixels:
+    if h_bar * w_bar > max_pixels:
+        beta = math.sqrt((height * width) / max_pixels)
+        h_bar = max(patch_size, math.floor(height / beta / patch_size) * patch_size)
+        w_bar = max(patch_size, math.floor(width / beta / patch_size) * patch_size)
+    # If too few pixels, scale up
+    elif h_bar * w_bar < min_pixels:
         beta = math.sqrt(min_pixels / (height * width))
         h_bar = math.ceil(height * beta / patch_size) * patch_size
         w_bar = math.ceil(width * beta / patch_size) * patch_size
@@ -254,6 +263,28 @@ def resize_and_pad_image(image, target_resolution):
     return new_image
 
 
+def divide_to_patches(image, patch_size):
+    """
+    Divides an image into patches of a specified size.
+
+    Args:
+        image (PIL.Image.Image): The input image.
+        patch_size (int): The size of each patch.
+
+    Returns:
+        list: A list of PIL.Image.Image objects representing the patches.
+    """
+    patches = []
+    width, height = image.size
+    for i in range(0, height, patch_size):
+        for j in range(0, width, patch_size):
+            box = (j, i, j + patch_size, i + patch_size)
+            patch = image.crop(box)
+            patches.append(patch)
+
+    return patches
+
+
 def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     """
     Calculate the shape of the image patch grid after the preprocessing for images of any resolution.
@@ -300,7 +331,7 @@ def process_anyres_image(image, processor, grid_pinpoints):
     if isinstance(grid_pinpoints, str) and "x" in grid_pinpoints:
         try:
             patch_size = processor.size[0]
-        except (KeyError, TypeError):
+        except Exception as e:
             patch_size = processor.size["shortest_edge"]
         assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
         # Use regex to extract the range from the input string
@@ -322,11 +353,35 @@ def process_anyres_image(image, processor, grid_pinpoints):
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
         return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
-    else:
-        # OneVision encoder uses patch_size=14
+    elif 'onevision' in processor.__class__.__name__.lower() or 'clip' in processor.__class__.__name__.lower():
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
         return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+    elif 'qwen' in processor.__class__.__name__.lower():
+        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
+        grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
+        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+    else: # FIXME: for aimv2
+        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
+        grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
+        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+
+    patches = divide_to_patches(image_padded, processor.crop_size["height"])
+
+    # FIXME: this seems to be a bug that it resizes instead of pad.
+    # but to keep it consistent with previous, i will keep it as it is
+    # TODO: uncomment below to ablate with the padding
+    if isinstance(processor.size, dict):
+        shortest_edge = processor.size["shortest_edge"]
+    else:
+        shortest_edge = min(processor.size)
+    image_original_resize = image.resize((shortest_edge, shortest_edge))
+    # image_padded_square = expand2square(image, tuple(int(x*255) for x in processor.image_mean))
+    # image_original_resize = image_padded_square.resize((processor.size['shortest_edge'], processor.size['shortest_edge']))
+
+    image_patches = [image_original_resize] + patches
+    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    return torch.stack(image_patches, dim=0)
 
 
 def load_image_from_base64(image):
@@ -347,12 +402,13 @@ def expand2square(pil_img, background_color):
         return result
 
 
-def process_images(images, image_processor, model_cfg, is_video=False):
+def process_images(images, image_processor, model_cfg):
     image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", None)
     new_images = []
-    if is_video:
+    if len(images) == 8: #TODO: for video
         image_aspect_ratio = 'pad'
 
+    # assert 1==34, f'len(images) if list: {len(images) if isinstance(images, list) else "N/A"}, image_aspect_ratio: {image_aspect_ratio}, model_cfg.image_grid_pinpoints: {model_cfg.image_grid_pinpoints}'
     if image_aspect_ratio == "highres":
         for image in images:
             image = process_highres_image(image, image_processor, model_cfg.image_grid_pinpoints)
@@ -361,6 +417,8 @@ def process_images(images, image_processor, model_cfg, is_video=False):
         for image in images:
             image = process_native_image(image, image_processor)
             new_images.append(image)
+        # assert 3==4, f'new_images: {new_images}'
+        return {'image_patchs': [img['pixel_values'] for img in new_images], 'grid_thw': [img['grid_thw'] for img in new_images]}
     elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
         for image in images:
             image = process_anyres_image(image, image_processor, model_cfg.image_grid_pinpoints)
@@ -371,20 +429,30 @@ def process_images(images, image_processor, model_cfg, is_video=False):
             image = process_highres_image_crop_split(image, model_cfg, image_processor)
             new_images.append(image)
     elif image_aspect_ratio == "pad":
-        image_patchs = []
-        grid_thw = []
-        if 'siglip' in image_processor.__class__.__name__.lower():
-            # SigLIP uses 512x512 with patch_size=16 -> 32x32 patches
-            target_size, patch_grid = 512, 32
-        else:
-            # OneVision encoder uses 504x504 with patch_size=14 -> 36x36 patches
-            target_size, patch_grid = 504, 36
-        for image in images:
-            image = expand2square(image, (0, 0, 0))
-            image = image.resize((target_size, target_size))
-            image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
-            grid_thw.append([1, patch_grid, patch_grid])
-        return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
+        if 'siglip' in image_processor.__class__.__name__.lower() or 'qwen' in image_processor.__class__.__name__.lower():
+            image_patchs = []
+            grid_thw = []
+            for image in images:
+                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
+                image = image.resize((512, 512))
+                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
+                grid_thw.append([1, 32, 32])
+            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
+
+        elif 'llava_vit' in image_processor.__class__.__name__.lower() or 'llavavit' in image_processor.__class__.__name__.lower():
+            image_patchs = []
+            grid_thw = []
+            for image in images:
+                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
+                image = image.resize((504, 504))
+                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
+                grid_thw.append([1, 36, 36])
+            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
+
+        image = image.resize((504, 504))
+        # image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))
+        image = image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
+        new_images.append(image)
     else:
         return image_processor.preprocess(images, return_tensors="pt")["pixel_values"]
     if all(x.shape == new_images[0].shape for x in new_images):
