@@ -204,27 +204,3 @@ def dali_dataloader(
         label_select=label_select,
     )
     return dataloader
-
-
-if __name__ == "__main__":
-    import cv2
-    import numpy as np
-
-    loader = dali_dataloader(
-        "/data_4/coyo_ocr_v0/train_00", 4, [336, 336], workers=4, is_training=True, mean=[0, 0, 0], std=[1, 1, 1], label_select=None, seed=1437, num_shards=None, shard_id=None, max_side=336
-    )
-
-    image_list = []
-    big_img = np.zeros((3360, 3360, 3), dtype=np.uint8)
-    for image, label in loader:
-        print(label)
-        image = image[0].permute(1, 2, 0).cpu().numpy()
-        image_list.append(image)
-        if len(image_list) == 100:
-            break
-
-    for i in range(100):
-        row = i // 10
-        col = i % 10
-        big_img[row * 336 : (row + 1) * 336, col * 336 : (col + 1) * 336] = image_list[i]
-    cv2.imwrite("output_big_image.jpg", big_img[:, :, ::-1])

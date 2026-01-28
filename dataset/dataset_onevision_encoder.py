@@ -142,8 +142,8 @@ def onevision_encoder_si_cfs_single_node():
     WARNING: This is NOT a recommended approach as it can cause severe data imbalance.
     """
     patterns = [
-        "/datasets_ov_encoder/coyo400m/*.rec",
-        "/datasets_ov_encoder/laion260m/*.rec",
+        "datasets_ov_encoder/coyo400m/*.rec",
+        "datasets_ov_encoder/laion260m/*.rec",
     ]
 
     all_files = [f for pattern in patterns for f in glob.glob(pattern)]
@@ -277,7 +277,6 @@ def onevision_encoder_video_codec():
     """
     assert world_size <= 128
     list_mp4_label_path = f"train_how_to_100m_panda70m_k710_square_with_index_filtered_split_128/part_{rank:03d}"
-
     return Property(
         name="onevision_encoder_video_codec",
         prefixes=[list_mp4_label_path],
