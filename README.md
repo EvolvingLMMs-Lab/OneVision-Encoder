@@ -1,6 +1,3 @@
-<!-- <p align="center">
-  <img alt="OneVision Encoder" src="asset/onevision_encoder.png" width="1200" style="max-width: 100%;">
-</p> -->
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="asset/logo_dark.png">
   <source media="(prefers-color-scheme: light)" srcset="asset/logo_light.png">
@@ -20,7 +17,6 @@
 📊 **[Data Card](docs/data_card.md)**
 
 </div>
-
 
 <p align="center">
   <picture>
@@ -51,7 +47,6 @@ Conventional approaches mitigate this by sparsely sampling frames, however, this
 We introduce OneVision Encoder, a vision transformer that resolves this trade-off by drawing inspiration from HEVC (High-Efficiency Video Coding). Rather than densely processing all patches from a few frames, OneVision Encoder sparsely selects informative patches from many frames. This codec-inspired patch selection mechanism identifies temporally salient regions (e.g., motion, object interactions, and semantic changes) and allocates computation exclusively to these informative areas.
 
 Coupled with global contrastive learning over a 2M-scale concept memory bank, OneVision Encoder achieves state-of-the-art performance across major video benchmarks (MVBench, VideoMME, Perception Test), while also delivering strong results on image understanding tasks (DocVQA, ChartQA, and OCRBench).
-
 
 ### Key Features
 
@@ -98,7 +93,6 @@ The visualization below illustrates four different video processing pipelines.
 
 Standard contrastive learning methods (e.g., CLIP) are fundamentally constrained by batch size, as negative samples are drawn only from the current batch, typically limited to 32K–64K examples. This restriction yields a narrow and incomplete view of the embedding space, often resulting in suboptimal representation learning. In contrast, our approach maintains a global concept bank comprising 2M clustered centers, allowing each training sample to contrast against a diverse and representative set of negatives independent of batch composition. This global contrasting mechanism leads to more discriminative embeddings and well-separated semantic clusters.
 
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_dark.gif">
@@ -107,9 +101,7 @@ Standard contrastive learning methods (e.g., CLIP) are fundamentally constrained
   </picture>
 </p>
 
-
 ---
-
 
 ### LMM Probe Results
 
@@ -123,25 +115,22 @@ We train the model on a mixed dataset comprising 740K samples from LLaVA-OneVisi
   </picture>
 </p>
 
-
-
-
-
 ## ⚡ Quick Start
 
 > [!IMPORTANT]
 > **Transformers Version Compatibility:**
-> - ✅ **`transformers==4.53.1`** (Recommended): Works with `AutoModel.from_pretrained()` 
+>
+> - ✅ **`transformers==4.57.3`** (Recommended): Works with `AutoModel.from_pretrained()`
 > - ⚠️ **`transformers>=5.0.0`**: Not currently supported. We are actively working on a fix.
 
-
 > **Note:** This model supports native resolution input. For optimal performance:
+>
 > - **Image**: 448×448 resolution (pre-trained)
 > - **Video**: 224×224 resolution with 256 tokens per frame (pre-trained)
 >
 > Use CLIP preprocessing from the [model repository](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large).
 
-### Using AutoModel (Recommended: transformers==4.53.1)
+### Using AutoModel (Recommended: transformers==4.57.3)
 
 ```python
 from transformers import AutoModel, AutoImageProcessor
@@ -169,9 +158,8 @@ with torch.no_grad():
     # outputs.pooler_output: [B, hidden_size]
 
 # Video inference: [B, C, T, H, W] with patch_positions
-import math
-num_frames, frame_tokens, target_frames = 16, 256, 64
-patches_per_side = int(math.sqrt(frame_tokens))  # 16 for 256 tokens
+num_frames, target_frames = 16, 64
+patch_size = 14
 # Load video frames and preprocess each frame (replace with your video frame paths)
 frames = [Image.open(f"path/to/frame_{i}.jpg") for i in range(num_frames)]
 video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_values"]
@@ -179,21 +167,23 @@ video_pixel_values = preprocessor(images=frames, return_tensors="pt")["pixel_val
 video = video_pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4).to("cuda")
 
 # Build patch_positions for temporal sampling: [B, num_frames * frame_tokens, 3]
-# Each position is (t, h, w) where t is temporal index, h/w are spatial patch coordinates
-frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()  # [num_frames]
-per = torch.arange(frame_tokens).cuda()  # [frame_tokens]
+frame_pos = torch.linspace(0, target_frames - 1, num_frames).long().cuda()  # [T]
+grid_h, grid_w = video.shape[-2] // patch_size, video.shape[-1] // patch_size  # patch grid
+frame_tokens = grid_h * grid_w
 
-# Temporal positions: frame index for each patch
-t_positions = frame_pos.unsqueeze(-1).expand(-1, frame_tokens).reshape(1, -1)  # [1, num_frames * frame_tokens]
-# Spatial positions: h and w within each frame's patch grid
-h_positions = (per // patches_per_side).unsqueeze(0).expand(num_frames, -1).reshape(1, -1)
-w_positions = (per % patches_per_side).unsqueeze(0).expand(num_frames, -1).reshape(1, -1)
-# Stack to create patch_positions: [B, num_frames * frame_tokens, 3]
-patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1)
-# patch_positions example (with 256 tokens per frame, 16x16 patch grid):
-#   patch_positions[0, 0:4, :]   -> [[0, 0, 0], [0, 0, 1], [0, 0, 2], [0, 0, 3]]  # Frame 0 (t=0), first 4 patches
-#   patch_positions[0, 256:260, :] -> [[4, 0, 0], [4, 0, 1], [4, 0, 2], [4, 0, 3]]  # Frame 1 (t=4, since 16 frames map to 64 positions)
-#   Each [t, h, w] represents: t=temporal frame index (0-63), h=row in patch grid, w=column in patch grid
+t_positions = frame_pos[:, None].repeat(1, frame_tokens).reshape(-1)  # [T * frame_tokens]
+h_positions = torch.arange(grid_h, device="cuda").repeat_interleave(grid_w)
+h_positions = h_positions.repeat(num_frames)  # [T * frame_tokens]
+w_positions = torch.arange(grid_w, device="cuda").repeat(grid_h)
+w_positions = w_positions.repeat(num_frames)  # [T * frame_tokens]
+
+patch_positions = torch.stack([t_positions, h_positions, w_positions], dim=-1).unsqueeze(0)
+# patch_positions example (256 tokens per frame, 16x16 patch grid):
+#   Each row is [t, h, w].
+#   First 4 patches of frame 0 (t=0):
+#     patch_positions[0, 0:4, :] -> [[0, 0, 0], [0, 0, 1], [0, 0, 2], [0, 0, 3]]
+#   First 4 patches of frame 1 (t=4):
+#     patch_positions[0, 256:260, :] -> [[4, 0, 0], [4, 0, 1], [4, 0, 2], [4, 0, 3]]
 
 with torch.no_grad():
     outputs = model(video, patch_positions=patch_positions)
@@ -242,7 +232,6 @@ pip install -r requirements.txt
 
 ### Option 2 (Docker)
 
-
 ```bash
 docker build -t onevision-encoder:2601 .
 
@@ -251,7 +240,6 @@ docker run -it --rm --gpus all --ipc host --net host --privileged \
     -w /workspace/OneVision-Encoder \
     onevision-encoder:2601 bash
 ```
-
 
 ### Install Package
 
@@ -283,20 +271,17 @@ git clone https://huggingface.co/lmms-lab-encoder/onevision-encoder-large-si
 
 Download the pretraining data and prepare the data directory as per the instructions in `data/README.md`.
 
-
 More documentation will be added soon.
 
 ```bash
 bash shells/ov_encoder_large_stage2_residual_8gpus.sh
 ```
 
-
 Training configurations and hyperparameters will be documented soon. For now, please refer to `--help` for available options.
 
 ## 📊 Evaluation
 
 ### Attentive Probe Evaluation
-
 
 #### Chunk-wise Sampling Evaluation
 
@@ -314,6 +299,7 @@ bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 ```
 
 **Sampling-Specific Parameters:**
+
 - `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
 
 #### OV-Encoder Codec Evaluation
@@ -329,27 +315,6 @@ Then run the following command:
 ```bash
 bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh
 ```
-
-**Codec-Specific Parameters:**
-- `K_keep`: Number of patches to keep.
-- `cache_dir` (optional): Directory for cached codec patches. Use this to specify where codec-selected patches are stored/loaded when you want to persist or reuse them.
-
-#### Shared Parameters
-
-The following parameters are common to both evaluation methods:
-
-- `dataset`: Dataset to evaluate on (e.g., `diving48`, `ssv2`, `kinetics400`). Prepare the dataset according to the Attentive Probe format.
-- `num_frames`: Total number of frames in the video sequence (e.g., 8 for sampling, 64 for codec).
-- `model_weight`: Path to the pre-trained model. Use `lmms-lab-encoder/onevision-encoder-large` to load directly from HuggingFace, or provide a local path.
-- `model_name`: Model architecture name (e.g., `hf_llava_vit_large_ln`).
-- `embedding_size`: Size of the embedding dimension (e.g., 1024).
-- `batch_size`: Training batch size (varies by evaluation type).
-- `default_lr_list`: Learning rate for the probe training.
-- `default_weight_decay`: Weight decay for optimization.
-- `eval_freq`: Evaluation frequency during training.
-- `dali_py_num_workers`: Number of DALI data loading workers.
-- `data_root`: Root directory containing your prepared dataset (codec evaluation only).
-
 
 ## 👥 Contributors
 

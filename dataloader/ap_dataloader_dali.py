@@ -1,8 +1,3 @@
-#
-# Created by anxiangsir
-# Date: 2025-11-13 12:26:36 (UTC)
-#
-
 import os
 import warnings
 from typing import Any, Dict, List, Tuple
@@ -13,12 +8,14 @@ import nvidia.dali.fn as fn
 import nvidia.dali.types as types
 from nvidia.dali.pipeline import pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
+
+
 try:
     import cv2
+
     _HAS_CV2 = True
 except ImportError:
     _HAS_CV2 = False
-
 
 
 # ----------------------------------------------------------------------------
@@ -47,13 +44,14 @@ class DALIWarper:
     def reset(self):
         self.iter.reset()
 
+
 # ----------------------------------------------------------------------------
 # 2. DALI External Source for Video Data (modified - returns indices, total_frames and file_name)
 # ----------------------------------------------------------------------------
 class VideoExternalSource:
     def __init__(self, mode: str, source_params: Dict[str, Any]):
         self.mode = mode
-        self.file_list: List[Tuple[str, int]]   = source_params["file_list"]
+        self.file_list: List[Tuple[str, int]] = source_params["file_list"]
         self.num_shards: int = source_params["num_shards"]
         self.shard_id: int = source_params["shard_id"]
         self.batch_size: int = source_params["batch_size"]
@@ -73,7 +71,6 @@ class VideoExternalSource:
         self.fallback_example = self.file_list[0] if self.file_list else ("", 0)
 
     def _get_frame_indices(self, num_frames: int) -> List[int]:
-
         if num_frames < self.sequence_length:
             indices = list(range(num_frames))
             indices += [num_frames - 1] * (self.sequence_length - num_frames)
@@ -110,7 +107,8 @@ class VideoExternalSource:
         except Exception as e:
             warnings.warn(f"Failed to load video: {video_path}, error: {e}. Using fallback.")
             fallback_path, _ = self.fallback_example
-            if not fallback_path: raise IOError(f"Fallback video path is empty!")
+            if not fallback_path:
+                raise IOError(f"Fallback video path is empty!")
             video_data, frame_indices, total_frames = self._load_video_data(fallback_path)
 
         return video_data, np.int64([int(video_label)]), frame_indices, np.int64([total_frames])
@@ -198,7 +196,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
         batch=False,
         parallel=True,
         dtype=[types.UINT8, types.INT64, types.INT64, types.INT64],
-        layout=["FHWC", "C", "C", "C"]  # Empty layout for file_name byte array (variable length)
+        layout=["FHWC", "C", "C", "C"],  # Empty layout for file_name byte array (variable length)
     )
 
     videos = videos.gpu()
@@ -208,6 +206,7 @@ def dali_video_pipeline(mode: str, source_params: Dict[str, Any]):
 
     videos = preprocess_videos(videos, mode, input_size, mean, std)
     return videos, labels, indices, total_frames
+
 
 # ----------------------------------------------------------------------------
 # 4. Main Dataloader Function (modified - output_map adds indices, total_frames and file_name)
@@ -229,8 +228,7 @@ def get_dali_dataloader(
     seed: int = 0,
     feature_extract: bool = True,
 ) -> DALIWarper:
-    """
-    """
+    """ """
     print(f"[{mode} loader] Reading for: {data_csv_path}")
     file_list = []
     try:
@@ -249,26 +247,36 @@ def get_dali_dataloader(
     world_size = int(os.getenv("WORLD_SIZE", "1"))
 
     source_params = {
-        "num_shards": world_size, "shard_id": rank, "file_list": file_list,
-        "batch_size": batch_size, "sequence_length": sequence_length, "seed": seed + rank,
-        "use_rgb": use_rgb, "input_size": input_size, "short_side_size": short_side_size,
-        "mean": mean, "std": std,
-        "decord_num_threads": decord_num_threads, "feature_extract": feature_extract
+        "num_shards": world_size,
+        "shard_id": rank,
+        "file_list": file_list,
+        "batch_size": batch_size,
+        "sequence_length": sequence_length,
+        "seed": seed + rank,
+        "use_rgb": use_rgb,
+        "input_size": input_size,
+        "short_side_size": short_side_size,
+        "mean": mean,
+        "std": std,
+        "decord_num_threads": decord_num_threads,
+        "feature_extract": feature_extract,
     }
 
     pipe = dali_video_pipeline(
-        batch_size=batch_size, num_threads=dali_num_threads, device_id=local_rank,
-        seed=seed + rank, py_num_workers=dali_py_num_workers, py_start_method="forkserver",
-        prefetch_queue_depth=2, mode=mode, source_params=source_params,
+        batch_size=batch_size,
+        num_threads=dali_num_threads,
+        device_id=local_rank,
+        seed=seed + rank,
+        py_num_workers=dali_py_num_workers,
+        py_start_method="forkserver",
+        prefetch_queue_depth=2,
+        mode=mode,
+        source_params=source_params,
     )
     pipe.build()
 
     # ===> output_map adds "indices", "total_frames" and "file_name" <===
-    dali_iter = DALIGenericIterator(
-        pipelines=[pipe],
-        output_map=["videos", "labels", "indices", "total_frames"],
-        auto_reset=True
-    )
+    dali_iter = DALIGenericIterator(pipelines=[pipe], output_map=["videos", "labels", "indices", "total_frames"], auto_reset=True)
     steps_per_epoch = len(file_list) // world_size // batch_size
     dataloader = DALIWarper(dali_iter=dali_iter, steps_per_epoch=steps_per_epoch)
 
