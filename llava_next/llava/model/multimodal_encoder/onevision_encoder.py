@@ -58,14 +58,14 @@ class OneVisionEncoderTower(nn.Module):
             rank0_print("{} is already loaded, `load_model` called again, skipping.".format(self.vision_tower_name))
             return
 
-        self.vision_tower = AutoModel.from_pretrained(self.vision_tower_name, trust_remote_code=True)
+        self.vision_tower = AutoModel.from_pretrained(self.vision_tower_name, trust_remote_code=True, attn_implementation="flash_attention_2")
         
         # Update config from loaded model
         self.config = self.vision_tower.config
         
         self.is_loaded = True
 
-    def forward(self, images, grid_thw=None, visible_indices=None, num_frames=None):
+    def forward(self, images, grid_thw=None, patch_positions=None, num_frames=None):
         """
         Forward pass for the vision tower.
 
@@ -75,20 +75,24 @@ class OneVisionEncoderTower(nn.Module):
                 - Tensor of shape (T, C, H, W) for video frames stacked in batch dim
                 - List of tensors
             grid_thw: Optional grid info for variable resolution
-            visible_indices: Optional indices for visible patches
+            patch_positions: Optional indices for visible patches
             num_frames: Number of video frames. When > 1, treats input as video
                 and reshapes (T, C, H, W) -> (1, C, T, H, W) for processing.
 
         Returns:
             image_features: Tensor of shape (B, num_patches, hidden_size)
         """
+        if patch_positions is not None and patch_positions[0] is None:
+            patch_positions = None
+        else:
+            patch_positions  = patch_positions[0]
         if isinstance(images, list):
             image_features = []
             for image in images:
                 image_forward_out = self.vision_tower(
                     image.to(device=self.device, dtype=self.dtype).unsqueeze(0),
                     output_hidden_states=True,
-                    visible_indices=visible_indices
+                    patch_positions=patch_positions
                 )
                 image_feature = image_forward_out.hidden_states[-1].to(image.dtype)
                 image_features.append(image_feature)
@@ -101,6 +105,8 @@ class OneVisionEncoderTower(nn.Module):
             if pixel_values.dim() == 3:
                 # (C, H, W) -> (1, C, H, W)
                 pixel_values = pixel_values.unsqueeze(0)
+            elif pixel_values.dim() == 4 and pixel_values.shape[0] == 8 and pixel_values.shape[2] == pixel_values.shape[3]: # TODO: replace with more robust check
+                num_frames = pixel_values.shape[0]
 
             is_video = num_frames is not None and num_frames > 1
             if is_video:
@@ -110,7 +116,7 @@ class OneVisionEncoderTower(nn.Module):
             image_forward_outs = self.vision_tower(
                 pixel_values,
                 output_hidden_states=True,
-                visible_indices=visible_indices
+                patch_positions=patch_positions
             )
 
             # Get hidden state from selected layer
