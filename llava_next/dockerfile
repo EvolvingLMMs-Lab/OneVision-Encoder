@@ -150,7 +150,13 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir -e . || true
 
 # ============================================================
-# 5. Set environment variables and working directory
+# 5. Install lmms-eval (evaluation framework)
+# ============================================================
+WORKDIR /workspace/lmms-eval
+RUN pip install --no-cache-dir -e .
+
+# ============================================================
+# 6. Set environment variables and working directory
 # ============================================================
 WORKDIR /workspace
 

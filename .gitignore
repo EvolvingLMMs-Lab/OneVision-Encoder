@@ -107,6 +107,7 @@ secret/
 *.log
 log/
 logs/
+eval_log/
 *.pid
 *.pid.lock
 *.seed
