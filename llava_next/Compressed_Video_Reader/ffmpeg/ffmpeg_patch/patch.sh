@@ -10,5 +10,4 @@ else
     yes | cp -rf "$FFMPEG_PATCH_DIR"/hevcdec.c "$FFMPEG_INSTALL_DIR"/libavcodec
     yes | cp -rf "$FFMPEG_PATCH_DIR"/hevcdec.h "$FFMPEG_INSTALL_DIR"/libavcodec
     yes | cp -rf "$FFMPEG_PATCH_DIR"/hevc_refs.c "$FFMPEG_INSTALL_DIR"/libavcodec
-    # yes | cp -rf "$FFMPEG_PATCH_DIR"/h264_mb_template.c "$FFMPEG_INSTALL_DIR"/libavcodec
 fi

@@ -43,16 +43,9 @@ setup(
     },
     python_requires='>=3.7, <4',
     install_requires=['pkgconfig>=1.5.1', 'numpy>=1.23,<2.0.0', 'flow-vis>=0.1','opencv-python>=4.0'],
-    url='https://github.com/AcherStyx/Compressed-Video-Reader',
-    project_urls={
-        'Source': 'https://github.com/AcherStyx/Compressed-Video-Reader',
-        'Tracker': 'https://github.com/AcherStyx/Compressed-Video-Reader/issues'
-    },
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Programming Language :: Python :: 3',
         'License :: OSI Approved :: MIT License',
     ]
 )
-
-    # install_requires=['pkgconfig>=1.5.1', 'numpy>=1.17.0', 'flow-vis>=0.1', 'opencv-python>=4.0'],

@@ -5,9 +5,9 @@ cd "${SCRIPT_DIR}" || exit
 
 # Install FFMPEG dependencies
 echo "Installing FFMPEG dependencies"
-sudo apt update -qq --fix-missing && \
-sudo apt upgrade -y && \
-sudo apt -y install \
+apt update -qq --fix-missing && \
+apt upgrade -y && \
+apt -y install \
     libass-dev \
     libfreetype6-dev \
     libsdl2-dev \
