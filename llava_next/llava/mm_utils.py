@@ -417,7 +417,6 @@ def process_images(images, image_processor, model_cfg):
         for image in images:
             image = process_native_image(image, image_processor)
             new_images.append(image)
-        # assert 3==4, f'new_images: {new_images}'
         return {'image_patchs': [img['pixel_values'] for img in new_images], 'grid_thw': [img['grid_thw'] for img in new_images]}
     elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
         for image in images:
@@ -439,13 +438,13 @@ def process_images(images, image_processor, model_cfg):
                 grid_thw.append([1, 32, 32])
             return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
 
-        elif 'llava_vit' in image_processor.__class__.__name__.lower() or 'llavavit' in image_processor.__class__.__name__.lower():
+        elif 'onevision' in image_processor.__class__.__name__.lower() or 'clip' in image_processor.__class__.__name__.lower():
             image_patchs = []
             grid_thw = []
             for image in images:
                 image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
                 image = image.resize((504, 504))
-                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
+                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"])
                 grid_thw.append([1, 36, 36])
             return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
 

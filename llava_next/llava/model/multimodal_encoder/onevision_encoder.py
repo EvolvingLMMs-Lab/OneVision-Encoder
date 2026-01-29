@@ -82,7 +82,7 @@ class OneVisionEncoderTower(nn.Module):
         Returns:
             image_features: Tensor of shape (B, num_patches, hidden_size)
         """
-        if patch_positions is not None and patch_positions[0] is None:
+        if patch_positions is None or patch_positions[0] is None:
             patch_positions = None
         else:
             patch_positions  = patch_positions[0]
