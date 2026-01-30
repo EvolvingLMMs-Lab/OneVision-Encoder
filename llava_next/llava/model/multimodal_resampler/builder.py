@@ -4,6 +4,7 @@ import warnings
 from .masked_drop import MaskedDrop
 from .spatial_pool import SpatialPool
 from .perceiver import PerceiverResampler
+
 try:
     from .qformer import Qformer
 except ImportError as e:

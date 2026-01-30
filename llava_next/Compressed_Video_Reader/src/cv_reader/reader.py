@@ -1,10 +1,7 @@
 from . import api
 
 
-def read_video(
-        video_path: str,
-        with_residual: bool = True
-):
+def read_video(video_path: str, with_residual: bool = True):
     """
     Read motion vector and residual from encoded video file
     :param video_path: Path to H.264 video file
