@@ -11,7 +11,7 @@
 <div align="center">
 
 📝 **[Homepage](https://www.lmms-lab.com/onevision-encoder/index.html)**
-🤗 **[Models](https://huggingface.co/lmms-lab-encoder/onevision-encoder-large)** |
+🤗 **[Models](https://huggingface.co/collections/lmms-lab-encoder/onevision-encoder)** |
 📄 **[Tech Report (coming)]()** |
 📋 **[Model Card](docs/model_card.md)** |
 📊 **[Data Card](docs/data_card.md)**
