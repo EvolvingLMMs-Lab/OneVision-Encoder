@@ -12,12 +12,12 @@ export ADDR="localhost"
 
 LLM_VERSION="Qwen/Qwen3-4B-Instruct-2507"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
-VISION_MODEL_VERSION="lmms-lab/onevision-encoder-large"
+VISION_MODEL_VERSION="SigLIP2/siglip2-so400m-patch16-naflex"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 
 PROMPT_VERSION=plain
 
-BASE_RUN_NAME="date$(date +%m%d)_llavanext-onevision-encoder-large_-2hid-qwen3-4b-instruct-pretrain_blip558k_plain"
+BASE_RUN_NAME="date$(date +%m%d)_llavanext-siglip2packing_-2hidnorm-qwen3-4b-instruct-pretrain_blip558k_plain"
 echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
 OUTPUT_DIR="checkpoints/projectors/${BASE_RUN_NAME}"

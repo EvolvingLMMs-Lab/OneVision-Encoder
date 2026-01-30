@@ -30,7 +30,9 @@ def forward(
 
     query_states = self.q_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
     key_states = self.k_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-    value_states = self.v_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)  # shape: (b, num_heads, s, head_dim)
+    value_states = (
+        self.v_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+    )  # shape: (b, num_heads, s, head_dim)
 
     kv_seq_len = key_states.shape[-2]
     if past_key_value is not None:
@@ -82,6 +84,11 @@ def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_em
 def replace_llama_attn_with_flash_attn():
     cuda_major, cuda_minor = torch.cuda.get_device_capability()
     if cuda_major < 8:
-        warnings.warn("Flash attention is only supported on A100 or H100 GPU during training due to head dim > 64 backward." "ref: https://github.com/HazyResearch/flash-attention/issues/190#issuecomment-1523359593")
-    transformers.models.llama.modeling_llama.LlamaModel._prepare_decoder_attention_mask = _prepare_decoder_attention_mask
+        warnings.warn(
+            "Flash attention is only supported on A100 or H100 GPU during training due to head dim > 64 backward."
+            "ref: https://github.com/HazyResearch/flash-attention/issues/190#issuecomment-1523359593"
+        )
+    transformers.models.llama.modeling_llama.LlamaModel._prepare_decoder_attention_mask = (
+        _prepare_decoder_attention_mask
+    )
     transformers.models.llama.modeling_llama.LlamaAttention.forward = forward

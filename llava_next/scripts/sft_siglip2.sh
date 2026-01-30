@@ -6,7 +6,7 @@ export PYTHONPATH=$(pwd)
 
 LLM_VERSION="Qwen/Qwen3-4B-Instruct-2507"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
-VISION_MODEL_VERSION="lmms-lab/onevision-encoder-large"
+VISION_MODEL_VERSION="SigLIP2/siglip2-so400m-patch16-naflex"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 
 export WANDB_MODE=disabled
@@ -14,7 +14,7 @@ export PORT=29502
 
 PROMPT_VERSION="qwen_1_5"
 
-BASE_RUN_NAME="./checkpoints/date$(date +%m%d)_llavanext-onevision-encoder-large_-2hid-qwen3-4b-sigvid"
+BASE_RUN_NAME="./checkpoints/date$(date +%m%d)_llavanext-siglip2_-2hid-qwen3-4b-sigvid"
 echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
 mkdir -p $BASE_RUN_NAME
@@ -25,9 +25,9 @@ deepspeed --master_port 65535 \
     --deepspeed scripts/zero3.json \
     --model_name_or_path ${LLM_VERSION} \
     --version ${PROMPT_VERSION} \
-    --data_path video800k_with_codec8f_or_8fkeep_mixed_image800k.jsonl \
+    --data_path video800k_mixed_image800k.jsonl \
     --image_folder root \
-    --pretrain_mm_mlp_adapter="checkpoints/projectors/date$(date +%m%d)_llavanext-onevision-encoder-large_-2hid-qwen3-4b-instruct-pretrain_blip558k_plain/mm_projector.bin" \
+    --pretrain_mm_mlp_adapter="checkpoints/projectors/date$(date +%m%d)_llavanext-siglip2_-2hid-qwen3-4b-instruct-pretrain_blip558k_plain/mm_projector.bin" \
     --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower ${VISION_MODEL_VERSION} \
@@ -37,7 +37,7 @@ deepspeed --master_port 65535 \
     --mm_use_im_patch_token False \
     --group_by_modality_length True \
     --image_aspect_ratio anyres \
-    --image_grid_pinpoints "[(574, 1120), (1120, 574), (1120, 1120), (1694, 574), (574, 1694)]" \
+    --image_grid_pinpoints "[(576, 1120), (1120, 576), (1120, 1120), (1696, 576), (576, 1696)]" \
     --mm_patch_merge_type flat \
     --bf16 True \
     --run_name $BASE_RUN_NAME \
