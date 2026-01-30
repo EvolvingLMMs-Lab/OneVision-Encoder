@@ -4,28 +4,14 @@ export NCCL_IB_GID_INDEX=3
 export NCCL_SOCKET_IFNAME=eth0
 export PYTHONPATH=$(pwd)
 
-# Monitor if a specific PID exists, if so wait for 1 minute
-PID_TO_MONITOR=493372
-
-if [ -z "$PID_TO_MONITOR" ]; then
-    echo "Usage: $0 <pid_to_monitor>"
-    exit 1
-fi
-
-# Monitor the given PID, sleep if it exists
-while kill -0 "$PID_TO_MONITOR" 2>/dev/null; do
-    echo "PID $PID_TO_MONITOR is still running. Waiting 2 minutes..."
-    sleep 120
-done
-
 LLM_VERSION="Qwen/Qwen3-4B-Instruct-2507"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
 VISION_MODEL_VERSION="lmms-lab/onevision-encoder-large"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
+
 export WANDB_MODE=disabled
-
-
 export PORT=29502  
+
 PROMPT_VERSION="qwen_1_5"
 
 BASE_RUN_NAME="./checkpoints/date$(date +%m%d)_llavanext-onevision-encoder-large_-2hid-qwen3-4b-sigvid"
@@ -39,7 +25,7 @@ deepspeed --master_port 65535 \
     --deepspeed scripts/zero3.json \
     --model_name_or_path ${LLM_VERSION} \
     --version ${PROMPT_VERSION} \
-    --data_path video_800k_mixed_codec8f_or_8fkeep.jsonl \
+    --data_path video800k_with_codec8f_or_8fkeep_mixed_image800k.jsonl \
     --image_folder root \
     --pretrain_mm_mlp_adapter="checkpoints/projectors/date$(date +%m%d)_llavanext-onevision-encoder-large_-2hid-qwen3-4b-instruct-pretrain_blip558k_plain/mm_projector.bin" \
     --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \

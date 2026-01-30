@@ -91,7 +91,9 @@ def process_highres_image_crop_split(image, data_args, processor=None):
         processor = data_args.image_processor
     image_crop = resize_and_center_crop(image, crop_resolution)
     image_patches = extract_patches(image_crop, patch_size=split_resolution, overlap_ratio=0)
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    image_patches = [
+        processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches
+    ]
     return torch.stack(image_patches, dim=0)
 
 
@@ -112,31 +114,30 @@ def process_highres_image(image, processor, grid_pinpoints):
     image_padded = image_padded.resize((select_size, select_size))
     image_patches = extract_patches(image_padded, patch_size=processor.size["shortest_edge"], overlap_ratio=0)
     image_patches = [image_original_resize] + image_patches
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    image_patches = [
+        processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches
+    ]
     return torch.stack(image_patches, dim=0)
 
+
 def smart_resize(
-    height: int, 
-    width: int, 
-    patch_size: int = 16,
-    min_pixels: int = 32 * 32,
-    max_pixels: int = 1600*1600
+    height: int, width: int, patch_size: int = 16, min_pixels: int = 32 * 32, max_pixels: int = 1600 * 1600
 ):
     """
     Rescales the image dimensions so that:
     1. Both dimensions (height and width) are divisible by 'factor' (32 for Siglip2).
     2. The total number of pixels is within the range ['min_pixels', 'max_pixels'].
     3. The aspect ratio of the image is maintained as closely as possible.
-    
+
     This is similar to Qwen2VL's smart_resize but adapted for Siglip2's requirements.
-    
+
     Args:
         height: Original image height
         width: Original image width
         factor: Factor that dimensions must be divisible by (default: 32 = 2 * 16)
         min_pixels: Minimum number of pixels (default: 1024 = 32*32)
         max_pixels: Maximum number of pixels (default: 262144 = 512*512)
-    
+
     Returns:
         Tuple of (resized_height, resized_width)
     """
@@ -144,15 +145,15 @@ def smart_resize(
         raise ValueError(
             f"Absolute aspect ratio must be smaller than 200, got {max(height, width) / min(height, width)}"
         )
-    
+
     # Round to nearest factor
     h_bar = round(height / patch_size) * patch_size
     w_bar = round(width / patch_size) * patch_size
-    
+
     # Ensure minimum factor size
     h_bar = max(patch_size, h_bar)
     w_bar = max(patch_size, w_bar)
-    
+
     if h_bar * w_bar > max_pixels:
         beta = math.sqrt((height * width) / max_pixels)
         h_bar = max(patch_size, math.floor(height / beta / patch_size) * patch_size)
@@ -162,34 +163,37 @@ def smart_resize(
         beta = math.sqrt(min_pixels / (height * width))
         h_bar = math.ceil(height * beta / patch_size) * patch_size
         w_bar = math.ceil(width * beta / patch_size) * patch_size
-    
+
     return h_bar, w_bar
 
 
 def process_native_image(image, processor):
     orig_width, orig_height = image.size
-    if 'siglip' in processor.__class__.__name__.lower():
+    if "siglip" in processor.__class__.__name__.lower():
         target_height, target_width = smart_resize(
-                height=orig_height,
-                width=orig_width,
-                patch_size=16,
-                min_pixels=16*4,
-            )
+            height=orig_height,
+            width=orig_width,
+            patch_size=16,
+            min_pixels=16 * 4,
+        )
         image = image.resize((target_width, target_height), Image.BICUBIC)
         image_patches = [processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]]
         grid_thw = [1, target_height // 16, target_width // 16]
-        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+        return {"pixel_values": torch.cat(image_patches, dim=0), "grid_thw": grid_thw}
     else:
         target_height, target_width = smart_resize(
-                height=orig_height,
-                width=orig_width,
-                patch_size=14,
-                min_pixels=14*4,
-            )
+            height=orig_height,
+            width=orig_width,
+            patch_size=14,
+            min_pixels=14 * 4,
+        )
         image = image.resize((target_width, target_height), Image.BICUBIC)
-        image_patches = [processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]]
+        image_patches = [
+            processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]
+        ]
         grid_thw = [1, target_height // 14, target_width // 14]
-        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+        return {"pixel_values": torch.cat(image_patches, dim=0), "grid_thw": grid_thw}
+
 
 def select_best_resolution(original_size, possible_resolutions):
     """
@@ -216,7 +220,9 @@ def select_best_resolution(original_size, possible_resolutions):
         effective_resolution = min(downscaled_width * downscaled_height, original_width * original_height)
         wasted_resolution = (width * height) - effective_resolution
 
-        if effective_resolution > max_effective_resolution or (effective_resolution == max_effective_resolution and wasted_resolution < min_wasted_resolution):
+        if effective_resolution > max_effective_resolution or (
+            effective_resolution == max_effective_resolution and wasted_resolution < min_wasted_resolution
+        ):
             max_effective_resolution = effective_resolution
             min_wasted_resolution = wasted_resolution
             best_fit = (width, height)
@@ -304,7 +310,9 @@ def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
         range_start = tuple(map(int, matches[0]))
         range_end = tuple(map(int, matches[-1]))
         # Generate a matrix of tuples from (range_start[0], range_start[1]) to (range_end[0], range_end[1])
-        grid_pinpoints = [(i, j) for i in range(range_start[0], range_end[0] + 1) for j in range(range_start[1], range_end[1] + 1)]
+        grid_pinpoints = [
+            (i, j) for i in range(range_start[0], range_end[0] + 1) for j in range(range_start[1], range_end[1] + 1)
+        ]
         # Multiply all elements by patch_size
         grid_pinpoints = [[dim * patch_size for dim in pair] for pair in grid_pinpoints]
     if type(grid_pinpoints) is list:
@@ -339,7 +347,9 @@ def process_anyres_image(image, processor, grid_pinpoints):
         range_start = tuple(map(int, matches[0]))
         range_end = tuple(map(int, matches[-1]))
         # Generate a matrix of tuples from (range_start[0], range_start[1]) to (range_end[0], range_end[1])
-        grid_pinpoints = [(i, j) for i in range(range_start[0], range_end[0] + 1) for j in range(range_start[1], range_end[1] + 1)]
+        grid_pinpoints = [
+            (i, j) for i in range(range_start[0], range_end[0] + 1) for j in range(range_start[1], range_end[1] + 1)
+        ]
         # Multiply all elements by patch_size
         grid_pinpoints = [[dim * patch_size for dim in pair] for pair in grid_pinpoints]
 
@@ -349,22 +359,26 @@ def process_anyres_image(image, processor, grid_pinpoints):
         possible_resolutions = ast.literal_eval(grid_pinpoints)
     best_resolution = select_best_resolution(image.size, possible_resolutions)
     image_padded = resize_and_pad_image(image, best_resolution)
-    if 'siglip' in processor.__class__.__name__.lower():
+    if "siglip" in processor.__class__.__name__.lower():
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
-        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
-    elif 'onevision' in processor.__class__.__name__.lower() or 'clip' in processor.__class__.__name__.lower():
-        image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"]]
+        return {"pixel_values": torch.cat(image_patches, dim=0), "grid_thw": grid_thw}
+    elif "onevision" in processor.__class__.__name__.lower() or "clip" in processor.__class__.__name__.lower():
+        image_patches = [
+            processor.preprocess(image_padded, return_tensors="pt", do_resize=False, do_center_crop=False)[
+                "pixel_values"
+            ]
+        ]
         grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
-        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
-    elif 'qwen' in processor.__class__.__name__.lower():
+        return {"pixel_values": torch.cat(image_patches, dim=0), "grid_thw": grid_thw}
+    elif "qwen" in processor.__class__.__name__.lower():
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 16, best_resolution[0] // 16]
-        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
-    else: # FIXME: for aimv2
+        return {"pixel_values": torch.cat(image_patches, dim=0), "grid_thw": grid_thw}
+    else:  # FIXME: for aimv2
         image_patches = [processor.preprocess(image_padded, return_tensors="pt", do_resize=False)["pixel_values"]]
         grid_thw = [1, best_resolution[1] // 14, best_resolution[0] // 14]
-        return {'pixel_values': torch.cat(image_patches, dim=0), 'grid_thw': grid_thw}
+        return {"pixel_values": torch.cat(image_patches, dim=0), "grid_thw": grid_thw}
 
     patches = divide_to_patches(image_padded, processor.crop_size["height"])
 
@@ -380,7 +394,9 @@ def process_anyres_image(image, processor, grid_pinpoints):
     # image_original_resize = image_padded_square.resize((processor.size['shortest_edge'], processor.size['shortest_edge']))
 
     image_patches = [image_original_resize] + patches
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    image_patches = [
+        processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches
+    ]
     return torch.stack(image_patches, dim=0)
 
 
@@ -405,8 +421,8 @@ def expand2square(pil_img, background_color):
 def process_images(images, image_processor, model_cfg):
     image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", None)
     new_images = []
-    if len(images) == 8: #TODO: for video
-        image_aspect_ratio = 'pad'
+    if len(images) == 8:  # TODO: for video
+        image_aspect_ratio = "pad"
 
     # assert 1==34, f'len(images) if list: {len(images) if isinstance(images, list) else "N/A"}, image_aspect_ratio: {image_aspect_ratio}, model_cfg.image_grid_pinpoints: {model_cfg.image_grid_pinpoints}'
     if image_aspect_ratio == "highres":
@@ -417,36 +433,54 @@ def process_images(images, image_processor, model_cfg):
         for image in images:
             image = process_native_image(image, image_processor)
             new_images.append(image)
-        return {'image_patchs': [img['pixel_values'] for img in new_images], 'grid_thw': [img['grid_thw'] for img in new_images]}
+        return {
+            "image_patchs": [img["pixel_values"] for img in new_images],
+            "grid_thw": [img["grid_thw"] for img in new_images],
+        }
     elif image_aspect_ratio == "anyres" or "anyres_max" in image_aspect_ratio:
         for image in images:
             image = process_anyres_image(image, image_processor, model_cfg.image_grid_pinpoints)
             new_images.append(image)
-        return {'image_patchs': [img['pixel_values'] for img in new_images], 'grid_thw': [img['grid_thw'] for img in new_images]}
+        return {
+            "image_patchs": [img["pixel_values"] for img in new_images],
+            "grid_thw": [img["grid_thw"] for img in new_images],
+        }
     elif image_aspect_ratio == "crop_split":
         for image in images:
             image = process_highres_image_crop_split(image, model_cfg, image_processor)
             new_images.append(image)
     elif image_aspect_ratio == "pad":
-        if 'siglip' in image_processor.__class__.__name__.lower() or 'qwen' in image_processor.__class__.__name__.lower():
+        if (
+            "siglip" in image_processor.__class__.__name__.lower()
+            or "qwen" in image_processor.__class__.__name__.lower()
+        ):
             image_patchs = []
             grid_thw = []
             for image in images:
-                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
+                image = expand2square(image, tuple(int(0 * 255) for x in [0, 0, 0]))
                 image = image.resize((512, 512))
-                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"])
+                image_patchs.append(
+                    image_processor.preprocess(image, return_tensors="pt", do_resize=False)["pixel_values"]
+                )
                 grid_thw.append([1, 32, 32])
-            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
+            return {"image_patchs": image_patchs, "grid_thw": torch.tensor(grid_thw)}
 
-        elif 'onevision' in image_processor.__class__.__name__.lower() or 'clip' in image_processor.__class__.__name__.lower():
+        elif (
+            "onevision" in image_processor.__class__.__name__.lower()
+            or "clip" in image_processor.__class__.__name__.lower()
+        ):
             image_patchs = []
             grid_thw = []
             for image in images:
-                image = expand2square(image, tuple(int(0 * 255) for x in [0,0,0]))
+                image = expand2square(image, tuple(int(0 * 255) for x in [0, 0, 0]))
                 image = image.resize((504, 504))
-                image_patchs.append(image_processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)["pixel_values"])
+                image_patchs.append(
+                    image_processor.preprocess(image, return_tensors="pt", do_resize=False, do_center_crop=False)[
+                        "pixel_values"
+                    ]
+                )
                 grid_thw.append([1, 36, 36])
-            return {'image_patchs': image_patchs, 'grid_thw': torch.tensor(grid_thw)}
+            return {"image_patchs": image_patchs, "grid_thw": torch.tensor(grid_thw)}
 
         image = image.resize((504, 504))
         # image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))

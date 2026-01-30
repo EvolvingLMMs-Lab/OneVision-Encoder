@@ -29,16 +29,17 @@ class OneVisionEncoderTower(nn.Module):
     """
     Vision Tower wrapper for LlavaViT model, compatible with LLaVA framework.
     """
+
     def __init__(self, vision_tower, vision_tower_cfg=None, delay_load=False):
         super().__init__()
 
         self.is_loaded = False
         self.vision_tower_name = vision_tower
         self.select_layer = vision_tower_cfg.mm_vision_select_layer if vision_tower_cfg is not None else None
-        
+
         # Default config - will be updated after loading
         self.config = AutoConfig.from_pretrained(self.vision_tower_name, trust_remote_code=True)
-        
+
         self.image_processor = AutoImageProcessor.from_pretrained(self.vision_tower_name, trust_remote_code=True)
 
         if not delay_load:
@@ -48,7 +49,9 @@ class OneVisionEncoderTower(nn.Module):
             rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `unfreeze_mm_vision_tower`: True.")
             self.load_model()
         elif hasattr(vision_tower_cfg, "mm_tunable_parts") and "mm_vision_tower" in vision_tower_cfg.mm_tunable_parts:
-            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`.")
+            rank0_print(
+                f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`."
+            )
             self.load_model()
         else:
             self.cfg_only = self.config
@@ -58,11 +61,13 @@ class OneVisionEncoderTower(nn.Module):
             rank0_print("{} is already loaded, `load_model` called again, skipping.".format(self.vision_tower_name))
             return
 
-        self.vision_tower = AutoModel.from_pretrained(self.vision_tower_name, trust_remote_code=True, attn_implementation="flash_attention_2")
-        
+        self.vision_tower = AutoModel.from_pretrained(
+            self.vision_tower_name, trust_remote_code=True, attn_implementation="flash_attention_2"
+        )
+
         # Update config from loaded model
         self.config = self.vision_tower.config
-        
+
         self.is_loaded = True
 
     def forward(self, images, grid_thw=None, patch_positions=None, num_frames=None):
@@ -85,14 +90,14 @@ class OneVisionEncoderTower(nn.Module):
         if patch_positions is None or patch_positions[0] is None:
             patch_positions = None
         else:
-            patch_positions  = patch_positions[0]
+            patch_positions = patch_positions[0]
         if isinstance(images, list):
             image_features = []
             for image in images:
                 image_forward_out = self.vision_tower(
                     image.to(device=self.device, dtype=self.dtype).unsqueeze(0),
                     output_hidden_states=True,
-                    patch_positions=patch_positions
+                    patch_positions=patch_positions,
                 )
                 image_feature = image_forward_out.hidden_states[-1].to(image.dtype)
                 image_features.append(image_feature)
@@ -105,7 +110,11 @@ class OneVisionEncoderTower(nn.Module):
             if pixel_values.dim() == 3:
                 # (C, H, W) -> (1, C, H, W)
                 pixel_values = pixel_values.unsqueeze(0)
-            elif pixel_values.dim() == 4 and pixel_values.shape[0] == 8 and pixel_values.shape[2] == pixel_values.shape[3]: # TODO: replace with more robust check
+            elif (
+                pixel_values.dim() == 4
+                and pixel_values.shape[0] == 8
+                and pixel_values.shape[2] == pixel_values.shape[3]
+            ):  # TODO: replace with more robust check
                 num_frames = pixel_values.shape[0]
 
             is_video = num_frames is not None and num_frames > 1
@@ -114,9 +123,7 @@ class OneVisionEncoderTower(nn.Module):
                 pixel_values = pixel_values.unsqueeze(0).permute(0, 2, 1, 3, 4)
 
             image_forward_outs = self.vision_tower(
-                pixel_values,
-                output_hidden_states=True,
-                patch_positions=patch_positions
+                pixel_values, output_hidden_states=True, patch_positions=patch_positions
             )
 
             # Get hidden state from selected layer
