@@ -231,80 +231,97 @@ bash examples/models/tensor_parallel.sh
 bash examples/models/sglang.sh
 ```
 
+
 **Evaluation with vLLM for bigger model (llava-next-72b)**
 
 ```bash
 bash examples/models/vllm_qwen2vl.sh
 ```
 
-**More Parameters**
-
-```bash
-python3 -m lmms_eval --help
-```
-
-**Environmental Variables**
-Before running experiments and evaluations, we recommend you to export following environment variables to your environment. Some are necessary for certain tasks to run.
-
-```bash
-export OPENAI_API_KEY="<YOUR_API_KEY>"
-export HF_HOME="<Path to HF cache>" 
-export HF_TOKEN="<YOUR_API_KEY>"
-export HF_HUB_ENABLE_HF_TRANSFER="1"
-export REKA_API_KEY="<YOUR_API_KEY>"
-# Other possible environment variables include 
-# ANTHROPIC_API_KEY,DASHSCOPE_API_KEY etc.
-```
-
-**Common Environment Issues**
-
-Sometimes you might encounter some common issues for example error related to httpx or protobuf. To solve these issues, you can first try
-
-```bash
-python3 -m pip install httpx==0.23.3;
-python3 -m pip install protobuf==3.20;
-# If you are using numpy==2.x, sometimes may causing errors
-python3 -m pip install numpy==1.26;
-# Someties sentencepiece are required for tokenizer to work
-python3 -m pip install sentencepiece;
-```
-
-## Add Customized Model and Dataset
-
-Please refer to our [documentation](docs/README.md).
-
-## Acknowledgement
-
-lmms_eval is a fork of [lm-eval-harness](https://github.com/EleutherAI/lm-evaluation-harness). We recommend you to read through the [docs of lm-eval-harness](https://github.com/EleutherAI/lm-evaluation-harness/tree/main/docs) for relevant information. 
-
 ---
 
-Below are the changes we made to the original API:
-- Build context now only pass in idx and process image and doc during the model responding phase. This is due to the fact that dataset now contains lots of images and we can't store them in the doc like the original lm-eval-harness other wise the cpu memory would explode.
-- Instance.args (lmms_eval/api/instance.py) now contains a list of images to be inputted to lmms.
-- lm-eval-harness supports all HF language models as single model class. Currently this is not possible of lmms because the input/output format of lmms in HF are not yet unified. Thererfore, we have to create a new class for each lmms model. This is not ideal and we will try to unify them in the future.
----
+### Preparing eval datasets and offline codec-patch assets (for video tasks)
 
-## Citations
+Some video evaluations benefit from **offline precomputed visual assets** (mosaics + position indices) to avoid per-sample frame extraction during evaluation.
 
-```shell
-@misc{zhang2024lmmsevalrealitycheckevaluation,
-      title={LMMs-Eval: Reality Check on the Evaluation of Large Multimodal Models}, 
-      author={Kaichen Zhang and Bo Li and Peiyuan Zhang and Fanyi Pu and Joshua Adrian Cahyono and Kairui Hu and Shuai Liu and Yuanhan Zhang and Jingkang Yang and Chunyuan Li and Ziwei Liu},
-      year={2024},
-      eprint={2407.12772},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2407.12772}, 
-}
+This repo provides:
+- `Compressed_Video_Reader/tool/offline_precompute_llava_codec_assets.py` — precomputes offline assets from a jsonl list.
+- `scripts/precompute_codec_patch/run_offline_codec_patch_for_eval.sh` — a runner script (recommended) with `path/to/...` placeholders.
 
-@misc{lmms_eval2024,
-    title={LMMs-Eval: Accelerating the Development of Large Multimoal Models},
-    url={https://github.com/EvolvingLMMs-Lab/lmms-eval},
-    author={Bo Li*, Peiyuan Zhang*, Kaichen Zhang*, Fanyi Pu*, Xinrun Du, Yuhao Dong, Haotian Liu, Yuanhan Zhang, Ge Zhang, Chunyuan Li and Ziwei Liu},
-    publisher    = {Zenodo},
-    version      = {v0.1.0},
-    month={March},
-    year={2024}
-}
+#### 1) Create the input jsonl (video list)
+
+Prepare a jsonl file where **each line** contains at least:
+- `video`: absolute path to the video file
+- `key`: a **stable unique id** used as the offline asset folder name
+
+Recommended (matches the precompute script schema):
+- `task`, `split`, `doc_id`, `n`, `exists`
+
+Example line:
+```json
+{"task":"videomme","split":"test","doc_id":123,"n":0,"video":"path/to/video.mp4","key":"<unique_key>","exists":true}
 ```
+
+**Important:** the `key` must be consistent between **precompute** and the model's **offline loader**. If the loader reports `MISS`, it usually means the `key` (or folder layout / filenames) doesn't match.
+
+#### 2) Precompute offline assets
+
+Run the precompute tool to generate assets under:
+```
+path/to/offline_root/assets/<key>/
+  mosaic_000.jpg ... mosaic_007.jpg
+  positions_thw.npy
+  visible_indices.npy
+  frame_ids.npy
+  meta.json
+```
+
+Example command:
+```bash
+python Compressed_Video_Reader/tool/offline_precompute_llava_codec_assets.py \
+  --jsonl path/to/eval_videos.jsonl \
+  --out_root path/to/offline_root \
+  --num_workers 8 \
+  --seq_len_frames 64 \
+  --num_images 8 \
+  --square_size 576 \
+  --patch_size 16
+```
+
+Optional sharding (useful for large datasets):
+```bash
+python Compressed_Video_Reader/tool/offline_precompute_llava_codec_assets.py \
+  --jsonl path/to/eval_videos.jsonl \
+  --out_root path/to/offline_root \
+  --num_workers 8 \
+  --num_shards 8 \
+  --shard_id 0
+```
+
+**Do not rename** the expected output filenames (e.g. `mosaic_000.jpg`, `positions_thw.npy`). Renaming will cause `MISS` and trigger fallback to frame extraction.
+
+#### 3) Run evaluation using offline assets
+
+Set these environment variables before launching `lmms_eval`:
+```bash
+export LLAVA_CODEC_USE_OFFLINE=1
+export LLAVA_CODEC_OFFLINE_ROOT=path/to/offline_root/assets
+
+# Optional (recommended): keep configs aligned with your offline assets
+export LLAVA_CODEC_VISIDX_MODE=pack_topk
+export LLAVA_CODEC_SEQ_LEN_FRAMES=64
+export LLAVA_CODEC_NUM_IMAGES=8
+export LLAVA_CODEC_SQUARE_SIZE=576
+export LLAVA_CODEC_PATCH_SIZE=16
+
+# Debug (single switch)
+export LLAVA_CODEC_DEBUG=1
+```
+
+If offline assets are found, logs will include `HIT` / `USING_OFFLINE`. If not found, you will see `MISS` and the pipeline will **fallback to frame extraction**.
+
+Quick checklist when you see `MISS`:
+- `LLAVA_CODEC_OFFLINE_ROOT` points to the directory that contains `assets/<key>/...`
+- `<key>` matches the one produced in your input jsonl
+- `mosaic_000.jpg ...` and `positions_thw.npy` exist under `assets/<key>/`
+- your `seq_len_frames / num_images / square_size / patch_size` match between precompute and eval
