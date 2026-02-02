@@ -23,6 +23,54 @@ warnings.filterwarnings("ignore")
 
 from loguru import logger as eval_logger
 
+import os
+import sys
+
+def _env_debug_enabled() -> bool:
+    """Enable debug logging with a single env var.
+
+    Supported values for `LLAVA_CODEC_DEBUG`:
+      - "0" (default): disabled
+      - "1" / "true" / "yes": enabled on local main process only
+      - "all": enabled on all processes
+    """
+    v = os.environ.get("LLAVA_CODEC_DEBUG", "0")
+    v_l = str(v).lower()
+    return v_l in ("1", "true", "yes", "all")
+
+
+def _should_log(accelerator: Optional[object] = None) -> bool:
+    """Return True if we should emit debug logs in this context.
+
+    Behavior:
+      - Requires `LLAVA_CODEC_DEBUG` to be enabled.
+      - If `LLAVA_CODEC_DEBUG=all`, all processes will log.
+      - Otherwise, only the accelerator local main process will log when an accelerator is provided.
+    """
+    v = os.environ.get("LLAVA_CODEC_DEBUG", "0")
+    v_l = str(v).lower()
+    if v_l not in ("1", "true", "yes", "all"):
+        return False
+    if v_l == "all":
+        return True
+    if accelerator is None:
+        # Fallback when called outside model context: only log on rank0.
+        return os.environ.get("LOCAL_RANK", "0") in ("0", "")
+    return getattr(accelerator, "is_local_main_process", False)
+
+# Module import-time quick check to ensure environment vars are visible when imported
+if _env_debug_enabled():
+    _msg = (
+        f"[llava_ov_encoder import] file={__file__} cwd={os.getcwd()} pid={os.getpid()} "
+        f"LOCAL_RANK={os.environ.get('LOCAL_RANK')} RANK={os.environ.get('RANK')} WORLD_SIZE={os.environ.get('WORLD_SIZE')} "
+        f"LLAVA_CODEC_DEBUG={os.environ.get('LLAVA_CODEC_DEBUG')}"
+    )
+    try:
+        eval_logger.info(_msg)
+    except Exception:
+        pass
+    print(_msg, file=sys.stderr, flush=True)
+
 from llava.constants import DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX
 from llava.conversation import conv_templates
 from llava.mm_utils import (
@@ -47,6 +95,12 @@ import os
 from typing import List, Dict, Any
 from pathlib import Path
 import cv2
+
+# --- offline helpers for LLAVA codec ---
+import glob
+import json
+import numpy as np
+import re
 
 def build_patch_positions(num_frames: int = 8, total_frames: int = 64, h: int = 36, w: int = 36) -> torch.Tensor:
     """
@@ -78,6 +132,317 @@ def build_patch_positions(num_frames: int = 8, total_frames: int = 64, h: int = 
     
     return patch_positions
 
+
+# --- LLAVA codec offline helper functions ---
+
+def _env_truthy(key: str, default: str = "0") -> bool:
+    return os.environ.get(key, default) in ("1", "true", "True", "YES", "yes")
+
+
+def _env_use_offline() -> bool:
+    return _env_truthy("LLAVA_CODEC_USE_OFFLINE", "0")
+
+
+def _offline_root() -> str:
+    return os.environ.get("LLAVA_CODEC_OFFLINE_ROOT", "")
+
+
+
+def _normalize_video_id(video_path: str) -> str:
+    """Best-effort id used to locate offline assets."""
+    # Most datasets use the basename without extension as the id
+    return Path(video_path).stem
+
+
+# --- offline dir index (meta.json based) ---
+# Some offline precompute pipelines store assets under an arbitrary `key` (not equal to video stem).
+# We build a per-process index by scanning for meta.json under LLAVA_CODEC_OFFLINE_ROOT and map:
+#   - video stem -> asset dir
+#   - meta['key'] -> asset dir
+_OFFLINE_INDEX = None  # type: Optional[Dict[str, str]]
+_OFFLINE_INDEX_ROOT = None  # type: Optional[str]
+
+
+def _build_offline_index(root: str) -> Dict[str, str]:
+    index: Dict[str, str] = {}
+    if not root or (not os.path.exists(root)):
+        return index
+
+    # Walk the root and find meta.json. This is O(#assets) but done once per process.
+    for dirpath, _, filenames in os.walk(root):
+        if "meta.json" not in filenames:
+            continue
+        meta_path = os.path.join(dirpath, "meta.json")
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            continue
+
+        # Map by video stem
+        v = meta.get("video") or meta.get("video_path")
+        if v:
+            try:
+                stem = Path(str(v)).stem
+                if stem and stem not in index:
+                    index[stem] = dirpath
+            except Exception:
+                pass
+
+        # Also map by key (useful if caller wants to reference by key)
+        k = meta.get("key")
+        if k:
+            k = str(k)
+            if k and k not in index:
+                index[k] = dirpath
+
+    return index
+
+
+def _offline_dir_from_index(root: str, video_path: str, accelerator: Optional[object] = None) -> Optional[str]:
+    """Return an asset directory for this video by consulting/initializing the meta.json index."""
+    global _OFFLINE_INDEX, _OFFLINE_INDEX_ROOT
+
+    root = (root or "").rstrip("/")
+    if not root:
+        return None
+
+    if _OFFLINE_INDEX is None or _OFFLINE_INDEX_ROOT != root:
+        _OFFLINE_INDEX_ROOT = root
+        _OFFLINE_INDEX = _build_offline_index(root)
+        if _should_log(accelerator):
+            _msg = f"[codec][offline] built meta.json index: root={root} entries={len(_OFFLINE_INDEX)}"
+            try:
+                eval_logger.info(_msg)
+            except Exception:
+                pass
+            print(_msg, file=sys.stderr, flush=True)
+
+    try:
+        stem = Path(video_path).stem
+    except Exception:
+        stem = _normalize_video_id(video_path)
+
+    if not stem:
+        return None
+
+    d = _OFFLINE_INDEX.get(stem) if _OFFLINE_INDEX else None
+    if d and os.path.exists(d):
+        return d
+    return None
+
+
+def _candidate_offline_dirs(video_path: str) -> List[str]:
+    root = _offline_root().rstrip("/")
+    if not root:
+        return []
+    vid = _normalize_video_id(video_path)
+    # Common layouts:
+    # 1) {root}/{vid}/...
+    # 2) {root}/.../{vid}/... (nested)
+    # 3) {root}/{vid}.* (flat)
+    cand = []
+    cand.append(os.path.join(root, vid))
+    cand.append(root)  # allow flat layout
+
+    # Add nested hits (keep it bounded)
+    try:
+        nested = glob.glob(os.path.join(root, "**", vid), recursive=True)
+        cand.extend(nested[:20])
+    except Exception:
+        pass
+
+    # Fallback: consult meta.json index (handles layouts like {root}/<key>/...)
+    try:
+        idx_dir = _offline_dir_from_index(root, video_path, accelerator=None)
+        if idx_dir:
+            cand.append(idx_dir)
+    except Exception:
+        pass
+
+    # Unique, existing
+    out = []
+    seen = set()
+    for p in cand:
+        if p and p not in seen:
+            seen.add(p)
+            if os.path.exists(p):
+                out.append(p)
+    return out
+
+
+def _pick_first_existing(paths: List[str]) -> Optional[str]:
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _find_offline_images(off_dir: str, max_images: int = 8) -> List[str]:
+    """Find offline mosaic/packed images. Supports jpg/png/webp, and common naming."""
+    if not off_dir or not os.path.exists(off_dir):
+        return []
+
+    exts = ("*.jpg", "*.jpeg", "*.png", "*.webp")
+
+    # Prefer 'mosaic*' / 'pack*' like names, then fall back to all images.
+    prefer = []
+    for pat in ("mosaic*", "pack*", "grid*", "image*"):
+        for ext in exts:
+            prefer.extend(glob.glob(os.path.join(off_dir, f"{pat}{ext[1:]}")))
+
+    # Fallback: any image files in directory
+    any_imgs = []
+    for ext in exts:
+        any_imgs.extend(glob.glob(os.path.join(off_dir, ext)))
+
+    # Merge while keeping order preference
+    merged = []
+    seen = set()
+    for lst in (prefer, any_imgs):
+        for p in lst:
+            if p not in seen:
+                seen.add(p)
+                merged.append(p)
+
+    # Sort naturally by trailing numbers if present
+    def _nat_key(s: str):
+        base = os.path.basename(s)
+        parts = re.split(r"(\d+)", base)
+        key = []
+        for x in parts:
+            if x.isdigit():
+                key.append(int(x))
+            else:
+                key.append(x)
+        return key
+
+    merged = sorted(merged, key=_nat_key)
+    return merged[: max(1, int(max_images))]
+
+
+def _find_positions_npy(off_dir: str) -> Optional[str]:
+    if not off_dir or not os.path.exists(off_dir):
+        return None
+    # Common filenames
+    for name in (
+        # common
+        "position.npy",
+        "positions.npy",
+        "position_ids.npy",
+        "patch_positions.npy",
+        "patch_positions.pt.npy",
+        "position_ids.pt.npy",
+        # offline_precompute_llava_codec_assets.py outputs
+        "positions_thw.npy",
+        "positions_thw_int32.npy",
+    ):
+        p = os.path.join(off_dir, name)
+        if os.path.exists(p):
+            return p
+    # Fallback: any *position*.npy
+    hits = glob.glob(os.path.join(off_dir, "*position*.npy"))
+    if hits:
+        return sorted(hits)[0]
+    return None
+
+
+def _load_patch_positions_from_npy(npy_path: str, device: torch.device) -> Optional[torch.Tensor]:
+    """Load patch positions from a numpy file.
+
+    Expected shapes:
+      - [seq, 3]
+      - [1, seq, 3]
+    Values are assumed to be (t, h, w) integers.
+    """
+    if not npy_path or not os.path.exists(npy_path):
+        return None
+    try:
+        arr = np.load(npy_path)
+        if arr is None:
+            return None
+        if arr.ndim == 2 and arr.shape[-1] == 3:
+            t = torch.from_numpy(arr).long().unsqueeze(0)
+        elif arr.ndim == 3 and arr.shape[0] == 1 and arr.shape[-1] == 3:
+            t = torch.from_numpy(arr).long()
+        else:
+            # Unknown layout
+            return None
+        return t.to(device)
+    except Exception:
+        return None
+
+
+def _offline_load_visuals_and_positions(
+    video_path: str,
+    device: torch.device,
+    accelerator: Optional[object] = None,
+) -> Tuple[Optional[List[Image.Image]], Optional[torch.Tensor], Optional[str]]:
+    """Try to load offline visuals (mosaics/packed images) and patch positions.
+
+    Returns:
+      (visuals, patch_positions, chosen_offline_dir)
+    """
+    if not _env_use_offline():
+        return None, None, None
+
+    root = _offline_root()
+    max_images = int(os.environ.get("LLAVA_CODEC_NUM_IMAGES", "8"))
+
+    cand_dirs = _candidate_offline_dirs(video_path)
+    if _should_log(accelerator):
+        _msg = f"[codec][offline] USE_OFFLINE=1 root={root} video={video_path} candidates={cand_dirs[:5]} (total={len(cand_dirs)})"
+        try:
+            eval_logger.info(_msg)
+        except Exception:
+            pass
+        print(_msg, file=sys.stderr, flush=True)
+
+    chosen = None
+    visuals = None
+    pos = None
+
+    for d in cand_dirs:
+        imgs = _find_offline_images(d, max_images=max_images)
+        if imgs:
+            chosen = d
+            try:
+                visuals = [Image.open(p).convert("RGB") for p in imgs]
+            except Exception as e:
+                if _should_log(accelerator):
+                    _msg = f"[codec][offline] failed to open images in {d}: {e}"
+                    try:
+                        eval_logger.warning(_msg)
+                    except Exception:
+                        pass
+                    print(_msg, file=sys.stderr, flush=True)
+                visuals = None
+                continue
+
+            npy = _find_positions_npy(d)
+            pos = _load_patch_positions_from_npy(npy, device=device) if npy else None
+
+            if _should_log(accelerator):
+                _msg = f"[codec][offline] HIT dir={d} images={len(imgs)} sample={imgs[:2]} positions_npy={npy} pos_shape={(tuple(pos.shape) if pos is not None else None)}"
+                try:
+                    eval_logger.info(_msg)
+                except Exception:
+                    pass
+                print(_msg, file=sys.stderr, flush=True)
+            break
+
+    if chosen is None:
+        if _should_log(accelerator):
+            _msg = f"[codec][offline] MISS (no assets found) video={video_path} root={root} -> fallback to frame extraction"
+            try:
+                eval_logger.warning(_msg)
+            except Exception:
+                pass
+            print(_msg, file=sys.stderr, flush=True)
+        return None, None, None
+
+    return visuals, pos, chosen
+
 def extract_frames_from_video(video_path, output_dir, num_frames=8, use_alternative_method=False):
     """
     Extract frames from video.
@@ -90,6 +455,13 @@ def extract_frames_from_video(video_path, output_dir, num_frames=8, use_alternat
         list: List of saved frame paths
     """
     try:
+        if _should_log(getattr(globals().get('self', None), 'accelerator', None)) or _should_log(None):
+            _msg = f"[codec][extract_frames] video={video_path} output_dir={output_dir} num_frames={num_frames} use_alt={use_alternative_method} pid={os.getpid()}"
+            try:
+                eval_logger.info(_msg)
+            except Exception:
+                pass
+            print(_msg, file=sys.stderr, flush=True)
         # 创建输出目录
         os.makedirs(output_dir, exist_ok=True)
         # 获取视频文件名（不含扩展名）
@@ -362,9 +734,33 @@ def convert_inputs(inputs, image_root: str = '/workspace/tmp/vlm_imgs', num_fram
             video_path = vision_info["video"]
             video_name = Path(video_path).stem
             img_dir = os.path.join(image_root, video_name)
-            img_paths = extract_frames_from_video(video_path, img_dir, num_frames=num_frames)
-            images = [Image.open(p) for p in img_paths]
-            video_inputs.append(images)
+
+            # Try offline assets first when enabled
+            offline_visuals, offline_pos, offline_dir = _offline_load_visuals_and_positions(
+                video_path=video_path,
+                device=torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu"),
+                accelerator=None,
+            )
+            if offline_visuals is not None:
+                if _should_log(None):
+                    _msg = f"[convert_inputs] USING_OFFLINE video={video_path} dir={offline_dir} images={len(offline_visuals)} pid={os.getpid()}"
+                    try:
+                        eval_logger.info(_msg)
+                    except Exception:
+                        pass
+                    print(_msg, file=sys.stderr, flush=True)
+                video_inputs.append(offline_visuals)
+            else:
+                if _should_log(None):
+                    _msg = f"[convert_inputs] USING_FRAME_EXTRACTION video={video_path} img_dir={img_dir} num_frames={num_frames} pid={os.getpid()}"
+                    try:
+                        eval_logger.info(_msg)
+                    except Exception:
+                        pass
+                    print(_msg, file=sys.stderr, flush=True)
+                img_paths = extract_frames_from_video(video_path, img_dir, num_frames=num_frames)
+                images = [Image.open(p) for p in img_paths]
+                video_inputs.append(images)
         else:
             raise ValueError("image, image_url or video should in content.")
 
@@ -415,6 +811,17 @@ class Llava_OV_Encoder(lmms):
         accelerator_kwargs = InitProcessGroupKwargs(timeout=timedelta(weeks=52))
         accelerator = Accelerator(kwargs_handlers=[accelerator_kwargs])
         self.accelerator = accelerator
+        if hasattr(self.accelerator, "is_local_main_process") and self.accelerator.is_local_main_process and _env_debug_enabled():
+            eval_logger.info(
+                f"[llava_ov_encoder.__init__] PID={os.getpid()} "
+                f"LLAVA_CODEC_DEBUG={os.environ.get('LLAVA_CODEC_DEBUG')} "
+                f"LLAVA_CODEC_USE_OFFLINE={os.environ.get('LLAVA_CODEC_USE_OFFLINE')} "
+                f"LLAVA_CODEC_OFFLINE_ROOT={os.environ.get('LLAVA_CODEC_OFFLINE_ROOT')} "
+                f"LLAVA_CODEC_VISIDX_MODE={os.environ.get('LLAVA_CODEC_VISIDX_MODE')} "
+                f"LLAVA_CODEC_NUM_IMAGES={os.environ.get('LLAVA_CODEC_NUM_IMAGES')} "
+                f"LLAVA_CODEC_SQUARE_SIZE={os.environ.get('LLAVA_CODEC_SQUARE_SIZE')} "
+                f"LLAVA_CODEC_PATCH_SIZE={os.environ.get('LLAVA_CODEC_PATCH_SIZE')}"
+            )
         if accelerator.num_processes > 1:
             self._device = torch.device(f"cuda:{accelerator.local_process_index}")
             self.device_map = f"cuda:{accelerator.local_process_index}"
@@ -655,13 +1062,46 @@ class Llava_OV_Encoder(lmms):
             task = task[0]
             split = split[0]
             batched_visuals = [doc_to_visual[0](self.task_dict[task][split][ids]) for ids in doc_id]  # [B, N] 如果是视频的话，里面全是路径
-            is_video = False
+            offline_patch_positions = None
+            offline_dir = None
+
             if batched_visuals and isinstance(batched_visuals[0], list) and len(batched_visuals[0]) > 0 and isinstance(batched_visuals[0][0], str):
                 is_video = True
                 cur_video = batched_visuals[0][0]
-                frames_paths = extract_frames_from_video(cur_video, '/workspace/tmp/vlm_imgs', num_frames=8)
-                flattened_visuals = [Image.open(p) for p in frames_paths]
-            
+
+                # Prefer offline assets when enabled
+                offline_visuals, offline_pos, offline_dir = _offline_load_visuals_and_positions(
+                    video_path=cur_video,
+                    device=self.device,
+                    accelerator=getattr(self, 'accelerator', None),
+                )
+
+                if offline_visuals is not None:
+                    flattened_visuals = offline_visuals
+                    offline_patch_positions = offline_pos
+                    if _should_log(getattr(self, 'accelerator', None)) or _should_log(None):
+                        _msg = (
+                            f"[generate_until] USING_OFFLINE video={cur_video} dir={offline_dir} "
+                            f"images={len(flattened_visuals)} pos_shape={(tuple(offline_patch_positions.shape) if offline_patch_positions is not None else None)} pid={os.getpid()}"
+                        )
+                        try:
+                            eval_logger.info(_msg)
+                        except Exception:
+                            pass
+                        print(_msg, file=sys.stderr, flush=True)
+                else:
+                    frames_paths = extract_frames_from_video(cur_video, '/workspace/tmp/vlm_imgs', num_frames=8)
+                    if _should_log(getattr(self, 'accelerator', None)) or _should_log(None):
+                        _msg = (
+                            f"[generate_until] USING_FRAME_EXTRACTION video={cur_video} extracted_frames={len(frames_paths)} "
+                            f"paths_sample={frames_paths[:3]} pid={os.getpid()}"
+                        )
+                        try:
+                            eval_logger.info(_msg)
+                        except Exception:
+                            pass
+                        print(_msg, file=sys.stderr, flush=True)
+                    flattened_visuals = [Image.open(p) for p in frames_paths]
             else:
                 flattened_visuals = self.flatten(batched_visuals)  # [B*N]
             # we assume all gen kwargs in the batch are the same
@@ -745,11 +1185,14 @@ class Llava_OV_Encoder(lmms):
             input_ids = self.pad_sequence(input_ids_list, batch_first=True, padding_value=pad_token_ids).to(self.device)
             attention_masks = input_ids.ne(pad_token_ids).to(self.device)
             # These steps are not in LLaVA's original code, but are necessary for generation to work
-            # TODO: attention to this major generation step...
-            if len(grid_thw) == 1:
-                patch_positions = [build_patch_positions(num_frames=1, total_frames=1, h=item[1], w=item[2]).to(self.device) for item in grid_thw]
+            # Prefer offline-provided patch positions when available.
+            if offline_patch_positions is not None:
+                patch_positions = [offline_patch_positions]
             else:
-                patch_positions = [build_patch_positions(num_frames=8, total_frames=64, h=36, w=36).to(self.device)]
+                if len(grid_thw) == 1:
+                    patch_positions = [build_patch_positions(num_frames=1, total_frames=1, h=item[1], w=item[2]).to(self.device) for item in grid_thw]
+                else:
+                    patch_positions = [build_patch_positions(num_frames=8, total_frames=64, h=36, w=36).to(self.device)]
             try:
                 cont = self.model.generate(
                     input_ids,
