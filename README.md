@@ -233,9 +233,6 @@ You can set up the environment using **one of the following two methods**:
 
 ### Option 1 (Conda + Pip)
 
-<details>
-<summary>Click to expand conda setup commands</summary>
-
 ```bash
 conda env create -f environment.yml -n ov_encoder
 pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu118
@@ -243,12 +240,7 @@ pip install --extra-index-url https://pypi.nvidia.com --upgrade nvidia-dali-cuda
 pip install -r requirements.txt
 ```
 
-</details>
-
 ### Option 2 (Docker)
-
-<details>
-<summary>Click to expand docker setup commands</summary>
 
 ```bash
 docker build -t onevision-encoder:2601 .
@@ -259,49 +251,29 @@ docker run -it --rm --gpus all --ipc host --net host --privileged \
     onevision-encoder:2601 bash
 ```
 
-</details>
-
 ### Install Package
 
 Inside the container, install the package in editable mode:
-
-<details>
-<summary>Click to expand installation command</summary>
 
 ```bash
 pip install -e .
 ```
 
-</details>
-
 ### Single Node Dry Run To Test Setup
-
-<details>
-<summary>Click to expand dry run command</summary>
 
 ```bash
 bash shells/ov_encoder_base_stage1_si_dry_run.sh
 ```
 
-</details>
-
 ### Single Node Stage-1 Single Image
-
-<details>
-<summary>Click to expand training command</summary>
 
 ```bash
 bash shells/ov_encoder_base_stage1_si.sh
 ```
 
-</details>
-
 ### Single Node Stage-2 Video Contine Pretraining
 
 Download the Stage-1 checkpoint from HuggingFace:
-
-<details>
-<summary>Click to expand checkpoint download and training commands</summary>
 
 ```bash
 git clone https://huggingface.co/lmms-lab-encoder/onevision-encoder-large-si
@@ -315,8 +287,6 @@ More documentation will be added soon.
 bash shells/ov_encoder_large_stage2_residual_8gpus.sh
 ```
 
-</details>
-
 Training configurations and hyperparameters will be documented soon. For now, please refer to `--help` for available options.
 
 ## 📊 Evaluation
@@ -326,9 +296,6 @@ Training configurations and hyperparameters will be documented soon. For now, pl
 #### Chunk-wise Sampling Evaluation
 
 To evaluate the encoder with uniform frame sampling, first navigate to the evaluation directory:
-
-<details>
-<summary>Click to expand evaluation commands</summary>
 
 ```bash
 pip install -e .
@@ -341,8 +308,6 @@ Then run the following command:
 bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 ```
 
-</details>
-
 **Sampling-Specific Parameters:**
 
 - `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
@@ -350,9 +315,6 @@ bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 #### OV-Encoder Codec Evaluation
 
 To evaluate the encoder with codec-style patch selection, first navigate to the evaluation directory:
-
-<details>
-<summary>Click to expand codec evaluation commands</summary>
 
 ```bash
 cd eval_encoder
@@ -363,8 +325,6 @@ Then run the following command:
 ```bash
 bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh
 ```
-
-</details>
 
 ## 👥 Contributors
 
