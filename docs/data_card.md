@@ -39,7 +39,7 @@ For image data, we primarily process LAION-400M and COYO-700M with the following
 
 **Deduplication:** We employ a Union-Find algorithm to strictly deduplicate the dataset.
 
-**Clustering and Multi-label Annotation:** We utilize the metaclip-h14-fullcc2.5b model to extract image features and cluster all images into two million classes. Based on this clustering, each image sample is annotated with the nearest Top-10 class centers as its multi-label supervision signal.
+**Clustering and Multi-label Annotation:** We utilize the metaclip-h14-fullcc2.5b model to extract image features and cluster all images into 2 million classes. Based on this clustering, each image sample is annotated with the nearest Top-10 class centers as its multi-label supervision signal.
 
 **OCR-based Fine-grained Tagging:** Furthermore, we incorporate the OBELICS and Zero250M datasets. We utilize PaddleOCR to recognize text within images and perform word segmentation on the recognized content; the resulting vocabulary is used as multi-labels to construct a supervision signal containing exactly 100 fine-grained tags per image.
 
