@@ -467,6 +467,10 @@ def _worker_one(task):
             if bool(first_full) and i == 0:
                 # put full t=0 frame
                 canvas[:] = frames_sq[0]
+                # Also record the positions for all patches of t=0 frame
+                for hh in range(hb):
+                    for ww in range(wb):
+                        pos_out.append([0, int(hh), int(ww)])
             else:
                 if layout == "spatial":
                     # place patches back to their (h,w)

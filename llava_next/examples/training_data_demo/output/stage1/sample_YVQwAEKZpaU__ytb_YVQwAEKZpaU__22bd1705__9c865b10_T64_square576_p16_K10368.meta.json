@@ -1,0 +1,43 @@
+{
+  "sample_id": "YVQwAEKZpaU",
+  "sample_key": "videos/ytb_YVQwAEKZpaU.mp4|YVQwAEKZpaU|0",
+  "video": "videos/ytb_YVQwAEKZpaU.mp4",
+  "T": 64,
+  "frame_ids": null,
+  "preprocess": "square576",
+  "square_size": 576,
+  "patch": 16,
+  "keep_frames_equiv": 8,
+  "padding_policy": "zero",
+  "keep_uniform_first": false,
+  "keep_first_full_frame": true,
+  "H0": 640,
+  "W0": 360,
+  "pad_info": {
+    "scale": 0.9,
+    "Hn": 576,
+    "Wn": 324,
+    "pad_top": 0,
+    "pad_left": 126,
+    "pad_bottom": 0,
+    "pad_right": 126,
+    "out_size": 576,
+    "H0": 640,
+    "W0": 360
+  },
+  "hb": 36,
+  "wb": 36,
+  "S_total": 1296,
+  "S_valid": 720,
+  "K": 10368,
+  "padding_patch_filtered": 576,
+  "valid_ranges": {
+    "S_valid": 720,
+    "hb_total": 36,
+    "wb_total": 36,
+    "valid_h_start": 0,
+    "valid_h_end": 36,
+    "valid_w_start": 8,
+    "valid_w_end": 28
+  }
+}

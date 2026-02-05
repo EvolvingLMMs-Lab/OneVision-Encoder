@@ -239,20 +239,12 @@ def _candidate_offline_dirs(video_path: str) -> List[str]:
     vid = _normalize_video_id(video_path)
     # Common layouts:
     # 1) {root}/{vid}/...
-    # 2) {root}/.../{vid}/... (nested)
-    # 3) {root}/{vid}.* (flat)
+    # 2) {root}/{vid}.* (flat)
     cand = []
     cand.append(os.path.join(root, vid))
     cand.append(root)  # allow flat layout
 
-    # Add nested hits (keep it bounded)
-    try:
-        nested = glob.glob(os.path.join(root, "**", vid), recursive=True)
-        cand.extend(nested[:20])
-    except Exception:
-        pass
-
-    # Fallback: consult meta.json index (handles layouts like {root}/<key>/...)
+    # Use meta.json index for lookup (fast O(1) after initial build)
     try:
         idx_dir = _offline_dir_from_index(root, video_path, accelerator=None)
         if idx_dir:
@@ -388,7 +380,6 @@ def _offline_load_visuals_and_positions(
 
     root = _offline_root()
     max_images = int(os.environ.get("LLAVA_CODEC_NUM_IMAGES", "8"))
-
     cand_dirs = _candidate_offline_dirs(video_path)
     if _should_log(accelerator):
         _msg = f"[codec][offline] USE_OFFLINE=1 root={root} video={video_path} candidates={cand_dirs[:5]} (total={len(cand_dirs)})"
@@ -462,9 +453,9 @@ def extract_frames_from_video(video_path, output_dir, num_frames=8, use_alternat
             except Exception:
                 pass
             print(_msg, file=sys.stderr, flush=True)
-        # 创建输出目录
+        # Create output directory
         os.makedirs(output_dir, exist_ok=True)
-        # 获取视频文件名（不含扩展名）
+        # Get video filename (without extension)
         video_name = Path(video_path).stem
         saved_frames = []
         if use_alternative_method:
@@ -595,16 +586,16 @@ def _extract_frames_robust_method(video_path, output_dir, video_name, num_frames
             # Base command for handling NAL unit errors
             base_cmd = [
                 'ffmpeg',
-                '-v', 'error',  # 只显示错误信息
-                '-err_detect', 'ignore_err',  # 忽略错误
-                '-fflags', '+genpts+igndts',  # 生成时间戳，忽略DTS错误
-                '-ignore_unknown',  # 忽略未知流
+                '-v', 'error',  # Show only errors
+                '-err_detect', 'ignore_err',  # Ignore errors
+                '-fflags', '+genpts+igndts',  # Generate timestamps, ignore DTS errors
+                '-ignore_unknown',  # Ignore unknown streams
                 '-i', video_path,
-                '-avoid_negative_ts', 'make_zero',  # 避免负时间戳
+                '-avoid_negative_ts', 'make_zero',  # Avoid negative timestamps
                 '-vf', f'select=not(mod(n\\,{max(1, 100//num_frames)})),scale=640:480',
                 '-vsync', 'vfr',
                 '-frames:v', str(num_frames),
-                '-q:v', '3',  # 稍微降低质量以提高稳定性
+                '-q:v', '3',  # Slightly lower quality for stability
                 '-y',
                 temp_pattern
             ]
@@ -679,7 +670,7 @@ def _extract_frames_robust_method(video_path, output_dir, video_name, num_frames
                 '-v', 'error',
                 '-err_detect', 'ignore_err',
                 '-fflags', '+genpts+igndts+discardcorrupt',
-                '-skip_frame', 'nokey',  # 只处理关键帧
+                '-skip_frame', 'nokey',  # Process keyframes only
                 '-i', video_path,
                 '-vf', 'scale=640:480',
                 '-frames:v', str(num_frames),
@@ -1061,7 +1052,7 @@ class Llava_OV_Encoder(lmms):
             contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*chunk)
             task = task[0]
             split = split[0]
-            batched_visuals = [doc_to_visual[0](self.task_dict[task][split][ids]) for ids in doc_id]  # [B, N] 如果是视频的话，里面全是路径
+            batched_visuals = [doc_to_visual[0](self.task_dict[task][split][ids]) for ids in doc_id]  # [B, N] For video, contains paths
             offline_patch_positions = None
             offline_dir = None
 
@@ -1075,8 +1066,8 @@ class Llava_OV_Encoder(lmms):
                     device=self.device,
                     accelerator=getattr(self, 'accelerator', None),
                 )
-
                 if offline_visuals is not None:
+                    print('Using offline visuals for video: ', cur_video)
                     flattened_visuals = offline_visuals
                     offline_patch_positions = offline_pos
                     if _should_log(getattr(self, 'accelerator', None)) or _should_log(None):
@@ -1126,7 +1117,6 @@ class Llava_OV_Encoder(lmms):
             # encode, pad, and truncate contexts for this batch
             grid_thw = None
             if flattened_visuals:
-                # assert 1==3, f'flattened_visuals len: {len(flattened_visuals)}\n shapes: {flattened_visuals.size}'
                 image_tensor = process_images(flattened_visuals, self._image_processor, self._config)
                 
                 if type(image_tensor) is list:
@@ -1151,7 +1141,7 @@ class Llava_OV_Encoder(lmms):
                     2. image token is already specified in the context, so we don't need to add it.
                     3. image token is not specified in the context and there is image inputs, so we need to add it. In this case, we add the image token at the beginning of the context and add a new line.
                     """
-                    image_tokens = [DEFAULT_IMAGE_TOKEN] * len(visual) if isinstance(visual, list) else [DEFAULT_IMAGE_TOKEN]
+                    image_tokens = [DEFAULT_IMAGE_TOKEN] * len(image_tensor) if isinstance(image_tensor, list) else [DEFAULT_IMAGE_TOKEN]
                     image_tokens = "\n".join(image_tokens)
                     question = image_tokens + "\n" + context
                 else:
