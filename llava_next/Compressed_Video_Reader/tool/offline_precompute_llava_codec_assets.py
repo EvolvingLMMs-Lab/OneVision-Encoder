@@ -734,6 +734,11 @@ def _compute_visible_indices_pack_topk_time_spatial(
         elif thw.shape[0] > target:
             thw = thw[:target]
 
+        # Sort thw by T -> H -> W to ensure consistent ordering
+        # This matches training data format and enables proper positional encoding
+        sorted_indices = np.lexsort((thw[:, 2], thw[:, 1], thw[:, 0]))
+        thw = thw[sorted_indices]
+
         thw64 = thw.astype(np.int64)
         visible_indices = thw64[:, 0] * int(S_total) + thw64[:, 1] * int(wb) + thw64[:, 2]
         visible_indices = visible_indices.astype(np.int64)

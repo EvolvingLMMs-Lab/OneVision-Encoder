@@ -370,6 +370,7 @@ autogen/
 .openapi/
 openapi_generated/
 swagger_generated/
+.huggingface_cache/
 
 ########################################
 # Distributed / cluster training logs
@@ -507,3 +508,11 @@ ckpts
 .gitginore
 
 _codeql*
+
+# ===========================================
+# Allow example training data demo files
+# ===========================================
+!llava_next/examples/training_data_demo/output/
+!llava_next/examples/training_data_demo/output/**
+!llava_next/examples/training_data_demo/videos/
+!llava_next/examples/training_data_demo/videos/*.mp4

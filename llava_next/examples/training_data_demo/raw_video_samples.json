@@ -1,0 +1,96 @@
+[
+  {
+    "id": "YVQwAEKZpaU",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<video>\nWhat is the background setting of the diving performances in the video?\nA. A forest with tall trees\nB. A clear blue sky, a building, and several white tents with spectators\nC. A stadium with a large crowd\nD. A beach with palm trees\nPlease respond with only the letter of the correct answer."
+      },
+      {
+        "from": "gpt",
+        "value": "B."
+      },
+      {
+        "from": "human",
+        "value": "What event is being showcased in the video?\nA. An Olympic Games diving event\nB. A local swimming competition\nC. A recreational pool party\nD. A high school diving meet\nPlease respond with only the letter of the correct answer."
+      },
+      {
+        "from": "gpt",
+        "value": "A."
+      },
+      {
+        "from": "human",
+        "value": "What acrobatic skills do the divers demonstrate in the video?\nA. Flips and twists\nB. Swimming laps\nC. Dancing on the diving board\nD. Running and jumping\nPlease provide your answer by stating the letter followed by the full option."
+      },
+      {
+        "from": "gpt",
+        "value": "A. Flips and twists."
+      },
+      {
+        "from": "human",
+        "value": "Where is the Olympic Games logo displayed in the video?\nA. In the top right corner\nB. In the bottom left corner\nC. In the center of the screen\nD. In the top left corner\nPlease provide your answer by stating the letter followed by the full option."
+      },
+      {
+        "from": "gpt",
+        "value": "A. In the top right corner."
+      },
+      {
+        "from": "human",
+        "value": "How does the video sequence reset after each dive?\nA. The person is back on the diving board, ready to perform another dive\nB. The scene changes to a different location\nC. The video ends\nD. The camera focuses on the audience\nPlease provide your answer by stating the letter followed by the full option."
+      },
+      {
+        "from": "gpt",
+        "value": "A. The person is back on the diving board, ready to perform another dive."
+      }
+    ],
+    "data_source": "0_30_s_youtube_v0_1",
+    "video": "videos/ytb_YVQwAEKZpaU.mp4"
+  },
+  {
+    "id": "XwB-dkS5BVM",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<video>\nWhere does the video take place?\nA. On a beach\nB. On a mountain\nC. In a city park\nD. In a forest\nPlease provide your answer by stating the letter followed by the full option."
+      },
+      {
+        "from": "gpt",
+        "value": "A. On a beach."
+      },
+      {
+        "from": "human",
+        "value": "What is the person wearing who is holding the large black puzzle piece?\nA. A floral dress\nB. A blue jacket and jeans\nC. A striped short-sleeve shirt and white pants\nD. A red t-shirt and shorts\nPlease respond with only the letter of the correct answer."
+      },
+      {
+        "from": "gpt",
+        "value": "C."
+      },
+      {
+        "from": "human",
+        "value": "What does the first person do after placing the puzzle piece on the ground?\nA. Sits down and starts arranging puzzle pieces\nB. Walks away\nC. Takes a nap\nD. Picks up some sand and pours it over the puzzle piece\nPlease provide your answer by stating the letter followed by the full option."
+      },
+      {
+        "from": "gpt",
+        "value": "D. Picks up some sand and pours it over the puzzle piece."
+      },
+      {
+        "from": "human",
+        "value": "What elements enhance the tranquil atmosphere in the video?\nA. The sound of traffic and people talking\nB. The calm sea, beautiful sunset, and seagulls flying\nC. A bustling market scene\nD. Loud music and bright lights\nPlease respond with only the letter of the correct answer."
+      },
+      {
+        "from": "gpt",
+        "value": "B."
+      },
+      {
+        "from": "human",
+        "value": "What text appears in the top left corner of the frames, likely indicating the creator or contributor of the video?\nA. @PUZZLEMASTER\nB. @SUNSETVIEWS\nC. @BEACHLOVER\nD. @KYLENUTT\nPlease provide your answer by stating the letter followed by the full option."
+      },
+      {
+        "from": "gpt",
+        "value": "D. @KYLENUTT."
+      }
+    ],
+    "data_source": "0_30_s_youtube_v0_1",
+    "video": "videos/ytb_XwB-dkS5BVM.mp4"
+  }
+]

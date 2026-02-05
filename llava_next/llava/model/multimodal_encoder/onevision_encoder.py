@@ -91,6 +91,10 @@ class OneVisionEncoderTower(nn.Module):
             patch_positions = None
         else:
             patch_positions = patch_positions[0]
+            if patch_positions.dim() == 2:
+                patch_positions = patch_positions.unsqueeze(0).to(device=self.device, dtype=torch.long)
+            else:
+                patch_positions = patch_positions.to(device=self.device, dtype=torch.long)
         if isinstance(images, list):
             image_features = []
             for image in images:
