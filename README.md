@@ -132,6 +132,9 @@ We train the model on a mixed dataset comprising 740K samples from LLaVA-OneVisi
 
 ### Using AutoModel (Recommended: transformers==4.57.3)
 
+<details>
+<summary>Click to expand code example</summary>
+
 ```python
 from transformers import AutoModel, AutoImageProcessor
 from PIL import Image
@@ -189,7 +192,12 @@ with torch.no_grad():
     outputs = model(video, patch_positions=patch_positions)
 ```
 
+</details>
+
 ### Loading from Source Code  
+
+<details>
+<summary>Click to expand installation and usage code</summary>
 
 ```bash
 git clone https://github.com/EvolvingLMMs-Lab/OneVision-Encoder.git
@@ -210,6 +218,8 @@ preprocessor = AutoImageProcessor.from_pretrained(
     trust_remote_code=True
 )
 ```
+
+</details>
 
 ### Codec Input
 
