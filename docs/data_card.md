@@ -5,15 +5,37 @@
 
 ## Overview
 
-This document describes the datasets used for training OneVision Encoder. The training data consists of both image and video datasets.
+This document describes the datasets used for training OneVision Encoder. The pretraining corpus combines large-scale image and video datasets for unified visual representation learning. Image datasets primarily provide broad visual coverage, while video datasets support temporal modeling and video-language alignment.
 
-## Dataset Summary
+## OneVision-Encoder Pretraining Dataset
+
+The table below shows the pretraining dataset composition. We use "ExoVideo" to denote large-scale third-person web videos, and "ActionVideo" to denote curated action recognition datasets.
+
+| Source | Samples | Type | Modality | Temporal | Curation |
+|--------|---------|------|----------|----------|----------|
+| **LAION-400M** | 250M | WebImages | Image | -- | Yes |
+| **COYO-700M** | 400M | WebImages | Image | -- | Yes |
+| **OBELICS** | 15M | Documents | Image | -- | Yes |
+| **Zero250M** | 15M | CuratedImages | Image | -- | Yes |
+| **ImageNet-21K** | 14M | Images | Image | -- | Yes |
+| **HowTo100M** | 50M | ExoVideo | Video | Short | No |
+| **Panda-70M** | 50M | ExoVideo | Video | Long | Yes |
+| **Kinetics-710** | 658K | ActionVideo | Video | Short | Yes |
+| **SSV2** | 221K | ActionVideo | Video | Short | Yes |
+
+### Dataset Summary
 
 | Category | Total Samples |
 |----------|---------------|
 | **Image** | ~694M |
 | **Video** | ~100M+ |
 | **Total** | ~794M+ |
+
+---
+
+## Image Data Annotation
+
+**Image Data Annotation.** For image data, we primarily process LAION-400M and COYO-700M. First, we employ a Union-Find algorithm to strictly deduplicate the dataset. Subsequently, we utilize the metaclip-h14-fullcc2.5b model to extract image features and cluster all images into two million classes. Based on this clustering, each image sample is annotated with the nearest Top-10 class centers as its multi-label supervision signal. Furthermore, we incorporate the OBELICS and Zero250M datasets. We utilize PaddleOCR to recognize text within images and perform word segmentation on the recognized content; the resulting vocabulary is used as multi-labels to construct a supervision signal containing exactly 100 fine-grained tags per image.
 
 ---
 
