@@ -194,7 +194,7 @@ with torch.no_grad():
 
 </details>
 
-### Loading from Source Code  
+### Loading from Source Code
 
 <details>
 <summary>Click to expand installation and usage code</summary>
@@ -274,17 +274,6 @@ pip install -e .
 
 </details>
 
-### Single Node Dry Run To Test Setup
-
-<details>
-<summary>Click to expand dry run command</summary>
-
-```bash
-bash shells/ov_encoder_base_stage1_si_dry_run.sh
-```
-
-</details>
-
 ### Single Node Stage-1 Single Image
 
 <details>
@@ -329,6 +318,8 @@ To evaluate the OneVision Encoder as a vision backbone for LLaVA-NeXT multimodal
 
 Navigate to the llava_next directory and follow the setup instructions:
 
+For more details, refer to the [LLaVA-NeXT documentation](llava_next/README.md).
+
 <details>
 <summary>Click to expand LLaVA-NeXT evaluation setup</summary>
 
@@ -345,7 +336,9 @@ docker run -it --gpus all --ipc host --net host --privileged \
 
 </details>
 
-#### Running Evaluation
+#### LLaVA-NeXT-Video Evaluation
+
+
 
 For image benchmarks (ChartQA, DocVQA, AI2D, OCRBench, etc.):
 
@@ -374,7 +367,7 @@ TASKS="videomme" bash scripts/eval/eval_ov_encoder.sh
 
 </details>
 
-For more details, refer to the [LLaVA-NeXT documentation](llava_next/README.md).
+
 
 ### Attentive Probe Evaluation
 
@@ -398,9 +391,6 @@ bash shells_eval_ap/eval_ov_encoder_large_16frames.sh
 
 </details>
 
-**Sampling-Specific Parameters:**
-
-- `frames_token_num`: Number of tokens per frame (e.g., 256 tokens for standard sampling).
 
 #### OV-Encoder Codec Evaluation
 
@@ -426,11 +416,6 @@ bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh
 <!-- Add contributor list here -->
 
 ---
-
-## 📄 License
-
-This project is released under the Apache 2.0 License.
-
 
 
 ## 🔗 Related Projects
