@@ -29,6 +29,7 @@
 ## 📖 Table of Contents
 
 - [Introduction](#-introduction)
+- [Codec Style Patch Selection](#-codec-style-patch-selection)
 - [Setup](#-setup)
 - [Quick Start](#-quick-start)
 - [Training](#-training)
@@ -100,6 +101,53 @@ Standard contrastive learning methods (e.g., CLIP) are fundamentally constrained
     <img alt="Training Loss Visualization" src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/loss_github_light.gif" width="800" style="max-width: 100%;">
   </picture>
 </p>
+
+---
+
+## 🎯 Codec Style Patch Selection
+
+OneVision Encoder implements a codec-inspired patch selection mechanism that intelligently identifies and processes only the most informative patches from video frames. This approach is inspired by HEVC (High-Efficiency Video Coding) and enables efficient video understanding by focusing computation on temporally salient regions.
+
+### Implementation in `llava_next`
+
+The codec style patch selection is implemented across several key components in the [`llava_next`](llava_next) directory:
+
+#### 1. **Patch Selection Pipeline** ([`Compressed_Video_Reader/tool/`](llava_next/Compressed_Video_Reader/tool/))
+
+- **Stage 1** ([`stage1.py`](llava_next/Compressed_Video_Reader/tool/stage1.py)): Extracts codec information from videos
+  - Computes fused Motion Vector (MV) and Residual energy per frame
+  - Performs global top-k selection over temporal-spatial patches
+  - Outputs `visidx_thw.npy` containing selected patch indices
+
+- **Stage 2** ([`stage2.py`](llava_next/Compressed_Video_Reader/tool/stage2.py)): Packs selected patches into training format
+  - Generates mosaic images from selected patches
+  - Creates `positions_thw.npy` files with [t, h, w] coordinates for each patch
+
+#### 2. **Training Integration** ([`llava/train/train.py`](llava_next/llava/train/train.py))
+
+The training pipeline loads codec patch positions (lines 1267-1268):
+```python
+if "positions_thw" in sources[0]:
+    patch_positions = torch.tensor(np.load(sources[0]["positions_thw"])).unsqueeze(0)
+```
+
+#### 3. **Model Architecture** ([`llava/model/llava_arch.py`](llava_next/llava/model/llava_arch.py))
+
+The model passes patch positions to the vision encoder (line 199):
+```python
+def encode_images(self, images, grid_thw=None, patch_positions=None):
+    ...
+    image_features = vision_tower(images, patch_positions=patch_positions)
+```
+
+### How It Works
+
+1. **Temporal Saliency Detection**: Analyzes all frames to identify regions with motion, appearance variations, and semantic changes
+2. **Selective Patch Extraction**: Extracts only salient patches in a zigzag order, achieving 75-98% compression
+3. **3D Position Encoding**: Uses [t, h, w] coordinates to maintain spatiotemporal relationships
+4. **Efficient Processing**: Processes many frames sparsely instead of few frames densely
+
+For detailed usage instructions, see the [LLaVA-Next README](llava_next/README.md).
 
 ---
 
