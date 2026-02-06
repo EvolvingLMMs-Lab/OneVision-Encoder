@@ -321,6 +321,61 @@ Training configurations and hyperparameters will be documented soon. For now, pl
 
 ## 📊 Evaluation
 
+### LLaVA-NeXT Evaluation
+
+To evaluate the OneVision Encoder as a vision backbone for LLaVA-NeXT multimodal models, we use the lmms-eval framework with various vision-language benchmarks.
+
+#### Setup
+
+Navigate to the llava_next directory and follow the setup instructions:
+
+<details>
+<summary>Click to expand LLaVA-NeXT evaluation setup</summary>
+
+```bash
+cd llava_next
+
+# Using Docker (recommended)
+docker build -t ov_encoder_llava:26.01 .
+docker run -it --gpus all --ipc host --net host --privileged \
+    -v "$(pwd)":/workspace/OV-Encoder-Llava \
+    -w /workspace/OV-Encoder-Llava \
+    ov_encoder_llava:26.01 bash
+```
+
+</details>
+
+#### Running Evaluation
+
+For image benchmarks (ChartQA, DocVQA, AI2D, OCRBench, etc.):
+
+<details>
+<summary>Click to expand evaluation commands</summary>
+
+```bash
+# Evaluate on image benchmarks
+TASKS="ai2d,chartqa,docvqa_val" bash scripts/eval/eval_ov_encoder.sh
+```
+
+</details>
+
+For video benchmarks (VideoMME, MVBench, PerceptionTest, etc.), run each benchmark separately:
+
+<details>
+<summary>Click to expand video evaluation commands</summary>
+
+```bash
+# Preprocess video benchmark (one-time setup)
+bash scripts/precompute_codec_patch/preprocess_video_benchmark.sh videomme
+
+# Run evaluation
+TASKS="videomme" bash scripts/eval/eval_ov_encoder.sh
+```
+
+</details>
+
+For more details, refer to the [LLaVA-NeXT documentation](llava_next/README.md).
+
 ### Attentive Probe Evaluation
 
 #### Chunk-wise Sampling Evaluation
