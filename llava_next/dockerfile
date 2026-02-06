@@ -1,0 +1,178 @@
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+
+# Avoid interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ============================================================
+# 1. Install system dependencies (FFmpeg build + OpenCV + common tools)
+# ============================================================
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        wget \
+        git \
+        curl \
+        # FFmpeg build dependencies
+        libass-dev \
+        libfreetype6-dev \
+        libsdl2-dev \
+        libtool \
+        libva-dev \
+        libvdpau-dev \
+        libvorbis-dev \
+        libxcb1-dev \
+        libxcb-shm0-dev \
+        libxcb-xfixes0-dev \
+        texinfo \
+        zlib1g-dev \
+        nasm \
+        yasm \
+        libx264-dev \
+        libx265-dev \
+        libnuma-dev \
+        libvpx-dev \
+        libmp3lame-dev \
+        libopus-dev \
+        # OpenCV / GUI related
+        libgl1 \
+        libglib2.0-0 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+        # Development tools
+        vim \
+        # SSH for multi-node distributed training
+        openssh-client \
+        openssh-server \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# ============================================================
+# 1.5. Configure SSH for passwordless multi-node communication
+# ============================================================
+RUN mkdir -p /var/run/sshd && \
+    mkdir -p /root/.ssh && \
+    chmod 700 /root/.ssh && \
+    echo "StrictHostKeyChecking no" >> /etc/ssh/ssh_config && \
+    echo "UserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config
+
+# ============================================================
+# 2. Install FFmpeg development libraries (for PyAV build)
+# ============================================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
+    libavdevice-dev \
+    ffmpeg \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# ============================================================
+# 3. Install Compressed_Video_Reader (data preprocessing)
+# ============================================================
+WORKDIR /workspace
+COPY . .
+
+WORKDIR /workspace/Compressed_Video_Reader
+
+# cv_reader CLI imports cv2, install headless version suitable for containers
+RUN pip install --no-cache-dir opencv-python-headless numpy pkgconfig
+
+# Execute install.sh to install ffmpeg / cv_reader etc
+RUN bash install.sh
+
+# Verify cv_reader installation
+RUN cv_reader -h
+
+# ============================================================
+# 4. Install LLaVA training/inference dependencies (based on llava_xy environment)
+# ============================================================
+WORKDIR /workspace
+
+# Video processing (install first as it depends on FFmpeg)
+RUN pip install --no-cache-dir av
+
+# decord installation (try multiple methods)
+RUN pip install --no-cache-dir decord || \
+    pip install --no-cache-dir eva-decord || \
+    echo "Warning: decord installation failed, will use av instead"
+
+# Core deep learning libraries (PyTorch already in base image)
+RUN pip install --no-cache-dir \
+    accelerate==1.7.0 \
+    transformers==4.57.3 \
+    tokenizers==0.22.1 \
+    peft==0.15.2 \
+    deepspeed==0.16.3 \
+    flash_attn==2.7.4.post1 \
+    xformers==0.0.29.post2 \
+    timm==1.0.15 \
+    einops==0.8.1
+
+# Huggingface related
+RUN pip install --no-cache-dir \
+    datasets==2.16.1 \
+    huggingface-hub==0.36.0 \
+    safetensors==0.5.3 \
+    hf_transfer==0.1.9
+
+# Training tools
+RUN pip install --no-cache-dir \
+    wandb==0.20.1 \
+    tensorboard==2.19.0 \
+    trl==0.18.1 \
+    tyro==0.9.24
+
+# Web/API related
+RUN pip install --no-cache-dir \
+    fastapi==0.115.12 \
+    uvicorn==0.34.3 \
+    httpx==0.23.3 \
+    requests==2.32.4
+
+# Evaluation related
+RUN pip install --no-cache-dir \
+    evaluate==0.4.4 \
+    pycocoevalcap==1.2 \
+    pycocotools==2.0.10 \
+    sacrebleu==2.5.1 \
+    rouge_score==0.1.2
+
+# Other common tools
+RUN pip install --no-cache-dir \
+    pillow==11.2.1 \
+    scipy==1.15.3 \
+    scikit-learn==1.7.0 \
+    sentencepiece==0.1.99 \
+    tiktoken==0.9.0 \
+    ftfy==6.3.1 \
+    regex==2024.11.6 \
+    pydantic==2.11.7 \
+    rich==14.0.0 \
+    tqdm==4.67.1
+
+# Qwen-VL related
+RUN pip install --no-cache-dir \
+    qwen-vl-utils==0.0.11
+
+# Install llava_next project itself (if setup.py or pyproject.toml exists)
+RUN pip install --no-cache-dir -e . || true
+
+# ============================================================
+# 5. Install lmms-eval (evaluation framework)
+# ============================================================
+WORKDIR /workspace/lmms-eval
+RUN pip install --no-cache-dir -e .
+
+# ============================================================
+# 6. Set environment variables and working directory
+# ============================================================
+WORKDIR /workspace
+
+ENV PYTHONPATH="/workspace:/workspace/Compressed_Video_Reader"
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+
+CMD ["bash"]

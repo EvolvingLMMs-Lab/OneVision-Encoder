@@ -1,0 +1,47 @@
+# Exclude model checkpoints (very large)
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+
+# Exclude Git related
+.git/
+.gitignore
+
+# Exclude Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+.eggs/
+
+# Exclude editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Exclude logs and temporary files
+*.log
+logs/
+wandb/
+runs/
+outputs/
+temp/
+tmp/
+
+# Exclude test data (if large)
+Compressed_Video_Reader/test_data/
+
+# Exclude build artifacts (FFmpeg will be recompiled inside the image)
+Compressed_Video_Reader/ffmpeg/ffmpeg_source/
