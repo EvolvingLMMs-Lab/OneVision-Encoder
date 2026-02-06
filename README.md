@@ -115,6 +115,55 @@ We train the model on a mixed dataset comprising 740K samples from LLaVA-OneVisi
   </picture>
 </p>
 
+#### Reproducing LMM Probe Results
+
+> [!NOTE]
+> **To reproduce these results, use the `llava_next` folder contents.**
+
+<details>
+<summary>Click to expand reproduction instructions</summary>
+
+1. **Navigate to the LLaVA-NeXT directory:**
+   ```bash
+   cd llava_next
+   ```
+
+2. **Setup the environment:**
+   ```bash
+   # Using Docker (recommended)
+   docker build -t ov_encoder_llava:26.01 .
+   docker run -it --gpus all --ipc host --net host --privileged \
+       -v "$(pwd)":/workspace/OV-Encoder-Llava \
+       -w /workspace/OV-Encoder-Llava \
+       ov_encoder_llava:26.01 bash
+   ```
+
+3. **Prepare training data:**
+   - Follow the [training data preparation guide](llava_next/README.md#training-data-preparation) to convert your video data to codec format
+   - The training dataset should include:
+     - 740K samples from LLaVA-OneVision
+     - 800K samples from LLaVA-Video SFT
+
+4. **Run Stage-2 fine-tuning:**
+   ```bash
+   # Configure the training script with your data paths
+   bash scripts/sft_ov_encoder.sh
+   ```
+
+5. **Evaluate the model:**
+   ```bash
+   # For video benchmarks
+   bash scripts/precompute_codec_patch/preprocess_video_benchmark.sh videomme
+   TASKS="videomme" bash scripts/eval/eval_ov_encoder.sh
+   
+   # For image benchmarks
+   TASKS="ai2d,chartqa,docvqa_val" bash scripts/eval/eval_ov_encoder.sh
+   ```
+
+For detailed documentation on training data format, evaluation setup, and troubleshooting, refer to the [LLaVA-NeXT README](llava_next/README.md).
+
+</details>
+
 ## ⚡ Quick Start
 
 > [!IMPORTANT]
