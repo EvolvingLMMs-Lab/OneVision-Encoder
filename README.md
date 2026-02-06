@@ -33,6 +33,7 @@
 - [Quick Start](#-quick-start)
 - [Training](#-training)
 - [Evaluation](#-evaluation)
+- [Codec Style Patch Selection](#-codec-style-patch-selection)
 - [Contributors](#-contributors)
 - [License](#-license)
 - [Documentation](#-documentation)
@@ -459,6 +460,22 @@ bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh
 ```
 
 </details>
+
+---
+
+## 🎬 Codec Style Patch Selection
+
+The codec-inspired patch selection mechanism identifies and processes only the most informative patches from video frames, inspired by HEVC video coding.
+
+**Implementation in [`llava_next`](llava_next):**
+
+- **Pipeline**: [`Compressed_Video_Reader/tool/`](llava_next/Compressed_Video_Reader/tool/) - Stage 1 extracts codec info (MV/Residual energy), Stage 2 packs patches with position coordinates
+- **Training**: [`llava/train/train.py`](llava_next/llava/train/train.py) - Loads `positions_thw.npy` patch positions
+- **Model**: [`llava/model/llava_arch.py`](llava_next/llava/model/llava_arch.py) - Passes positions to vision encoder
+
+For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
+
+---
 
 ## 👥 Contributors
 
