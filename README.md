@@ -104,7 +104,7 @@ Standard contrastive learning methods (e.g., CLIP) are fundamentally constrained
 
 ---
 
-## 🎯 Codec Style Patch Selection
+## 🎬 Codec Style Patch Selection
 
 OneVision Encoder implements a codec-inspired patch selection mechanism that intelligently identifies and processes only the most informative patches from video frames. This approach is inspired by HEVC (High-Efficiency Video Coding) and enables efficient video understanding by focusing computation on temporally salient regions.
 
@@ -112,7 +112,9 @@ OneVision Encoder implements a codec-inspired patch selection mechanism that int
 
 The codec style patch selection is implemented across several key components in the [`llava_next`](llava_next) directory:
 
-#### 1. **Patch Selection Pipeline** ([`Compressed_Video_Reader/tool/`](llava_next/Compressed_Video_Reader/tool/))
+### 1. Patch Selection Pipeline
+
+Location: [`Compressed_Video_Reader/tool/`](llava_next/Compressed_Video_Reader/tool/)
 
 - **Stage 1** ([`stage1.py`](llava_next/Compressed_Video_Reader/tool/stage1.py)): Extracts codec information from videos
   - Computes fused Motion Vector (MV) and Residual energy per frame
@@ -123,7 +125,9 @@ The codec style patch selection is implemented across several key components in 
   - Generates mosaic images from selected patches
   - Creates `positions_thw.npy` files with [t, h, w] coordinates for each patch
 
-#### 2. **Training Integration** ([`llava/train/train.py`](llava_next/llava/train/train.py))
+### 2. Training Integration
+
+Location: [`llava/train/train.py`](llava_next/llava/train/train.py)
 
 The training pipeline loads codec patch positions (lines 1267-1268):
 ```python
@@ -131,7 +135,9 @@ if "positions_thw" in sources[0]:
     patch_positions = torch.tensor(np.load(sources[0]["positions_thw"])).unsqueeze(0)
 ```
 
-#### 3. **Model Architecture** ([`llava/model/llava_arch.py`](llava_next/llava/model/llava_arch.py))
+### 3. Model Architecture
+
+Location: [`llava/model/llava_arch.py`](llava_next/llava/model/llava_arch.py)
 
 The model passes patch positions to the vision encoder (line 199):
 ```python
