@@ -376,12 +376,7 @@ bash shells_eval_ap/eval_ov_encoder_large_2kpatches_codec.sh
 
 This project is released under the Apache 2.0 License.
 
----
 
-## 📚 Documentation
-
-- [Model Card](docs/model_card.md) - Detailed documentation for OneVision Encoder Large model
-- [Data Card](docs/datacard.md) - Training dataset information and statistics
 
 ## 🔗 Related Projects
 
