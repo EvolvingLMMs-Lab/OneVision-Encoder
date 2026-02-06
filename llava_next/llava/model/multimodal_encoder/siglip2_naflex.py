@@ -1,24 +1,37 @@
-from typing import Optional, Tuple, Union, List, Callable
+"""
+# Adapted from https://huggingface.co/MILVLG/imp-v1-3b/blob/main/vision_encoder.py
+"""
+
+from typing import Optional, Tuple, Union, Dict, List, Callable
+from collections import defaultdict
+from transformers.utils import TensorType, logging
+
 from dataclasses import dataclass
 from functools import lru_cache
-
-import math
-import os
-
-import numpy as np
+from functools import partial, reduce
+from PIL import Image
 import torch
-import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
-
-from transformers import PretrainedConfig
-from transformers.activations import ACT2FN
-from transformers.image_processing_utils import BatchFeature, BaseImageProcessor
+import numpy as np
+import math
+import os
+from transformers.image_processing_utils import BatchFeature, get_size_dict, BaseImageProcessor
 from transformers.image_transforms import (
     convert_to_rgb,
+    normalize,
+    rescale,
     resize,
     to_channel_dimension_format,
 )
+import torch.nn.functional as F
+from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
+from transformers.activations import ACT2FN
+from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
+from transformers.modeling_utils import PreTrainedModel, ALL_ATTENTION_FUNCTIONS
+from transformers import PretrainedConfig
+from transformers.utils import ModelOutput
+from llava.utils import rank0_print
 from transformers.image_utils import (
     ChannelDimension,
     ImageInput,
@@ -30,14 +43,9 @@ from transformers.image_utils import (
     valid_images,
     validate_preprocess_arguments,
 )
-from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
-from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
-from transformers.modeling_utils import PreTrainedModel, ALL_ATTENTION_FUNCTIONS
-from transformers.utils import TensorType, logging, ModelOutput
-
-from llava.utils import rank0_print
 
 logger = logging.get_logger(__name__)
+
 
 @lru_cache(maxsize=256)
 def get_image_size_for_max_num_patches(
@@ -114,8 +122,10 @@ def pad_along_first_dim(array: np.ndarray, target_length: int, pad_value: int = 
         mask[-padding_length:] = 0
     return array, mask
 
+
 class SigLip2ImageProcessor(BaseImageProcessor):
-    def __init__(self,
+    def __init__(
+        self,
         do_resize: bool = True,
         resample: "PILImageResampling" = PILImageResampling.BILINEAR,
         do_rescale: bool = True,
@@ -279,7 +289,7 @@ class SigLip2VisionConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        if hasattr(cls, '_set_token_in_kwargs'):
+        if hasattr(cls, "_set_token_in_kwargs"):
             cls._set_token_in_kwargs(kwargs)
 
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
@@ -289,7 +299,10 @@ class SigLip2VisionConfig(PretrainedConfig):
             config_dict = config_dict["vision_config"]
 
         if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            print(f"You are using a model of type {config_dict['model_type']} to instantiate a model of type " f"{cls.model_type}. This is not supported for all configurations of models and can yield errors.")
+            print(
+                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
+                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
+            )
 
         return cls.from_dict(config_dict, **kwargs)
 
@@ -410,6 +423,7 @@ class SigLip2VisionEmbeddings(nn.Module):
         embeddings = patch_embeds + resized_positional_embeddings
         return embeddings
 
+
 def eager_attention_forward(
     module: nn.Module,
     query: torch.Tensor,
@@ -432,6 +446,7 @@ def eager_attention_forward(
 
     return attn_output, attn_weights
 
+
 class SigLip2Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -443,7 +458,10 @@ class SigLip2Attention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
         if self.head_dim * self.num_heads != self.embed_dim:
-            raise ValueError(f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`:" f" {self.num_heads}).")
+            raise ValueError(
+                f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`:"
+                f" {self.num_heads})."
+            )
         self.scale = self.head_dim**-0.5
         self.dropout = config.attention_dropout
         self.is_causal = False
@@ -818,7 +836,6 @@ class SigLip2NaflexVisionTower(nn.Module):
         self.config = SigLip2VisionConfig()
 
         self.vision_tower_name = vision_tower
-        self.select_layer = vision_tower_cfg.mm_vision_select_layer
 
         self.image_processor = SigLip2ImageProcessor()
 
@@ -830,7 +847,9 @@ class SigLip2NaflexVisionTower(nn.Module):
             rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `unfreeze_mm_vision_tower`: True.")
             self.load_model()
         elif hasattr(vision_tower_cfg, "mm_tunable_parts") and "mm_vision_tower" in vision_tower_cfg.mm_tunable_parts:
-            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`.")
+            rank0_print(
+                f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`."
+            )
             self.load_model()
         else:
             self.cfg_only = self.config
@@ -841,51 +860,52 @@ class SigLip2NaflexVisionTower(nn.Module):
             return
 
         self.vision_tower = SigLip2VisionModel.from_pretrained(
-            self.vision_tower_name, 
-            device_map=device_map,
-            attn_implementation="flash_attention_2"
+            self.vision_tower_name, device_map=device_map, attn_implementation="flash_attention_2"
         )
 
         self.is_loaded = True
 
-    def forward(self, images, grid_thw=None, visible_indices=None):
+    def forward(self, images, grid_thw=None, **kwargs):
         if type(images) is list:
             image_features = []
             for image in images:
-                image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True)
+                image_forward_out = self.vision_tower(
+                    image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True
+                )
                 image_feature = image_forward_out.hidden_states[-1].to(image.dtype)
+                assert image_features.shape[-2] == 729
                 image_features.append(image_feature)
-        elif hasattr(images, 'keys'):
-            # Handle dictionary input format
-            pixel_values = images['pixel_values'].to(device=self.device, dtype=self.dtype)
-            spatial_shapes = images['spatial_shapes'].to(device=self.device)
-            pixel_attention_mask = images.get('pixel_attention_mask', None)
+        elif hasattr(images, "keys"):
+            # Handle dict input format
+            pixel_values = images["pixel_values"].to(device=self.device, dtype=self.dtype)
+            spatial_shapes = images["spatial_shapes"].to(device=self.device)
+            pixel_attention_mask = images.get("pixel_attention_mask", None)
             if pixel_attention_mask is not None:
                 pixel_attention_mask = pixel_attention_mask.to(device=self.device)
-            
+
             image_forward_outs = self.vision_tower(
-                pixel_values, 
-                pixel_attention_mask, 
-                spatial_shapes, 
-                output_hidden_states=True
+                pixel_values, pixel_attention_mask, spatial_shapes, output_hidden_states=True
             )
             image_features = image_forward_outs.hidden_states[-1]
         else:
             # Handle direct tensor input
-            # Assumes tensor shape is [batch_size, height, width, channels] or [batch_size, sequence_length, hidden_size]
+            # Tensor shape can be [batch_size, height, width, channels] or [batch_size, sequence_length, hidden_size]
             batch_size = images.shape[0]
-            
-            # If raw image tensor, preprocessing is needed
+            # assert 1==2, f'images.shape:{images.shape}'
+
+            # If raw image tensor, need preprocessing
             if len(images.shape) == 4:  # [B, H, W, C] format
-                # Call image processor to preprocess
+                # Call image processor for preprocessing
                 processed = self.image_processor.preprocess(images, return_tensors="pt")
-                pixel_values = processed['pixel_values'].to(device=self.device, dtype=self.dtype)
-                spatial_shapes = processed['spatial_shapes'].to(device=self.device)
+                pixel_values = processed["pixel_values"].to(device=self.device, dtype=self.dtype)
+                spatial_shapes = processed["spatial_shapes"].to(device=self.device)
                 pixel_attention_mask = None
-            else:
+            else:  # Assume already feature or tokenized tensor
+                # Use input tensor directly as pixel values
                 pixel_values = images.to(device=self.device, dtype=self.dtype)
                 if grid_thw is not None:
                     spatial_shapes = []
+                    # assert 1==3, f'grid_thw:{grid_thw}, pixel_values.shape:{pixel_values.shape}'
                     for b in range(batch_size):
                         thw = grid_thw[b]
                         feat_h = thw[1]
@@ -893,22 +913,15 @@ class SigLip2NaflexVisionTower(nn.Module):
                         spatial_shapes.append([feat_h, feat_w])
                     spatial_shapes = torch.tensor(spatial_shapes, device=self.device)
                 else:
-                    feat_w, feat_h = int(pixel_values.shape[1]**0.5), int(pixel_values.shape[1]**0.5)
+                    feat_w, feat_h = int(pixel_values.shape[1] ** 0.5), int(pixel_values.shape[1] ** 0.5)
                     # Estimate standard shape for each batch item
                     spatial_shapes = torch.tensor([[feat_h, feat_w]] * batch_size, device=self.device)
                 pixel_attention_mask = None
-            
+
             image_forward_outs = self.vision_tower(
-                pixel_values, 
-                pixel_attention_mask, 
-                spatial_shapes, 
-                output_hidden_states=True
+                pixel_values, pixel_attention_mask, spatial_shapes, output_hidden_states=True
             )
-            if self.select_layer is not None:
-                image_features = image_forward_outs.hidden_states[self.select_layer]
-            else:
-                image_features = image_forward_outs.hidden_states[-2]
-        
+            image_features = image_forward_outs.hidden_states[-2]
 
         return image_features
 
@@ -936,7 +949,7 @@ class SigLip2NaflexVisionTower(nn.Module):
 
     @property
     def num_patches_per_side(self):
-        return 560//16
+        return 560 // 16
         # return self.model_config["vision_cfg"]["image_size"] // self.model_config["vision_cfg"]["patch_size"]
 
     @property

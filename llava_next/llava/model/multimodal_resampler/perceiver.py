@@ -136,7 +136,9 @@ class PerceiverResampler(nn.Module):
         self.ff_mult = model_args.mm_perceiver_ff_mult
         self.pretrained = model_args.mm_perceiver_pretrained
 
-        self.perceiver = PerceiverResamplerModule(dim=vision_tower.hidden_size, depth=self.depth, num_latents=self.num_latents, ff_mult=self.ff_mult)
+        self.perceiver = PerceiverResamplerModule(
+            dim=vision_tower.hidden_size, depth=self.depth, num_latents=self.num_latents, ff_mult=self.ff_mult
+        )
 
         if self.pretrained is not None:
             self.load_state_dict(torch.load(self.pretrained))

@@ -28,6 +28,7 @@ class SimpleResBlock(nn.Module):
         x = self.pre_norm(x)
         return x + self.proj(x)
 
+
 class PatchMerger(nn.Module):
     def __init__(self, llm_dim, vit_dim, spatial_merge_size=2):
         super().__init__()
@@ -54,11 +55,12 @@ class SpatialMergeProjector(nn.Module):
     Supports dynamic resolutions where height and width can differ,
     as long as both dimensions are divisible by the merge size (default: 2).
     """
+
     def __init__(self, llm_dim, vit_dim, spatial_merge_size=2):
         super().__init__()
         self.spatial_merge_size = spatial_merge_size
         self.ln_q = nn.LayerNorm(vit_dim, eps=1e-6)
-        self.hidden_size = vit_dim * (spatial_merge_size ** 2)
+        self.hidden_size = vit_dim * (spatial_merge_size**2)
         self.llm_dim = llm_dim
 
         self.mlp = nn.Sequential(
@@ -77,11 +79,11 @@ class SpatialMergeProjector(nn.Module):
             (B, N // (spatial_merge_size^2), llm_dim)
         """
         B, N, C = x.size()
-        
+
         # Extract height and width from kwargs if provided
-        height = kwargs.get('height', None)
-        width = kwargs.get('width', None)
-        
+        height = kwargs.get("height", None)
+        width = kwargs.get("width", None)
+
         # Infer H and W if not provided
         if height is None or width is None:
             # For dynamic resolution, find factors of N that are divisible by merge_size
@@ -89,13 +91,14 @@ class SpatialMergeProjector(nn.Module):
             H, W = self._infer_hw(N)
         else:
             H, W = height, width
-        
+
         assert H * W == N, f"Height {H} * Width {W} != N {N}"
 
         # Validate divisibility by merge_size
         merge_size = self.spatial_merge_size
-        assert H % merge_size == 0 and W % merge_size == 0, \
+        assert H % merge_size == 0 and W % merge_size == 0, (
             f"Grid size ({H}, {W}) not divisible by merge_size {merge_size}"
+        )
 
         # Apply LayerNorm
         x = self.ln_q(x)
@@ -114,7 +117,7 @@ class SpatialMergeProjector(nn.Module):
         # Project to LLM dimension
         x = self.mlp(x)
         return x
-    
+
     def _infer_hw(self, N):
         """
         Infer height and width from total number of patches N.
@@ -125,19 +128,19 @@ class SpatialMergeProjector(nn.Module):
         # Find all valid factor pairs (h, w) where h * w = N
         # and both h and w are divisible by merge_size
         factors = []
-        for h in range(1, int(N ** 0.5) + 1):
+        for h in range(1, int(N**0.5) + 1):
             if N % h == 0:
                 w = N // h
                 if h % merge_size == 0 and w % merge_size == 0:
                     factors.append((h, w))
-        
+
         if not factors:
             # Fallback: try square root approach
-            h = w = int(round(N ** 0.5))
+            h = w = int(round(N**0.5))
             if h * w == N and h % merge_size == 0 and w % merge_size == 0:
                 return h, w
             raise ValueError(f"Cannot find valid H, W factors for N={N} divisible by merge_size={merge_size}")
-        
+
         # Choose the factor pair closest to square (minimize |h - w|)
         factors.sort(key=lambda x: abs(x[0] - x[1]))
         return factors[0]
@@ -159,7 +162,8 @@ def build_vision_projector(config, delay_load=False, **kwargs):
     if projector_type == "patch_merger":
         return PatchMerger(
             llm_dim=config.hidden_size,
-            vit_dim=config.mm_hidden_size,)
+            vit_dim=config.mm_hidden_size,
+        )
 
     if projector_type == "spatial_merge":
         return SpatialMergeProjector(
@@ -167,7 +171,6 @@ def build_vision_projector(config, delay_load=False, **kwargs):
             vit_dim=config.mm_hidden_size,
             spatial_merge_size=2,
         )
-
 
     mlp_gelu_match = re.match(r"^mlp(\d+)x_gelu$", projector_type)
     if mlp_gelu_match:
