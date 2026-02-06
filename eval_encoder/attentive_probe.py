@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--smoothing", type=float, default=0.1)
     parser.add_argument("--print_freq", type=int, default=10)
     parser.add_argument("--eval_freq", type=int, default=1)
-    parser.add_argument("--frames_token_num", type=int, default=196)
+    parser.add_argument("--frames_token_num", type=int, default=256)
 
     # Dataloader
     parser.add_argument("--dali_num_threads", type=int, default=2)
@@ -454,11 +454,18 @@ def evaluate(
 
 def get_model(args: argparse.Namespace) -> nn.Module:
     if args.model_name == "ov_encoder_large":
-        model = AutoModel.from_pretrained(
-            "lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True, attn_implementation="flash_attention_2"
-        )
-        model = torch.compile(model)
-        return model
+        if os.path.isdir(args.model_weight):
+            from onevision_encoder.modeling_onevision_encoder import OneVisionEncoderModel
+            model = OneVisionEncoderModel.from_pretrained(
+                args.model_weight, trust_remote_code=True, attn_implementation="flash_attention_2"
+            )
+            return model
+        else:
+            model = AutoModel.from_pretrained(
+                "lmms-lab-encoder/onevision-encoder-large", trust_remote_code=True, attn_implementation="flash_attention_2"
+            )
+            model = torch.compile(model)
+            return model
 
     model = create_model(args.model_name, pretrained=False)
     if args.model_family in ["chunk_wise_sampling"]:
