@@ -664,7 +664,7 @@ def main():
             for pfc in list_module_pfc:
                 clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
             opt.step()
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=True)
 
         lr_scheduler.step()
 
