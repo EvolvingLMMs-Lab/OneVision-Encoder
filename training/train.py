@@ -652,7 +652,7 @@ def main():
             list_loss.append(head_loss)
             list_loss_float.append(head_loss.item())
 
-        is_accumulation_step = global_step % args.backward_passes_per_step != 0
+        is_accumulation_step = (global_step + 1) % args.backward_passes_per_step != 0
         scaled_loss = sum(list_loss) / args.backward_passes_per_step
 
         if is_accumulation_step:
@@ -665,8 +665,7 @@ def main():
                 clip_grad_norm_(pfc.parameters(), max_norm=5, norm_type=2)
             opt.step()
             opt.zero_grad()
-
-        lr_scheduler.step()
+            lr_scheduler.step()
 
         batch_end_callback(
             global_step=global_step,
