@@ -479,9 +479,9 @@ For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
 
 ## 👥 Contributors
 
-| <a href="https://github.com/Luodian"><img src="https://avatars.githubusercontent.com/Luodian?v=4" width="100" alt="Luodian"/></a> | <a href="https://github.com/anxiangsir"><img src="https://avatars.githubusercontent.com/anxiangsir?v=4" width="100" alt="anxiangsir"/></a> | <a href="https://github.com/jiankangdeng"><img src="https://avatars.githubusercontent.com/jiankangdeng?v=4" width="100" alt="jiankangdeng"/></a> | <a href="https://github.com/FeilongTangmonash"><img src="https://avatars.githubusercontent.com/FeilongTangmonash?v=4" width="100" alt="FeilongTangmonash"/></a> | <a href="https://github.com/yiyexy"><img src="https://avatars.githubusercontent.com/yiyexy?v=4" width="100" alt="yiyexy"/></a> |
-| :---: | :---: | :---: | :---: | :---: |
-| **[Luodian](https://github.com/Luodian)** | **[anxiangsir](https://github.com/anxiangsir)** | **[jiankangdeng](https://github.com/jiankangdeng)** | **[FeilongTangmonash](https://github.com/FeilongTangmonash)** | **[yiyexy](https://github.com/yiyexy)** |
+| <a href="https://github.com/anxiangsir"><img src="https://avatars.githubusercontent.com/anxiangsir?v=4" width="100" alt="anxiangsir"/></a> | <a href="https://github.com/FeilongTangmonash"><img src="https://avatars.githubusercontent.com/FeilongTangmonash?v=4" width="100" alt="FeilongTangmonash"/></a> | <a href="https://github.com/YunyaoYan"><img src="https://avatars.githubusercontent.com/YunyaoYan?v=4" width="100" alt="YunyaoYan"/></a> | <a href="https://github.com/yiyexy"><img src="https://avatars.githubusercontent.com/yiyexy?v=4" width="100" alt="yiyexy"/></a> | <a href="https://github.com/Luodian"><img src="https://avatars.githubusercontent.com/Luodian?v=4" width="100" alt="Luodian"/></a> | <a href="https://github.com/yshenaw"><img src="https://avatars.githubusercontent.com/yshenaw?v=4" width="100" alt="yshenaw"/></a> | <a href="https://github.com/jiankangdeng"><img src="https://avatars.githubusercontent.com/jiankangdeng?v=4" width="100" alt="jiankangdeng"/></a> |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **[anxiangsir](https://github.com/anxiangsir)** | **[FeilongTangmonash](https://github.com/FeilongTangmonash)** | **[YunyaoYan](https://github.com/YunyaoYan)** | **[yiyexy](https://github.com/yiyexy)** | **[Luodian](https://github.com/Luodian)** | **[yshenaw](https://github.com/yshenaw)** | **[jiankangdeng](https://github.com/jiankangdeng)** |
 
 ---
 
