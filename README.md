@@ -479,17 +479,9 @@ For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
 
 ## 👥 Contributors
 
-<table>
-  <tr>
-    <td align="center" width="14.28%"><a href="https://github.com/anxiangsir"><img src="https://avatars.githubusercontent.com/anxiangsir?v=4&s=100" width="100" height="100" alt="anxiangsir"/><br/><sub><b>anxiangsir</b></sub></a></td>
-    <td align="center" width="14.28%"><a href="https://github.com/FeilongTangmonash"><img src="https://avatars.githubusercontent.com/FeilongTangmonash?v=4&s=100" width="100" height="100" alt="FeilongTangmonash"/><br/><sub><b>FeilongTangmonash</b></sub></a></td>
-    <td align="center" width="14.28%"><a href="https://github.com/YunyaoYan"><img src="https://avatars.githubusercontent.com/YunyaoYan?v=4&s=100" width="100" height="100" alt="YunyaoYan"/><br/><sub><b>YunyaoYan</b></sub></a></td>
-    <td align="center" width="14.28%"><a href="https://github.com/yiyexy"><img src="https://avatars.githubusercontent.com/yiyexy?v=4&s=100" width="100" height="100" alt="yiyexy"/><br/><sub><b>yiyexy</b></sub></a></td>
-    <td align="center" width="14.28%"><a href="https://github.com/Luodian"><img src="https://avatars.githubusercontent.com/Luodian?v=4&s=100" width="100" height="100" alt="Luodian"/><br/><sub><b>Luodian</b></sub></a></td>
-    <td align="center" width="14.28%"><a href="https://github.com/yshenaw"><img src="https://avatars.githubusercontent.com/yshenaw?v=4&s=100" width="100" height="100" alt="yshenaw"/><br/><sub><b>yshenaw</b></sub></a></td>
-    <td align="center" width="14.28%"><a href="https://github.com/jiankangdeng"><img src="https://avatars.githubusercontent.com/jiankangdeng?v=4&s=100" width="100" height="100" alt="jiankangdeng"/><br/><sub><b>jiankangdeng</b></sub></a></td>
-  </tr>
-</table>
+<a href="https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=EvolvingLMMs-Lab/OneVision-Encoder" width="800px"/>
+</a>
 
 ---
 
