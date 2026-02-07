@@ -692,8 +692,6 @@ def main():
                 list_head_names=args.list_head_names,
                 keep_num=20,
             )
-            # Also save in HuggingFace format
-            save_hf_checkpoint(args.output, backbone, global_step=global_step, image_size=args.image_size[0])
 
         if global_step > args.total_steps:
             save_checkpoint(
