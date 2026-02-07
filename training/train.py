@@ -350,7 +350,8 @@ def main():
         optimizer_cls = torch.optim.AdamW
 
         opt = optimizer_cls(parameters, lr=args.lr, weight_decay=args.weight_decay)
-        lr_scheduler = PolynomialLRWarmup(opt, int(args.total_steps * args.warmup_ratio), args.total_steps, 2)
+        optimizer_total_steps = args.total_steps // args.backward_passes_per_step
+        lr_scheduler = PolynomialLRWarmup(opt, int(optimizer_total_steps * args.warmup_ratio), optimizer_total_steps, 2)
     else:
         raise ValueError(f"{args.opt} not support!")
 
