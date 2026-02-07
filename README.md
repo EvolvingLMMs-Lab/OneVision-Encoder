@@ -479,7 +479,47 @@ For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
 
 ## 👥 Contributors
 
-<!-- Add contributor list here -->
+<!-- readme: contributors/Copilot/copilot-swe-agent/dependabot/github-actions/allcontributors/imgbot/snyk-bot/renovate -start -->
+<table>
+<tr>
+    <td align="center">
+        <a href="https://github.com/Luodian">
+            <img src="https://avatars.githubusercontent.com/Luodian?v=4" width="80;" alt="Luodian"/>
+            <br />
+            <sub><b>Luodian</b></sub>
+        </a>
+    </td>
+    <td align="center">
+        <a href="https://github.com/anxiangsir">
+            <img src="https://avatars.githubusercontent.com/anxiangsir?v=4" width="80;" alt="anxiangsir"/>
+            <br />
+            <sub><b>anxiangsir</b></sub>
+        </a>
+    </td>
+    <td align="center">
+        <a href="https://github.com/FeilongTangmonash">
+            <img src="https://avatars.githubusercontent.com/FeilongTangmonash?v=4" width="80;" alt="FeilongTangmonash"/>
+            <br />
+            <sub><b>FeilongTangmonash</b></sub>
+        </a>
+    </td>
+    <td align="center">
+        <a href="https://github.com/jiankangdeng">
+            <img src="https://avatars.githubusercontent.com/jiankangdeng?v=4" width="80;" alt="jiankangdeng"/>
+            <br />
+            <sub><b>jiankangdeng</b></sub>
+        </a>
+    </td>
+    <td align="center">
+        <a href="https://github.com/yiyexy">
+            <img src="https://avatars.githubusercontent.com/yiyexy?v=4" width="80;" alt="yiyexy"/>
+            <br />
+            <sub><b>yiyexy</b></sub>
+        </a>
+    </td>
+</tr>
+</table>
+<!-- readme: contributors/Copilot/copilot-swe-agent/dependabot/github-actions/allcontributors/imgbot/snyk-bot/renovate -end -->
 
 ---
 
