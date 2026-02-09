@@ -35,6 +35,7 @@
 - [Evaluation](#-evaluation)
 - [Codec Style Patch Selection](#-codec-style-patch-selection)
 - [Contributors](#-contributors)
+- [Related Projects](#-related-projects)
 - [License](#-license)
 - [Documentation](#-documentation)
 
@@ -497,3 +498,10 @@ For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
 ## 🔗 Related Projects
 
 - [nano-hevc](https://github.com/Luodian/nano-hevc) – A minimal and educational HEVC (H.265) encoder written in Python, designed to expose the full encoding pipeline and core design principles.
+- [LLaVA-OneVision-1.5](https://github.com/EvolvingLMMs-Lab/LLaVA-OneVision-1.5) – Fully open framework for democratized multimodal training, delivering state-of-the-art performance with native-resolution images at lower training costs.
+- [LLaVA-NeXT](https://github.com/LLaVA-VL/LLaVA-NeXT) – Open large multimodal model for vision and language tasks, with support for images, videos, and multi-image understanding.
+- [UNICOM](https://github.com/deepglint/unicom) – Large-scale visual representation model trained on LAION400M and COYO700M for foundational vision tasks and multimodal applications.
+- [DINOv3](https://github.com/facebookresearch/dinov3) – Meta AI's self-supervised vision foundation model family, trained on up to 1.7B images with up to 7B parameters, producing high-quality dense visual features.
+- [SigLIP2](https://github.com/google-research/big_vision) – Google's multilingual vision-language encoder with improved semantic alignment and support for dynamic image resolutions.
+- [lmms-eval](https://github.com/EvolvingLMMs-Lab/lmms-eval) – Unified evaluation toolkit for large multimodal models, supporting 100+ tasks across text, image, video, and audio domains.
+- [V-JEPA2](https://github.com/facebookresearch/vjepa2) – Meta's self-supervised video encoder trained on internet-scale data, achieving state-of-the-art performance on motion understanding and action anticipation.
