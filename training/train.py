@@ -84,7 +84,13 @@ parser.add_argument("--warmup_ratio", type=float, default=0.1, help="Warmup rati
 parser.add_argument("--backward_passes_per_step", type=int, default=1, help="Gradient accumulation steps")
 parser.add_argument("--repeat_pfc", type=int, default=0, help="Repeat factor for PFC ops or rebuild cycles")
 parser.add_argument("--save_pfc", type=int, default=1, help="Save PFC weights in checkpoints (0/1)")
-parser.add_argument("--compile_backbone", type=int, default=1, help="Enable torch.compile for backbone DDP module (0/1)")
+parser.add_argument(
+    "--compile_backend",
+    type=str,
+    default="auto",
+    choices=["auto", "none", "inductor", "aot_eager", "eager"],
+    help="torch.compile backend for backbone DDP module",
+)
 
 # Initialization / Resume
 parser.add_argument("--init_backbone", default="NULL", help="Backbone init path or 'NULL'")
@@ -383,15 +389,18 @@ def main():
 
     backbone_ddp = wrap_ddp(backbone)
     dali_types = {dataset_config.dali_type for dataset_config in args.list_datasets}
-    should_compile_backbone = bool(args.compile_backbone)
-    if should_compile_backbone and len(dali_types) > 1:
-        # Mixed input signatures tend to retrace heavily under torch.compile.
-        logger.info(f"Mixed dali_type inputs detected {sorted(dali_types)}; disable torch.compile to avoid retracing.")
-        should_compile_backbone = False
+    compile_backend = args.compile_backend
+    selected_backend = compile_backend
+    if compile_backend == "auto":
+        selected_backend = "inductor"
+        if len(dali_types) > 1:
+            # Mixed input signatures tend to retrace heavily under torch.compile.
+            logger.info(f"Mixed dali_type inputs detected {sorted(dali_types)}; disable torch.compile to avoid retracing.")
+            selected_backend = "none"
 
-    if should_compile_backbone:
-        backbone_ddp_compiled = torch.compile(backbone_ddp)
-        logger.info("Backbone DDP torch.compile enabled.")
+    if selected_backend != "none":
+        backbone_ddp_compiled = torch.compile(backbone_ddp, backend=selected_backend)
+        logger.info(f"Backbone DDP torch.compile enabled. backend={selected_backend}")
     else:
         backbone_ddp_compiled = backbone_ddp
         logger.info("Backbone DDP torch.compile disabled.")
