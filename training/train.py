@@ -485,8 +485,8 @@ def main():
         list_iter.append(iter(list_dali_dataloader[i]))
         list_next_data_batch.append(next(list_iter[i]))
 
-    if global_step > args.total_steps:
-        logger.info("global_step > total_steps")
+    if global_step >= args.total_steps:
+        logger.info("global_step >= total_steps")
         exit()
 
     num_samples = 0
@@ -693,7 +693,7 @@ def main():
                 keep_num=20,
             )
 
-        if global_step > args.total_steps:
+        if global_step >= args.total_steps:
             save_checkpoint(
                 args.output,
                 backbone,
