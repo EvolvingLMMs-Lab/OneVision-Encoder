@@ -100,8 +100,8 @@ class DALIWarperV2(object):
 
     def __next__(self):
         data_dict = self.iter.__next__()[0]
-        tensor_data = data_dict["data"].cuda()
-        tensor_label = data_dict["label"].long().cuda()
+        tensor_data = data_dict["data"]
+        tensor_label = data_dict["label"].long()
 
         if self.label_select is None:
             return tensor_data, tensor_label
