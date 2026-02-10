@@ -36,6 +36,7 @@
 - [Codec Style Patch Selection](#-codec-style-patch-selection)
 - [Contributors](#-contributors)
 - [Related Projects](#-related-projects)
+- [Citation](#-citation)
 - [License](#-license)
 - [Documentation](#-documentation)
 
@@ -505,3 +506,19 @@ For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
 - [SigLIP2](https://github.com/google-research/big_vision) – Google's multilingual vision-language encoder with improved semantic alignment and support for dynamic image resolutions.
 - [lmms-eval](https://github.com/EvolvingLMMs-Lab/lmms-eval) – Unified evaluation toolkit for large multimodal models, supporting 100+ tasks across text, image, video, and audio domains.
 - [V-JEPA2](https://github.com/facebookresearch/vjepa2) – Meta's self-supervised video encoder trained on internet-scale data, achieving state-of-the-art performance on motion understanding and action anticipation.
+
+---
+
+## 📝 Citation
+
+If you find OneVision-Encoder useful for your research and applications, please cite using this BibTeX:
+
+```bibtex
+@article{tang2026onevision_encoder,
+    title   = {{OneVision-Encoder}: Codec-Aligned Sparsity as a Foundational Principle for Multimodal Intelligence},
+    author  = {Tang, Feilong and An, Xiang and Yan, Yunyao and Xie, Yin and Qin, Bin and Yang, Kaicheng and Shen, Yifei and Zhang, Yuanhan and Li, Chunyuan and Feng, Shikun and Chen, Changrui and Tan, Huajie and Hu, Ming and Zhang, Manyuan and Li, Bo and Feng, Ziyong and Liu, Ziwei and Ge, Zongyuan and Deng, Jiankang},
+    journal = {arXiv:2602.08683},
+    year    = {2026},
+    url     = {https://arxiv.org/abs/2602.08683}
+}
+```
