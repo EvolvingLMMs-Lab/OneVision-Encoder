@@ -5,14 +5,14 @@
 </picture>
 
 <p align="center">
-  <strong>The first HEVC style Vision Transformer with advanced multimodal capabilities</strong>
+  <strong>Codec-Aligned Sparsity as a Foundational Principle for Multimodal Intelligence</strong>
 </p>
 
 <div align="center">
 
 📝 **[Homepage](https://www.lmms-lab.com/onevision-encoder/index.html)**
 🤗 **[Models](https://huggingface.co/collections/lmms-lab-encoder/onevision-encoder)** |
-📄 **[Tech Report (coming)]()** |
+📄 **[Tech Report](https://arxiv.org/abs/2602.08683)** |
 📋 **[Model Card](docs/model_card.md)** |
 📊 **[Data Card](docs/data_card.md)**
 
@@ -35,6 +35,8 @@
 - [Evaluation](#-evaluation)
 - [Codec Style Patch Selection](#-codec-style-patch-selection)
 - [Contributors](#-contributors)
+- [Related Projects](#-related-projects)
+- [Citation](#-citation)
 - [License](#-license)
 - [Documentation](#-documentation)
 
@@ -42,12 +44,12 @@
 
 ## 🔍 Introduction
 
-Video understanding models face a fundamental trade-off: incorporating more frames enables richer temporal reasoning but increases computational cost quadratically.
-Conventional approaches mitigate this by sparsely sampling frames, however, this strategy discards fine-grained motion dynamics and treats all spatial regions uniformly, resulting in wasted computation on static content.
+**Hypothesis.** Artificial general intelligence is, at its core, a compression problem. Effective compression demands resonance: deep learning scales best when its architecture aligns with the fundamental structure of the data. These are the fundamental principles. Yet, modern vision architectures have strayed from these truths: visual signals are highly redundant, while discriminative information, the surprise, is sparse. Current models process dense pixel grids uniformly, wasting vast compute on static background rather than focusing on the predictive residuals that define motion and meaning. We argue that to solve visual understanding, we must align our architectures with the information-theoretic principles of video, i.e., Codecs.
 
-We introduce OneVision Encoder, a vision transformer that resolves this trade-off by drawing inspiration from HEVC (High-Efficiency Video Coding). Rather than densely processing all patches from a few frames, OneVision Encoder sparsely selects informative patches from many frames. This codec-inspired patch selection mechanism identifies temporally salient regions (e.g., motion, object interactions, and semantic changes) and allocates computation exclusively to these informative areas.
+**Method.** OneVision-Encoder encodes video by compressing predictive visual structure into semantic meaning. By adopting Codec Patchification, OneVision-Encoder abandons uniform computation to focus exclusively on the 3.1%-25% of regions rich in signal entropy. To unify spatial and temporal reasoning under irregular token layouts, OneVision-Encoder employs a shared 3D RoPE and is trained with a large-scale cluster discrimination objective over more than one million semantic concepts, jointly capturing object permanence and motion dynamics.
 
-Coupled with global contrastive learning over a 2M-scale concept memory bank, OneVision Encoder achieves state-of-the-art performance across major video benchmarks (MVBench, VideoMME, Perception Test), while also delivering strong results on image understanding tasks (DocVQA, ChartQA, and OCRBench).
+**Evidence.** The results validate our core hypothesis: efficiency and accuracy are not a trade-off; they are positively correlated. By resolving the dichotomy between dense grids and sparse semantics, OneVision-Encoder redefines the performance frontier. When integrated into large multimodal models, it consistently outperforms strong vision backbones such as Qwen3-ViT and SigLIP2 across 16 image, video, and document understanding benchmarks, despite using substantially fewer visual tokens and pretraining data. Notably, on video understanding tasks, OneVision-Encoder achieves an average improvement of 4.1% over Qwen3-ViT. Under attentive probing, it achieves state-of-the-art representation quality, with 17.1% and 8.1% Top-1 accuracy improvements over SigLIP2 and DINOv3, respectively, on Diving-48 under identical patch budgets. These results demonstrate that codec-aligned, patch-level sparsity is not an optimization trick, but a foundational principle for next-generation visual generalists, positioning OneVision-Encoder as a scalable engine for universal multimodal intelligence.
+
 
 ### Key Features
 
@@ -479,7 +481,17 @@ For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
 
 ## 👥 Contributors
 
-<!-- Add contributor list here -->
+<table>
+  <tr>
+    <td align="center" width="14.28%"><a href="https://github.com/anxiangsir"><img src="https://github.com/anxiangsir.png?size=100" width="100" height="100" alt="anxiangsir"/><br /><sub><b>anxiangsir</b></sub></a></td>
+    <td align="center" width="14.28%"><a href="https://github.com/FeilongTangmonash"><img src="https://github.com/FeilongTangmonash.png?size=100" width="100" height="100" alt="FeilongTangmonash"/><br /><sub><b>FeilongTangmonash</b></sub></a></td>
+    <td align="center" width="14.28%"><a href="https://github.com/YunyaoYan"><img src="https://github.com/YunyaoYan.png?size=100" width="100" height="100" alt="YunyaoYan"/><br /><sub><b>YunyaoYan</b></sub></a></td>
+    <td align="center" width="14.28%"><a href="https://github.com/yiyexy"><img src="https://github.com/yiyexy.png?size=100" width="100" height="100" alt="yiyexy"/><br /><sub><b>yiyexy</b></sub></a></td>
+    <td align="center" width="14.28%"><a href="https://github.com/Luodian"><img src="https://github.com/Luodian.png?size=100" width="100" height="100" alt="Luodian"/><br /><sub><b>Luodian</b></sub></a></td>
+    <td align="center" width="14.28%"><a href="https://github.com/yshenaw"><img src="https://github.com/yshenaw.png?size=100" width="100" height="100" alt="yshenaw"/><br /><sub><b>yshenaw</b></sub></a></td>
+    <td align="center" width="14.28%"><a href="https://github.com/jiankangdeng"><img src="https://github.com/jiankangdeng.png?size=100" width="100" height="100" alt="jiankangdeng"/><br /><sub><b>jiankangdeng</b></sub></a></td>
+  </tr>
+</table>
 
 ---
 
@@ -487,3 +499,26 @@ For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
 ## 🔗 Related Projects
 
 - [nano-hevc](https://github.com/Luodian/nano-hevc) – A minimal and educational HEVC (H.265) encoder written in Python, designed to expose the full encoding pipeline and core design principles.
+- [LLaVA-OneVision-1.5](https://github.com/EvolvingLMMs-Lab/LLaVA-OneVision-1.5) – Fully open framework for democratized multimodal training, delivering state-of-the-art performance with native-resolution images at lower training costs.
+- [LLaVA-NeXT](https://github.com/LLaVA-VL/LLaVA-NeXT) – Open large multimodal model for vision and language tasks, with support for images, videos, and multi-image understanding.
+- [UNICOM](https://github.com/deepglint/unicom) – Large-scale visual representation model trained on LAION400M and COYO700M for foundational vision tasks and multimodal applications.
+- [DINOv3](https://github.com/facebookresearch/dinov3) – Meta AI's self-supervised vision foundation model family, trained on up to 1.7B images with up to 7B parameters, producing high-quality dense visual features.
+- [SigLIP2](https://github.com/google-research/big_vision) – Google's multilingual vision-language encoder with improved semantic alignment and support for dynamic image resolutions.
+- [lmms-eval](https://github.com/EvolvingLMMs-Lab/lmms-eval) – Unified evaluation toolkit for large multimodal models, supporting 100+ tasks across text, image, video, and audio domains.
+- [V-JEPA2](https://github.com/facebookresearch/vjepa2) – Meta's self-supervised video encoder trained on internet-scale data, achieving state-of-the-art performance on motion understanding and action anticipation.
+
+---
+
+## 📝 Citation
+
+If you find OneVision-Encoder useful for your research and applications, please cite using this BibTeX:
+
+```bibtex
+@article{tang2026onevision_encoder,
+    title   = {{OneVision-Encoder}: Codec-Aligned Sparsity as a Foundational Principle for Multimodal Intelligence},
+    author  = {Tang, Feilong and An, Xiang and Yan, Yunyao and Xie, Yin and Qin, Bin and Yang, Kaicheng and Shen, Yifei and Zhang, Yuanhan and Li, Chunyuan and Feng, Shikun and Chen, Changrui and Tan, Huajie and Hu, Ming and Zhang, Manyuan and Li, Bo and Feng, Ziyong and Liu, Ziwei and Ge, Zongyuan and Deng, Jiankang},
+    journal = {arXiv:2602.08683},
+    year    = {2026},
+    url     = {https://arxiv.org/abs/2602.08683}
+}
+```
