@@ -140,10 +140,17 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
             1.0 / (base ** (torch.arange(self.w_size, dtype=torch.float32) / self.w_size)),
             persistent=False,
         )
+        self._freqs_cache = {}
+        self._max_cache_size = 8
 
     def forward(self, t: int, h: int, w: int, device=None):
         if device is None:
             device = self.inv_freq_t.device
+
+        cache_key = (int(t), int(h), int(w), device.type, -1 if device.index is None else int(device.index))
+        cached = self._freqs_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         inv_t = self.inv_freq_t.to(device=device)
         inv_h = self.inv_freq_h.to(device=device)
@@ -158,6 +165,9 @@ class VideoRotaryEmbeddingSplit466(nn.Module):
         w_ids = torch.arange(w, device=device).repeat(h).repeat(t)
 
         freqs = torch.cat([ft[t_ids], fh[h_ids], fw[w_ids]], dim=-1)
+        if len(self._freqs_cache) >= self._max_cache_size:
+            self._freqs_cache.pop(next(iter(self._freqs_cache)))
+        self._freqs_cache[cache_key] = freqs
         return freqs
 
     def forward_from_positions(self, patch_positions: torch.Tensor) -> torch.Tensor:
@@ -611,23 +621,32 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         hidden_states = self.embeddings(pixel_values)
         batch_size, total_patches, _ = hidden_states.shape
 
-        # 2. Visible Indices Handling
-        if visible_indices is None:
-            visible_indices = (
-                torch.arange(total_patches, device=pixel_values.device).unsqueeze(0).expand(batch_size, -1)
-            )
-
-        # 3. RoPE Construction
-        if patch_positions is not None:
-            freqs_visible = self.video_rope.forward_from_positions(patch_positions)
-        else:
+        # 2. Visible Indices / RoPE Construction
+        dense_full_path = visible_indices is None and patch_positions is None
+        if dense_full_path:
             freqs_full = self.video_rope(
                 t=t_frames,
                 h=height // self.config.patch_size,
                 w=width // self.config.patch_size,
                 device=pixel_values.device,
             )
-            freqs_visible = freqs_full[visible_indices]
+            freqs_visible = freqs_full.unsqueeze(0).expand(batch_size, -1, -1)
+        else:
+            if visible_indices is None:
+                visible_indices = (
+                    torch.arange(total_patches, device=pixel_values.device).unsqueeze(0).expand(batch_size, -1)
+                )
+
+            if patch_positions is not None:
+                freqs_visible = self.video_rope.forward_from_positions(patch_positions)
+            else:
+                freqs_full = self.video_rope(
+                    t=t_frames,
+                    h=height // self.config.patch_size,
+                    w=width // self.config.patch_size,
+                    device=pixel_values.device,
+                )
+                freqs_visible = freqs_full[visible_indices]
 
         # Concatenate D/2 + D/2 -> D for applying rope
         freqs_visible = torch.cat([freqs_visible, freqs_visible], dim=-1)
@@ -636,8 +655,8 @@ class OneVisionEncoderModel(OneVisionEncoderPreTrainedModel):
         hidden_states = self.layernorm_pre(hidden_states)
 
         # fix: gather hidden_states to match freqs_visible when using sparse visible_indices
-        num_visible = visible_indices.shape[1]
-        if num_visible != total_patches:
+        num_visible = total_patches if dense_full_path else visible_indices.shape[1]
+        if not dense_full_path and num_visible != total_patches:
             # sparse mode: select only visible patches
             hidden_states = hidden_states.gather(
                 1, visible_indices.unsqueeze(-1).expand(-1, -1, hidden_states.shape[-1])
