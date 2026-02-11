@@ -44,13 +44,11 @@
 
 ## 🔍 Introduction
 
-<div align="center">
 
-<video src="https://github.com/anxiangsir/asset/raw/main/OneVision/residual_mv.mp4" controls autoplay loop muted playsinline width="800" style="max-width: 100%;" title="OneVision Encoder demonstration video showing residual motion vectors">
-  Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/f83a6b08-1961-4992-81cf-451ddb5b3391
 
-</div>
+
+
 
 **Hypothesis.** Artificial general intelligence is, at its core, a compression problem. Effective compression demands resonance: deep learning scales best when its architecture aligns with the fundamental structure of the data. These are the fundamental principles. Yet, modern vision architectures have strayed from these truths: visual signals are highly redundant, while discriminative information, the surprise, is sparse. Current models process dense pixel grids uniformly, wasting vast compute on static background rather than focusing on the predictive residuals that define motion and meaning. We argue that to solve visual understanding, we must align our architectures with the information-theoretic principles of video, i.e., Codecs.
 
