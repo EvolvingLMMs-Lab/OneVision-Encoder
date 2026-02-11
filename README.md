@@ -44,6 +44,12 @@
 
 ## 🔍 Introduction
 
+<div align="center">
+  <a href="https://www.youtube.com/watch?v=PPBmfUoIxJ8">
+    <img src="https://img.youtube.com/vi/PPBmfUoIxJ8/maxresdefault.jpg" alt="OneVision Encoder Video" width="800" style="max-width: 100%;">
+  </a>
+</div>
+
 **Hypothesis.** Artificial general intelligence is, at its core, a compression problem. Effective compression demands resonance: deep learning scales best when its architecture aligns with the fundamental structure of the data. These are the fundamental principles. Yet, modern vision architectures have strayed from these truths: visual signals are highly redundant, while discriminative information, the surprise, is sparse. Current models process dense pixel grids uniformly, wasting vast compute on static background rather than focusing on the predictive residuals that define motion and meaning. We argue that to solve visual understanding, we must align our architectures with the information-theoretic principles of video, i.e., Codecs.
 
 **Method.** OneVision-Encoder encodes video by compressing predictive visual structure into semantic meaning. By adopting Codec Patchification, OneVision-Encoder abandons uniform computation to focus exclusively on the 3.1%-25% of regions rich in signal entropy. To unify spatial and temporal reasoning under irregular token layouts, OneVision-Encoder employs a shared 3D RoPE and is trained with a large-scale cluster discrimination objective over more than one million semantic concepts, jointly capturing object permanence and motion dynamics.
