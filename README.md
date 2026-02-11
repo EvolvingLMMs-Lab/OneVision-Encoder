@@ -45,9 +45,20 @@
 ## 🔍 Introduction
 
 <div align="center">
-  <a href="https://www.youtube.com/watch?v=PPBmfUoIxJ8">
-    <img src="https://img.youtube.com/vi/PPBmfUoIxJ8/maxresdefault.jpg" alt="OneVision Encoder Video" width="800" style="max-width: 100%;">
-  </a>
+
+<!-- To enable direct video playback: -->
+<!-- 1. Download the video from YouTube (https://www.youtube.com/watch?v=PPBmfUoIxJ8) -->
+<!-- 2. Edit this README on GitHub -->
+<!-- 3. Drag and drop the video file into the edit box -->
+<!-- 4. GitHub will upload it and provide a URL like https://user-images.githubusercontent.com/... -->
+<!-- 5. Replace the line below with: <video src="URL" controls width="800"></video> -->
+
+<a href="https://www.youtube.com/watch?v=PPBmfUoIxJ8" target="_blank">
+  <img src="https://img.youtube.com/vi/PPBmfUoIxJ8/maxresdefault.jpg" alt="OneVision Encoder Introduction Video - Click to Watch" width="800" style="max-width: 100%;">
+</a>
+
+**📺 [▶️ 点击图片观看视频 / Click Image to Watch Video on YouTube](https://www.youtube.com/watch?v=PPBmfUoIxJ8)**
+
 </div>
 
 **Hypothesis.** Artificial general intelligence is, at its core, a compression problem. Effective compression demands resonance: deep learning scales best when its architecture aligns with the fundamental structure of the data. These are the fundamental principles. Yet, modern vision architectures have strayed from these truths: visual signals are highly redundant, while discriminative information, the surprise, is sparse. Current models process dense pixel grids uniformly, wasting vast compute on static background rather than focusing on the predictive residuals that define motion and meaning. We argue that to solve visual understanding, we must align our architectures with the information-theoretic principles of video, i.e., Codecs.
