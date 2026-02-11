@@ -46,8 +46,9 @@
 
 <div align="center">
 
-<video src="https://github.com/anxiangsir/asset/raw/main/OneVision/residual_mv.mp4" controls autoplay loop muted playsinline width="800" style="max-width: 100%;" title="OneVision Encoder demonstration video showing residual motion vectors">
-  Your browser does not support the video tag.
+<video controls autoplay loop muted playsinline width="800" style="max-width: 100%;" title="OneVision Encoder demonstration video showing residual motion vectors">
+  <source src="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/residual_mv.mp4" type="video/mp4">
+  Your browser does not support the video tag. <a href="https://raw.githubusercontent.com/anxiangsir/asset/main/OneVision/residual_mv.mp4">Click here to view the video</a>.
 </video>
 
 </div>
