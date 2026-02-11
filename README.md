@@ -46,18 +46,29 @@
 
 <div align="center">
 
-<!-- To enable direct video playback: -->
-<!-- 1. Download the video from YouTube (https://www.youtube.com/watch?v=PPBmfUoIxJ8) -->
-<!-- 2. Edit this README on GitHub -->
-<!-- 3. Drag and drop the video file into the edit box -->
-<!-- 4. GitHub will upload it and provide a URL like https://user-images.githubusercontent.com/... -->
-<!-- 5. Replace the line below with: <video src="URL" controls width="800"></video> -->
+<!--  
+为了在 README 中直接播放视频，请按以下步骤操作:
+To enable direct video playback in README, please follow these steps:
+
+1. 从 YouTube 下载视频 / Download video from YouTube: https://www.youtube.com/watch?v=PPBmfUoIxJ8
+   (可使用工具如 youtube-dl, yt-dlp 等 / Use tools like youtube-dl, yt-dlp, etc.)
+
+2. 在 GitHub 网页上编辑此 README / Edit this README on GitHub web interface
+
+3. 将视频文件拖放到编辑器中 / Drag and drop the video file into the editor
+
+4. GitHub 会自动上传并生成类似这样的 URL / GitHub will upload and generate a URL like:
+   https://github.com/user-attachments/assets/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+5. 删除下方的图片代码，替换为视频标签 / Delete the image code below and replace with video tag:
+   <video src="YOUR_GITHUB_VIDEO_URL" controls width="800" style="max-width: 100%;"></video>
+-->
 
 <a href="https://www.youtube.com/watch?v=PPBmfUoIxJ8" target="_blank">
   <img src="https://img.youtube.com/vi/PPBmfUoIxJ8/maxresdefault.jpg" alt="OneVision Encoder Introduction Video - Click to Watch" width="800" style="max-width: 100%;">
 </a>
 
-**📺 [▶️ 点击图片观看视频 / Click Image to Watch Video on YouTube](https://www.youtube.com/watch?v=PPBmfUoIxJ8)**
+**📺 [▶️ 点击图片观看 YouTube 视频 / Click to Watch on YouTube](https://www.youtube.com/watch?v=PPBmfUoIxJ8)**
 
 </div>
 
