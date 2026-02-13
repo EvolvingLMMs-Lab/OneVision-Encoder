@@ -854,8 +854,6 @@ class BatchEndCallBack(object):
             else:
                 self.init = True
                 self.tic = time.time()
-                self.loss_sum.zero_()
-                self.loss_count = 0
 
 
 def log_args(args, logger, writer: SummaryWriter = None, save_dir: str = None, rank: int = 0):
