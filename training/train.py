@@ -513,6 +513,11 @@ def main():
     sampling_bin = max(1, 64 // args.num_frames)
     frame_bin_starts = torch.arange(args.num_frames, device=f"cuda:{local_rank}") * sampling_bin
     token_offsets = torch.arange(args.num_tokens_per_frame, device=f"cuda:{local_rank}")
+    frame_token_offsets = frame_bin_starts.view(-1, 1) * args.num_tokens_per_frame + token_offsets.view(1, -1)
+    idx_range_by_head = [
+        torch.arange(args.list_batch_sizes_adjusted[head_id], device=f"cuda:{local_rank}")
+        for head_id in range(args.num_heads)
+    ]
 
     num_samples = 0
     end_of_batch = False
@@ -542,7 +547,7 @@ def main():
                 has_collage = n2 < bs
                 has_combined = n2 > 0
 
-                idx_range = torch.arange(bs, device=head_input.device)  # [8]
+                idx_range = idx_range_by_head[head_id][:bs]  # [8]
                 mask_residual = idx_range < n1  # first n1 samples use residual strategy
                 mask_frame_sampling = (idx_range >= n1) & (idx_range < n2)  # samples [n1, n2) use frame sampling
                 mask_collage = idx_range >= n2  # samples [n2, bs) use collage strategy
@@ -554,10 +559,12 @@ def main():
                 # mask_frame_sampling: sample 8 frames from 64, get all patches per frame
                 FRAMES = 64
                 if has_frame_sampling:
-                    frame_offsets = torch.randint(sampling_bin, (bs, args.num_frames), device=head_input.device)
-                    frames = (frame_bin_starts.unsqueeze(0) + frame_offsets).clamp(max=FRAMES - 1)  # [bs, 8], values in [0, 63]
-                    patch_indices = (frames.unsqueeze(-1) * args.num_tokens_per_frame + token_offsets.view(1, 1, -1)).reshape(bs, -1)
-                    out[mask_frame_sampling] = patch_indices[mask_frame_sampling]  # [nB, 2048]
+                    frame_sampling_idx = torch.nonzero(mask_frame_sampling, as_tuple=False).squeeze(1)  # [nB]
+                    nB = frame_sampling_idx.numel()
+                    frame_offsets = torch.randint(sampling_bin, (nB, args.num_frames), device=head_input.device)
+                    frames = (frame_bin_starts.unsqueeze(0) + frame_offsets).clamp(max=FRAMES - 1)  # [nB, 8], values in [0, 63]
+                    patch_indices = frame_token_offsets[frames].reshape(nB, -1)  # [nB, 2048]
+                    out[frame_sampling_idx] = patch_indices
 
                 combined_mask = mask_residual | mask_frame_sampling  # [8], first 7 samples are True
                 if has_combined:
