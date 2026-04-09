@@ -27,15 +27,16 @@ from the `docs/` directory.
 
 ### Phase 2: Build the Page
 
-Create `docs/issue-<N>.html` as a **single self-contained HTML file** (no build tools).
+Create `docs/issues/issue-<N>.html` as a **single self-contained HTML file** (no build tools).
 
 #### Required Structure
 
 ```
 docs/
   index.html              ← Hub page listing all issues (auto-directory)
-  issue-105.html          ← Individual explainer page
-  issue-<N>.html          ← New page you create
+  issues/
+    issue-105.html        ← Individual explainer page
+    issue-<N>.html        ← New page you create
 ```
 
 #### Design System (MUST follow)
@@ -93,7 +94,7 @@ After creating the explainer page, update `docs/index.html`:
 
 ### Phase 4: Commit
 
-- `git add docs/issue-<N>.html docs/index.html`
+- `git add docs/issues/issue-<N>.html docs/index.html`
 - Commit message format: `docs: add interactive explainer for issue #<N>`
 - Include `closes #<N>` in the commit body if appropriate
 
@@ -113,4 +114,4 @@ Draft a concise reply for the GitHub issue:
 - Code references must include actual file paths and line numbers from the codebase
 - Every formula must be KaTeX-rendered, not plain HTML entities
 - Mobile responsive — test mentally at 375px, 768px, 1024px breakpoints
-- File naming: `issue-<N>.html` where N is the GitHub issue number
+- File naming: `issues/issue-<N>.html` where N is the GitHub issue number, placed under `docs/issues/`
