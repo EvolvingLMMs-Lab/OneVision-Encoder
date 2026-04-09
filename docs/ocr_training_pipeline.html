@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title class="lang-span" data-en="How OCR Training Works in OneVision-Encoder" data-zh="OneVision-Encoder 中 OCR 训练的工作原理">How OCR Training Works in OneVision-Encoder</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <style>
+        :root {
+            --bg: #ffffff;
+            --bg-alt: #f8fafc;
+            --panel: #ffffff;
+            --text: #1e293b;
+            --text-muted: #64748b;
+            --text-light: #94a3b8;
+            --accent-blue: #2563eb;
+            --accent-indigo: #4f46e5;
+            --accent-pink: #e11d48;
+            --accent-emerald: #059669;
+            --accent-orange: #ea580c;
+            --border: #e2e8f0;
+            --border-strong: #cbd5e1;
+            --font-sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --font-mono: "SF Mono", "Fira Code", Consolas, monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.75;
+            font-size: 16px;
+        }
+
+        .container { max-width: 860px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+
+        /* Header */
+        header { text-align: center; margin-bottom: 4rem; padding-top: 2rem; }
+        h1 { font-size: 2.5rem; font-weight: 800; color: var(--text); line-height: 1.2; margin-bottom: 0.75rem; }
+        .subtitle { color: var(--text-muted); font-size: 1.15rem; }
+
+        /* Sections */
+        section { margin-bottom: 4rem; }
+        h2 {
+            font-size: 1.5rem; font-weight: 700; color: var(--text);
+            margin-bottom: 1rem; padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--accent-blue);
+            display: inline-block;
+        }
+        h3 { font-size: 1.15rem; font-weight: 700; color: var(--text); margin: 1.5rem 0 0.5rem; }
+        p { margin-bottom: 1rem; color: var(--text); }
+        ul, ol { margin-bottom: 1rem; padding-left: 1.5rem; }
+        li { margin-bottom: 0.4rem; }
+        strong { color: var(--text); }
+
+        /* Scroll reveal */
+        .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+        .reveal.active { opacity: 1; transform: translateY(0); }
+
+        /* Cards */
+        .card {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 10px; padding: 2rem; margin: 1.5rem 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+
+        /* Code */
+        code {
+            background: #f1f5f9; padding: 2px 6px; border-radius: 4px;
+            font-family: var(--font-mono); font-size: 0.88em; color: var(--accent-indigo);
+        }
+        pre {
+            background: #1e293b; color: #e2e8f0; padding: 1.25rem; border-radius: 8px;
+            overflow-x: auto; font-family: var(--font-mono); font-size: 0.85rem;
+            line-height: 1.6; margin: 1rem 0;
+        }
+        pre code { background: none; color: inherit; padding: 0; }
+        .kw { color: #7dd3fc; }
+        .cm { color: #94a3b8; }
+        .str { color: #a5f3fc; }
+        .num { color: #fca5a5; }
+        .fn { color: #fde68a; }
+
+        /* Stats */
+        .stat-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0; }
+        .stat-card {
+            flex: 1; min-width: 180px; text-align: center;
+            background: var(--bg-alt); border: 1px solid var(--border);
+            border-radius: 8px; padding: 1.25rem;
+        }
+        .stat-num { font-size: 2rem; font-weight: 800; font-family: var(--font-mono); line-height: 1.2; }
+        .stat-num.blue { color: var(--accent-blue); }
+        .stat-num.pink { color: var(--accent-pink); }
+        .stat-num.emerald { color: var(--accent-emerald); }
+        .stat-label { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+        /* Flow diagrams */
+        .flow-h { display: flex; align-items: center; gap: 0; flex-wrap: wrap; margin: 1.5rem 0; justify-content: center; }
+        .flow-box {
+            background: var(--bg-alt); border: 1.5px solid var(--border-strong);
+            border-radius: 8px; padding: 0.75rem 1rem; text-align: center;
+            font-size: 0.9rem; min-width: 110px; position: relative;
+        }
+        .flow-box.hl-blue { border-color: var(--accent-blue); background: #eff6ff; }
+        .flow-box.hl-pink { border-color: var(--accent-pink); background: #fff1f2; }
+        .flow-box.hl-emerald { border-color: var(--accent-emerald); background: #ecfdf5; }
+        .flow-box.hl-indigo { border-color: var(--accent-indigo); background: #eef2ff; }
+        .flow-box .label { font-weight: 700; font-size: 0.8rem; }
+
+        .arrow-r {
+            width: 36px; height: 0; border-top: 1.5px solid var(--border-strong);
+            position: relative; flex-shrink: 0;
+        }
+        .arrow-r::after {
+            content: ''; position: absolute; right: -1px; top: -5px;
+            border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+            border-left: 7px solid var(--border-strong);
+        }
+        .arrow-r.animated {
+            overflow: hidden;
+        }
+        .arrow-r.animated::before {
+            content: ''; position: absolute; top: -2px; left: -100%;
+            width: 50%; height: 4px; border-radius: 2px;
+            background: var(--accent-blue);
+            animation: arrow-pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes arrow-pulse { 0% { left: -50%; opacity: 0; } 50% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
+
+        .arrow-d {
+            width: 0; height: 28px; border-left: 1.5px solid var(--border-strong);
+            position: relative; margin: 0 auto;
+        }
+        .arrow-d::after {
+            content: ''; position: absolute; bottom: -1px; left: -5px;
+            border-left: 5px solid transparent; border-right: 5px solid transparent;
+            border-top: 7px solid var(--border-strong);
+        }
+
+        /* Multi-label PFC big diagram */
+        .pfc-diagram { margin: 2rem 0; }
+        .pfc-stage {
+            display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 0.5rem; flex-wrap: wrap;
+        }
+        .pfc-stage-label {
+            width: 100px; flex-shrink: 0; text-align: right;
+            font-weight: 700; font-size: 0.8rem; color: var(--text-muted);
+            padding-top: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .pfc-stage-content { flex: 1; min-width: 0; }
+
+        /* Tag badges */
+        .tag-row { display: flex; flex-wrap: wrap; gap: 5px; }
+        .tag {
+            display: inline-block; padding: 4px 10px; border-radius: 4px;
+            font-size: 0.75rem; font-family: var(--font-mono);
+            background: #f1f5f9; border: 1px solid #e2e8f0; color: var(--text-muted);
+            transition: all 0.4s ease;
+        }
+        .tag.active { background: #fee2e2; border-color: #fca5a5; color: var(--accent-pink); font-weight: 600; }
+        .tag.dim { opacity: 0.3; }
+
+        /* Weight matrix viz */
+        .weight-grid {
+            display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 1rem 0;
+        }
+        .weight-col {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+        }
+        .weight-col-label {
+            font-size: 0.7rem; font-family: var(--font-mono); font-weight: 700;
+            padding: 2px 6px; border-radius: 3px; margin-bottom: 4px;
+        }
+        .weight-cell {
+            width: 12px; height: 12px; border-radius: 2px; transition: all 0.3s ease;
+        }
+        .weight-cell.pos { background: var(--accent-pink); }
+        .weight-cell.neg { background: #e2e8f0; }
+        .weight-cell.neg.sampled { background: #bfdbfe; }
+        .weight-cell.neg.unsampled { background: #f8fafc; border: 1px solid #e2e8f0; }
+
+        /* Loss boxes */
+        .loss-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; margin: 1rem 0; }
+        .loss-box {
+            padding: 6px 12px; border-radius: 6px;
+            font-family: var(--font-mono); font-size: 0.8rem; font-weight: 600;
+            background: #fff1f2; border: 1px solid #fecdd3; color: var(--accent-pink);
+        }
+        .loss-plus { font-size: 1.2rem; color: var(--text-muted); font-weight: 300; }
+        .loss-eq { font-size: 0.9rem; color: var(--text); font-weight: 700; }
+
+        /* Architecture columns */
+        .arch-wrapper { display: flex; flex-direction: column; align-items: center; margin: 2rem 0; gap: 0; }
+        .arch-backbone {
+            width: 100%; max-width: 700px; text-align: center;
+            padding: 1.25rem; border-radius: 10px;
+            background: linear-gradient(135deg, #eef2ff, #ede9fe);
+            border: 2px solid var(--accent-indigo);
+            font-weight: 700; font-size: 1.1rem;
+        }
+        .arch-backbone .sub { font-weight: 400; font-size: 0.85rem; color: var(--text-muted); }
+        .arch-branches {
+            display: flex; width: 100%; max-width: 700px; justify-content: center;
+            position: relative; gap: 1rem; flex-wrap: wrap;
+        }
+        .arch-branch {
+            flex: 1; min-width: 190px; border-radius: 8px; padding: 1.25rem;
+            text-align: center; border-top: 4px solid; background: var(--bg-alt);
+            border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+        .arch-branch.b1 { border-top-color: var(--accent-blue); }
+        .arch-branch.b2 { border-top-color: var(--accent-pink); }
+        .arch-branch.b3 { border-top-color: var(--accent-indigo); }
+        .arch-branch .head-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.5rem; }
+        .arch-branch .head-detail { font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; }
+
+        .arch-connectors { width: 100%; max-width: 700px; height: 40px; }
+        .conn-line {
+            fill: none; stroke: var(--border-strong); stroke-width: 1.5;
+            stroke-dasharray: 5; animation: dash-flow 0.8s linear infinite;
+        }
+        @keyframes dash-flow { to { stroke-dashoffset: -10; } }
+
+        /* Formula */
+        .formula {
+            background: var(--bg-alt); border: 1px solid var(--border); border-radius: 8px;
+            padding: 1.5rem; text-align: center; margin: 1.5rem 0;
+            font-family: var(--font-mono); font-size: 1rem;
+        }
+        .formula .hl { color: var(--accent-pink); font-weight: 700; }
+        .formula .hl2 { color: var(--accent-blue); font-weight: 700; }
+        .formula .note { font-family: var(--font-sans); font-size: 0.85rem; color: var(--text-muted); margin-top: 0.75rem; }
+
+        /* KaTeX overrides */
+        .formula .katex { font-size: 1.3em; }
+        .formula .note .katex { font-size: 1.1em; }
+        .katex-inline .katex { font-size: 1.05em; }
+
+        /* Callout */
+        .callout {
+            border-left: 4px solid; padding: 1.25rem 1.5rem; border-radius: 0 8px 8px 0;
+            margin: 1.5rem 0; background: var(--bg-alt);
+        }
+        .callout.blue { border-color: var(--accent-blue); }
+        .callout.pink { border-color: var(--accent-pink); }
+        .callout.emerald { border-color: var(--accent-emerald); }
+        .callout p:last-child { margin-bottom: 0; }
+
+        /* Table */
+        table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+        th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+        th { font-weight: 700; background: var(--bg-alt); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            h1 { font-size: 1.75rem; }
+            .flow-h { flex-direction: column; align-items: center; }
+            .arrow-r { width: 0; height: 24px; border-top: none; border-left: 1.5px solid var(--border-strong); }
+            .arrow-r::after { right: auto; top: auto; bottom: -1px; left: -5px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--border-strong); border-bottom: none; }
+            .pfc-stage { flex-direction: column; }
+            .pfc-stage-label { width: auto; text-align: left; }
+        }
+    
+        /* Language Toggle */
+        .lang-toggle {
+            position: fixed;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            background: linear-gradient(135deg, #2563eb, #7c3aed);
+            border-radius: 0 0 16px 16px;
+            padding: 8px 6px;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.35);
+            cursor: pointer;
+            gap: 4px;
+        }
+        .lang-toggle-btn {
+            padding: 8px 22px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: rgba(255,255,255,0.6);
+            transition: all 0.3s ease;
+            user-select: none;
+            letter-spacing: 0.03em;
+        }
+        .lang-toggle-btn:hover {
+            color: rgba(255,255,255,0.85);
+        }
+        .lang-toggle-btn.active {
+            background: #ffffff;
+            color: #2563eb;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="lang-toggle" onclick="toggleLanguage()">
+    <div class="lang-toggle-btn active" id="btn-en">EN</div>
+    <div class="lang-toggle-btn" id="btn-zh">中文</div>
+</div>
+
+<div class="container">
+
+    <header class="reveal">
+        <h1><span class="lang-span" data-en="How OCR Training Works in OneVision-Encoder" data-zh="OneVision-Encoder 中 OCR 训练的工作原理">How OCR Training Works in OneVision-Encoder</span></h1>
+        <p class="subtitle"><span class="lang-span" data-en="Explaining multi-label Partial FC for OCR-based supervision" data-zh="解析基于 OCR 监督的多标签 Partial FC 机制">Explaining multi-label Partial FC for OCR-based supervision</span></p>
+    </header>
+
+    <!-- Section 1: Overview -->
+    <section class="reveal">
+        <h2><span class="lang-span" data-en="1. Data Sources" data-zh="1. 数据来源">1. Data Sources</span></h2>
+        <p><span class="lang-span" data-en="OCR supervision uses two image datasets that naturally contain embedded text:" data-zh="OCR 监督使用两个天然包含文字的图像数据集：">OCR supervision uses two image datasets that naturally contain embedded text:</span></p>
+        <div class="stat-row">
+            <div class="stat-card">
+                <div class="stat-num blue">15M</div>
+                <div class="stat-label"><span class="lang-span" data-en="&lt;strong&gt;OBELICS&lt;/strong&gt; &amp;mdash; document images from interleaved web pages" data-zh="&lt;strong&gt;OBELICS&lt;/strong&gt; &amp;mdash; 交错网页中的文档图像"><strong>OBELICS</strong> &mdash; document images from interleaved web pages</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num blue">15M</div>
+                <div class="stat-label"><span class="lang-span" data-en="&lt;strong&gt;Zero250M&lt;/strong&gt; &amp;mdash; curated high-quality image collection" data-zh="&lt;strong&gt;Zero250M&lt;/strong&gt; &amp;mdash; 精选高质量图像集合"><strong>Zero250M</strong> &mdash; curated high-quality image collection</span></div>
+            </div>
+        </div>
+        <p><span class="lang-span" data-en="These images are &lt;strong&gt;not paired with text captions&lt;/strong&gt;. Instead, PaddleOCR extracts the visible text and converts it into classification labels." data-zh="这些图像没有配对的文本描述。取而代之的是，PaddleOCR 提取图中可见文字并将其转化为分类标签。">These images are <strong>not paired with text captions</strong>. Instead, PaddleOCR extracts the visible text and converts it into classification labels.</span></p>
+    </section>
+
+    <!-- Section 2: PaddleOCR -->
+    <section class="reveal">
+        <h2><span class="lang-span" data-en="2. PaddleOCR Preprocessing" data-zh="2. PaddleOCR 预处理">2. PaddleOCR Preprocessing</span></h2>
+        <p><span class="lang-span" data-en="Each image is processed offline (before training) through the following pipeline:" data-zh="每张图像在训练前通过以下流程离线处理：">Each image is processed offline (before training) through the following pipeline:</span></p>
+
+        <div class="flow-h">
+            <div class="flow-box"><span class="lang-span" data-en="Raw Image&lt;br&gt;(OBELICS / Zero250M)" data-zh="原始图像&lt;br&gt;(OBELICS / Zero250M)">Raw Image<br>(OBELICS / Zero250M)</span></div>
+            <div class="arrow-r animated"></div>
+            <div class="flow-box hl-blue"><div class="label">PaddleOCR</div><span class="lang-span" data-en="Text region detection&lt;br&gt;+ recognition" data-zh="文本区域检测&lt;br&gt;+ 识别">Text region detection<br>+ recognition</span></div>
+            <div class="arrow-r animated"></div>
+            <div class="flow-box hl-emerald"><div class="label"><span class="lang-span" data-en="Word Segmentation" data-zh="分词">Word Segmentation</span></div><span class="lang-span" data-en="Tokenize recognized&lt;br&gt;text into words" data-zh="将识别的文本切分为词">Tokenize recognized<br>text into words</span></div>
+            <div class="arrow-r animated"></div>
+            <div class="flow-box hl-pink"><div class="label"><span class="lang-span" data-en="Multi-label Tags" data-zh="多标签标注">Multi-label Tags</span></div><span class="lang-span" data-en="100 word-tags&lt;br&gt;per image" data-zh="每张图 100 个词标签">100 word-tags<br>per image</span></div>
+        </div>
+
+        <div class="callout blue">
+            <p><span class="lang-span" data-en="&lt;strong&gt;Key point:&lt;/strong&gt; The segmented words are mapped to a &lt;strong&gt;global vocabulary of 365,187 classes&lt;/strong&gt;. Each image gets exactly &lt;strong&gt;100 tags&lt;/strong&gt; from this vocabulary. These 100 tags are stored as the image&#x27;s multi-label annotation in the &lt;code&gt;.rec&lt;/code&gt; training file." data-zh="&lt;strong&gt;关键点：&lt;/strong&gt;分词后的词被映射到一个包含 &lt;strong&gt;365,187 个类别的全局词表&lt;/strong&gt;中。每张图从该词表中获取恰好 &lt;strong&gt;100 个标签&lt;/strong&gt;。这 100 个标签作为多标签标注存储在 &lt;code&gt;.rec&lt;/code&gt; 训练文件中。"><strong>Key point:</strong> The segmented words are mapped to a <strong>global vocabulary of 365,187 classes</strong>. Each image gets exactly <strong>100 tags</strong> from this vocabulary. These 100 tags are stored as the image's multi-label annotation in the <code>.rec</code> training file.</span></p>
+            <p><span class="lang-span" data-en="&lt;strong&gt;Handling variable word counts:&lt;/strong&gt; In practice, PaddleOCR may extract fewer or more than 100 words from an image. If &lt;strong&gt;fewer than 100&lt;/strong&gt; words are detected, &lt;strong&gt;oversampling&lt;/strong&gt; is applied — existing tags are duplicated to fill the 100 slots. If &lt;strong&gt;more than 100&lt;/strong&gt; words are detected, &lt;strong&gt;downsampling&lt;/strong&gt; is applied — a random subset of 100 tags is selected. This ensures every image has a fixed-size label vector of exactly 100." data-zh="&lt;strong&gt;处理不同词数：&lt;/strong&gt;实际中，PaddleOCR 可能从一张图中提取少于或多于 100 个词。如果检测到&lt;strong&gt;少于 100 个&lt;/strong&gt;词，则进行&lt;strong&gt;过采样（oversampling）&lt;/strong&gt;——复制已有标签填满 100 个位置。如果检测到&lt;strong&gt;多于 100 个&lt;/strong&gt;词，则进行&lt;strong&gt;降采样（downsampling）&lt;/strong&gt;——随机选取 100 个标签的子集。这确保每张图都有固定大小为 100 的标签向量。"><strong>Handling variable word counts:</strong> In practice, PaddleOCR may extract fewer or more than 100 words from an image. If <strong>fewer than 100</strong> words are detected, <strong>oversampling</strong> is applied — existing tags are duplicated to fill the 100 slots. If <strong>more than 100</strong> words are detected, <strong>downsampling</strong> is applied — a random subset of 100 tags is selected. This ensures every image has a fixed-size label vector of exactly 100.</span></p>
+        </div>
+    </section>
+
+    <!-- Section 3: Multi-label Partial FC (THE KEY SECTION) -->
+    <section class="reveal">
+        <h2><span class="lang-span" data-en="3. Multi-label Partial FC (Core Mechanism)" data-zh="3. 多标签 Partial FC（核心机制）">3. Multi-label Partial FC (Core Mechanism)</span></h2>
+        <p><span class="lang-span" data-en="This is the key innovation for OCR training. Unlike standard single-label classification, each image has &lt;strong&gt;100 labels simultaneously&lt;/strong&gt;. The system uses a modified Partial FC that handles multi-label training through &lt;strong&gt;parallel independent softmax losses&lt;/strong&gt;." data-zh="这是 OCR 训练的关键创新。与标准单标签分类不同，每张图同时拥有 &lt;strong&gt;100 个标签&lt;/strong&gt;。系统使用修改版的 Partial FC，通过&lt;strong&gt;并行独立的 softmax loss&lt;/strong&gt; 处理多标签训练。">This is the key innovation for OCR training. Unlike standard single-label classification, each image has <strong>100 labels simultaneously</strong>. The system uses a modified Partial FC that handles multi-label training through <strong>parallel independent softmax losses</strong>.</span></p>
+
+        <h3><span class="lang-span" data-en="Step-by-step: How one OCR image is trained" data-zh="逐步解析：一张 OCR 图像如何训练">Step-by-step: How one OCR image is trained</span></h3>
+
+        <div class="pfc-diagram">
+
+            <!-- Step 1: 100 tags -->
+            <div class="pfc-stage">
+                <div class="pfc-stage-label"><span class="lang-span" data-en="Step 1&lt;br&gt;100 Tags" data-zh="Step 1&lt;br&gt;100 标签">Step 1<br>100 Tags</span></div>
+                <div class="pfc-stage-content">
+                    <p style="font-size:0.9rem; margin-bottom:0.5rem;"><span class="lang-span" data-en="Each image has 100 stored OCR tags (word IDs from the 365K vocabulary):" data-zh="每张图存储 100 个 OCR 标签（来自 365K 词表的词 ID）：">Each image has 100 stored OCR tags (word IDs from the 365K vocabulary):</span></p>
+                    <div class="tag-row" id="tag-row-100">
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin:0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
+
+            <!-- Step 2: Random sample 8 -->
+            <div class="pfc-stage">
+                <div class="pfc-stage-label"><span class="lang-span" data-en="Step 2&lt;br&gt;Sample 8" data-zh="Step 2&lt;br&gt;采样 8 个">Step 2<br>Sample 8</span></div>
+                <div class="pfc-stage-content">
+                    <p style="font-size:0.9rem; margin-bottom:0.5rem;"><span class="lang-span" data-en="Randomly shuffle all 100, keep first 8. Different every iteration:" data-zh="随机打乱 100 个标签，保留前 8 个。每次迭代不同：">Randomly shuffle all 100, keep first 8. Different every iteration:</span></p>
+<pre><code><span class="cm">// fused_partial_fc_v2_multi_res.py line 180-183</span>
+noise = torch.<span class="fn">rand</span>(batch_size, <span class="num">random_diff</span>, device=<span class="str">"cuda"</span>)  <span class="cm">// random_diff=100</span>
+ids_shuffle = torch.<span class="fn">argsort</span>(noise, dim=<span class="num">1</span>)
+ids_keep = ids_shuffle[:, :<span class="num">8</span>]
+local_labels = torch.<span class="fn">gather</span>(local_labels, dim=<span class="num">1</span>, index=ids_keep) <span class="cm">// [B, 8]</span></code></pre>
+                    <div class="tag-row" id="tag-row-8">
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin:0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
+
+            <!-- Step 3: 8 independent classifiers -->
+            <div class="pfc-stage">
+                <div class="pfc-stage-label"><span class="lang-span" data-en="Step 3&lt;br&gt;8x Classify" data-zh="Step 3&lt;br&gt;8 路分类">Step 3<br>8x Classify</span></div>
+                <div class="pfc-stage-content">
+                    <p style="font-size:0.9rem; margin-bottom:0.5rem;"><span class="lang-span" data-en="Each of the 8 labels gets its own independent classifier. For each label &lt;em&gt;i&lt;/em&gt;:" data-zh="8 个标签中的每一个都拥有独立的分类器。对于每个标签 &lt;em&gt;i&lt;/em&gt;：">Each of the 8 labels gets its own independent classifier. For each label <em>i</em>:</span></p>
+                    <ol style="font-size: 0.9rem;">
+                        <li><span class="lang-span" data-en="&lt;strong&gt;Sample class centers:&lt;/strong&gt; Keep the positive class center + randomly sample 10% of the 365K negative centers (&lt;code&gt;sample_rate=0.1&lt;/code&gt;)" data-zh="&lt;strong&gt;采样类中心：&lt;/strong&gt;保留正类中心 + 随机采样 365K 负类中心的 10%（&lt;code&gt;sample_rate=0.1&lt;/code&gt;）"><strong>Sample class centers:</strong> Keep the positive class center + randomly sample 10% of the 365K negative centers (<code>sample_rate=0.1</code>)</span></li>
+                        <li><span class="lang-span" data-en="&lt;strong&gt;Compute cosine similarity:&lt;/strong&gt;" data-zh="&lt;strong&gt;计算余弦相似度：&lt;/strong&gt;"><strong>Compute cosine similarity:</strong></span> <span class="katex-inline" data-formula="\text{logits}_i = \overline{\mathbf{e}} \cdot \overline{\mathbf{W}}_i^\top"></span></li>
+                        <li><span class="lang-span" data-en="&lt;strong&gt;Apply ArcFace margin:&lt;/strong&gt; Add angular margin &lt;code&gt;m&lt;/code&gt; to the positive logit:" data-zh="&lt;strong&gt;施加 ArcFace margin：&lt;/strong&gt;将角度 margin &lt;code&gt;m&lt;/code&gt; 加到正类 logit 上："><strong>Apply ArcFace margin:</strong> Add angular margin <code>m</code> to the positive logit:</span> <span class="katex-inline" data-formula="\cos(\theta_{y_i} + m)"></span></li>
+                        <li><span class="lang-span" data-en="&lt;strong&gt;Scale and softmax:&lt;/strong&gt; Multiply by &lt;code&gt;s&lt;/code&gt;, then softmax cross-entropy" data-zh="&lt;strong&gt;缩放并 softmax：&lt;/strong&gt;乘以 &lt;code&gt;s&lt;/code&gt;，然后 softmax 交叉熵"><strong>Scale and softmax:</strong> Multiply by <code>s</code>, then softmax cross-entropy</span></li>
+                    </ol>
+
+                    <!-- ArcFace Animation Start -->
+                    <div class="card arcface-anim" style="margin: 1.5rem 0; padding: 1.5rem;">
+                        <h4 style="margin-top:0; margin-bottom: 1rem; color: var(--text); font-size: 1.05rem;">
+                            <span class="lang-span" data-en="Multi-label ArcFace Visualization" data-zh="多标签 ArcFace 可视化">Multi-label ArcFace Visualization</span>
+                        </h4>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center;">
+                            <div style="flex: 1 1 50%; min-width: 250px; text-align: center; position: relative;">
+                                <canvas id="af-canvas" width="400" height="400" style="max-width: 100%; height: auto; display: block; margin: 0 auto;"></canvas>
+                            </div>
+                            <div style="flex: 1 1 40%; min-width: 220px; display: flex; flex-direction: column; gap: 1rem;">
+                                <div>
+                                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; display: flex; justify-content: space-between;">
+                                        <span class="lang-span" data-en="Click to select label" data-zh="点击选择标签">Click to select label</span>
+                                        <span id="af-cycle-status" class="lang-span" data-en="Auto-cycling..." data-zh="自动轮播中..." style="color: var(--accent-blue); font-style: italic;">Auto-cycling...</span>
+                                    </div>
+                                    <div id="af-tabs" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                                        <!-- Tabs generated via JS -->
+                                    </div>
+                                </div>
+                                <div style="background: var(--bg-alt); padding: 1rem; border-radius: 8px; border: 1px solid var(--border); font-size: 0.9rem; display: flex; flex-direction: column; gap: 0.4rem;">
+                                    <div><strong><span class="lang-span" data-en="Current label" data-zh="当前标签">Current label</span>:</strong> <span id="af-info-label" style="color: var(--accent-pink); font-family: var(--font-mono);">y₀ = label_0</span></div>
+                                    <div><strong>θ (<span class="lang-span" data-en="angle to positive" data-zh="到正类的角度">angle to positive</span>):</strong> <span id="af-info-theta">0°</span></div>
+                                    <div><strong>θ + m (margin):</strong> <span id="af-info-margin">0°</span></div>
+                                    <div><strong><span class="lang-span" data-en="Sampled negatives" data-zh="采样的负类">Sampled negatives</span>:</strong> <span style="color: var(--text-muted);">5 / 36K</span></div>
+                                </div>
+                                <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                                    <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#2563eb;"></span> <span class="lang-span" data-en="Embedding" data-zh="嵌入向量">Embedding</span></div>
+                                    <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#e11d48;"></span> <span class="lang-span" data-en="Positive center" data-zh="正类中心">Positive center</span></div>
+                                    <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#94a3b8;"></span> <span class="lang-span" data-en="Negative center" data-zh="负类中心">Negative center</span></div>
+                                    <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:12px;height:12px;background:rgba(225,29,72,0.15);border:1px solid rgba(225,29,72,0.4);"></span> <span>margin m</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <style>
+                            .af-tab {
+                                padding: 6px 0; text-align: center; border-radius: 4px; font-size: 0.8rem; font-family: var(--font-mono);
+                                background: var(--bg-alt); border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+                                transition: all 0.2s ease; user-select: none;
+                            }
+                            .af-tab:hover { background: #e2e8f0; }
+                            .af-tab.active { background: #fff1f2; border-color: #fecdd3; color: var(--accent-pink); font-weight: bold; }
+                        </style>
+                        <script>
+                            (function() {
+                                const canvas = document.getElementById('af-canvas');
+                                const ctx = canvas.getContext('2d');
+                                const dpr = window.devicePixelRatio || 1;
+                                const width = 400; const height = 400;
+                                canvas.width = width * dpr; canvas.height = height * dpr;
+                                ctx.scale(dpr, dpr);
+                                
+                                const cx = width / 2; const cy = height / 2;
+                                const radius = 130;
+                                const embedAngle = -Math.PI / 4; // 45 deg up-right
+                                const marginAngle = 28.6 * Math.PI / 180;
+                                
+                                const labels = [
+                                    { id: 0, text: 'revenue_10234', angle: embedAngle - 0.4 },
+                                    { id: 1, text: 'total_842', angle: embedAngle + 0.6 },
+                                    { id: 2, text: 'net_9931', angle: embedAngle - 0.8 },
+                                    { id: 3, text: 'q3_442', angle: embedAngle + 0.3 },
+                                    { id: 4, text: 'growth_882', angle: embedAngle - 1.2 },
+                                    { id: 5, text: 'margin_112', angle: embedAngle + 1.1 },
+                                    { id: 6, text: 'tax_332', angle: embedAngle - 0.6 },
+                                    { id: 7, text: 'invoice_81', angle: embedAngle + 0.9 }
+                                ];
+                                
+                                let currentId = 0;
+                                let transitionProgress = 1;
+                                let animStartTime = 0;
+                                let sourceAngle = labels[0].angle;
+                                let targetAngle = labels[0].angle;
+                                let isAutoCycling = true;
+                                let cycleTimer = null;
+                                let negCenters = [];
+                                
+                                function generateNegatives(excludeAngle) {
+                                    const negs = [];
+                                    for(let i=0; i<5; i++) {
+                                        let a = 0;
+                                        do { a = Math.random() * Math.PI * 2; } while (Math.abs(a - excludeAngle) < 0.5);
+                                        negs.push(a);
+                                    }
+                                    return negs;
+                                }
+                                negCenters = generateNegatives(labels[0].angle);
+                                
+                                // UI Setup
+                                const tabsContainer = document.getElementById('af-tabs');
+                                const tabs = [];
+                                labels.forEach((lbl, i) => {
+                                    const tab = document.createElement('div');
+                                    tab.className = 'af-tab' + (i === 0 ? ' active' : '');
+                                    tab.textContent = 'y' + i;
+                                    tab.onclick = () => {
+                                        isAutoCycling = false;
+                                        document.getElementById('af-cycle-status').style.visibility = 'hidden';
+                                        clearInterval(cycleTimer);
+                                        selectLabel(i);
+                                    };
+                                    tabsContainer.appendChild(tab);
+                                    tabs.push(tab);
+                                });
+                                
+                                function selectLabel(id) {
+                                    sourceAngle = currentAngle();
+                                    targetAngle = labels[id].angle;
+                                    if (targetAngle - sourceAngle > Math.PI) sourceAngle += Math.PI * 2;
+                                    if (sourceAngle - targetAngle > Math.PI) sourceAngle -= Math.PI * 2;
+                                    
+                                    currentId = id;
+                                    transitionProgress = 0;
+                                    animStartTime = performance.now();
+                                    negCenters = generateNegatives(targetAngle);
+                                    
+                                    tabs.forEach((t, i) => t.classList.toggle('active', i === id));
+                                    document.getElementById('af-info-label').textContent = 'y' + id + ' = ' + labels[id].text;
+                                    
+                                    requestAnimationFrame(draw);
+                                }
+                                
+                                function startCycle() {
+                                    cycleTimer = setInterval(() => {
+                                        if (isAutoCycling) selectLabel((currentId + 1) % 8);
+                                    }, 2500);
+                                }
+                                startCycle();
+                                
+                                function currentAngle() {
+                                    const ease = t => t<.5 ? 2*t*t : -1+(4-2*t)*t;
+                                    const p = Math.min(transitionProgress, 1);
+                                    return sourceAngle + (targetAngle - sourceAngle) * ease(p);
+                                }
+                                
+                                function draw(time) {
+                                    if (transitionProgress < 1) {
+                                        transitionProgress = (time - animStartTime) / 600; // 600ms
+                                    }
+                                    
+                                    ctx.clearRect(0, 0, width, height);
+                                    
+                                    // Unit Circle
+                                    ctx.beginPath();
+                                    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+                                    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2; ctx.stroke();
+                                    
+                                    // Axes
+                                    ctx.beginPath();
+                                    ctx.moveTo(cx - radius - 10, cy); ctx.lineTo(cx + radius + 10, cy);
+                                    ctx.moveTo(cx, cy - radius - 10); ctx.lineTo(cx, cy + radius + 10);
+                                    ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 1; ctx.stroke();
+                                    
+                                    const cAngle = currentAngle();
+                                    
+                                    // Negatives
+                                    ctx.fillStyle = '#94a3b8';
+                                    negCenters.forEach(a => {
+                                        ctx.beginPath();
+                                        ctx.arc(cx + Math.cos(a)*radius, cy + Math.sin(a)*radius, 3, 0, Math.PI*2);
+                                        ctx.fill();
+                                    });
+                                    
+                                    // Margin Wedge
+                                    const isClockwise = cAngle > embedAngle;
+                                    const wedgeStart = cAngle;
+                                    const wedgeEnd = cAngle + (isClockwise ? -marginAngle : marginAngle);
+                                    
+                                    ctx.beginPath();
+                                    ctx.moveTo(cx, cy);
+                                    ctx.arc(cx, cy, radius, Math.min(wedgeStart, wedgeEnd), Math.max(wedgeStart, wedgeEnd));
+                                    ctx.closePath();
+                                    ctx.fillStyle = 'rgba(225, 29, 72, 0.15)';
+                                    ctx.fill();
+                                    
+                                    // Theta arc
+                                    ctx.beginPath();
+                                    ctx.arc(cx, cy, radius * 0.3, Math.min(embedAngle, cAngle), Math.max(embedAngle, cAngle));
+                                    ctx.strokeStyle = '#64748b'; ctx.lineWidth = 1.5; ctx.stroke();
+                                    ctx.fillStyle = '#64748b';
+                                    ctx.font = '12px var(--font-sans)';
+                                    const midAngle = (embedAngle + cAngle) / 2;
+                                    ctx.fillText('θ', cx + Math.cos(midAngle)*radius*0.4 - 4, cy + Math.sin(midAngle)*radius*0.4 + 4);
+                                    
+                                    // Embedding
+                                    ctx.beginPath();
+                                    ctx.moveTo(cx, cy);
+                                    ctx.lineTo(cx + Math.cos(embedAngle)*radius*1.1, cy + Math.sin(embedAngle)*radius*1.1);
+                                    ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 3; ctx.stroke();
+                                    
+                                    ctx.beginPath();
+                                    ctx.moveTo(cx + Math.cos(embedAngle)*radius*1.1, cy + Math.sin(embedAngle)*radius*1.1);
+                                    ctx.lineTo(cx + Math.cos(embedAngle)*radius*1.1 - Math.cos(embedAngle-0.3)*10, cy + Math.sin(embedAngle)*radius*1.1 - Math.sin(embedAngle-0.3)*10);
+                                    ctx.lineTo(cx + Math.cos(embedAngle)*radius*1.1 - Math.cos(embedAngle+0.3)*10, cy + Math.sin(embedAngle)*radius*1.1 - Math.sin(embedAngle+0.3)*10);
+                                    ctx.closePath();
+                                    ctx.fillStyle = '#2563eb'; ctx.fill();
+                                    
+                                    // Positive Center
+                                    ctx.beginPath();
+                                    ctx.arc(cx + Math.cos(cAngle)*radius, cy + Math.sin(cAngle)*radius, 6, 0, Math.PI*2);
+                                    ctx.fillStyle = '#e11d48'; ctx.fill();
+                                    
+                                    ctx.font = 'bold 14px var(--font-mono)';
+                                    ctx.fillText('y' + currentId, cx + Math.cos(cAngle)*(radius+20) - 8, cy + Math.sin(cAngle)*(radius+20) + 5);
+                                    
+                                    // Text Info
+                                    if (transitionProgress >= 1) {
+                                        const thetaDeg = Math.abs((embedAngle - cAngle) * 180 / Math.PI).toFixed(1);
+                                        const marginDeg = (parseFloat(thetaDeg) + 28.6).toFixed(1);
+                                        document.getElementById('af-info-theta').textContent = thetaDeg + '°';
+                                        document.getElementById('af-info-margin').textContent = marginDeg + '°';
+                                    }
+                                    
+                                    if (transitionProgress < 1 || isAutoCycling) {
+                                        requestAnimationFrame(draw);
+                                    }
+                                }
+                                
+                                document.getElementById('af-info-label').textContent = 'y0 = revenue_10234';
+                                draw(performance.now());
+                            })();
+                        </script>
+                    </div>
+                    <!-- ArcFace Animation End -->
+
+                    <div class="weight-grid" id="weight-grid">
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); text-align: center; margin-top: 0.5rem;">
+                        <span class="lang-span" data-en="Each column = one of 8 labels." data-zh="每列 = 8 个标签之一。">Each column = one of 8 labels.</span> <span style="display:inline-block;width:10px;height:10px;background:var(--accent-pink);border-radius:2px;vertical-align:middle;"></span> <span class="lang-span" data-en="positive center" data-zh="正类中心">positive center</span>
+                        <span style="display:inline-block;width:10px;height:10px;background:#bfdbfe;border-radius:2px;vertical-align:middle;margin-left:8px;"></span> <span class="lang-span" data-en="sampled negatives (10%)" data-zh="采样的负类 (10%)">sampled negatives (10%)</span>
+                        <span style="display:inline-block;width:10px;height:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:2px;vertical-align:middle;margin-left:8px;"></span> <span class="lang-span" data-en="skipped (90%)" data-zh="跳过 (90%)">skipped (90%)</span>
+                    </p>
+                </div>
+            </div>
+
+            <div style="margin:0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
+
+            <!-- Step 4: Average loss -->
+            <div class="pfc-stage">
+                <div class="pfc-stage-label"><span class="lang-span" data-en="Step 4&lt;br&gt;Average" data-zh="Step 4&lt;br&gt;平均">Step 4<br>Average</span></div>
+                <div class="pfc-stage-content">
+                    <p style="font-size:0.9rem; margin-bottom:0.5rem;"><span class="lang-span" data-en="The 8 independent CE losses are averaged:" data-zh="8 个独立的 CE loss 取平均：">The 8 independent CE losses are averaged:</span></p>
+                    <div class="loss-row" id="loss-row">
+                    </div>
+                    <div class="formula">
+                        <div class="katex-formula" id="formula-ocr-loss"></div>
+                        <div class="note">
+                            <div class="katex-formula" id="formula-ce-def" style="display:inline-block;margin-bottom:0.25rem;"></div>
+                            <br>
+                            <span class="hl">m</span> = <span class="lang-span" data-en="angular margin" data-zh="角度 margin">angular margin</span> &nbsp;&nbsp;|&nbsp;&nbsp; <span class="hl2">s</span> = <span class="lang-span" data-en="scale factor" data-zh="缩放因子">scale factor</span> (64)
+                        </div>
+                    </div>
+<pre><code><span class="cm">// fused_partial_fc_v2_multi_res.py line 497</span>
+loss = (loss_0 + loss_1 + loss_2 + loss_3 + loss_4 + loss_5 + loss_6 + loss_7) / <span class="num">8.0</span></code></pre>
+                </div>
+            </div>
+        </div>
+
+        <div class="callout pink">
+            <p><span class="lang-span" data-en="&lt;strong&gt;Why 8 parallel classifiers instead of multi-label BCE?&lt;/strong&gt;" data-zh="&lt;strong&gt;为什么使用 8 路并行分类器而不是多标签 BCE？&lt;/strong&gt;"><strong>Why 8 parallel classifiers instead of multi-label BCE?</strong></span></p>
+            <p><span class="lang-span" data-en="Each label gets a full softmax over the entire vocabulary (~365K classes). This forces the model to discriminate each OCR word against all other possible words &amp;mdash; much harder than binary &quot;present/not present&quot;. The ArcFace margin further pushes embeddings apart in angular space, producing more discriminative representations." data-zh="每个标签都在整个词表（~365K 类别）上进行完整的 softmax。这迫使模型将每个 OCR 词与所有其他可能的词区分开来——远比二元的&quot;存在/不存在&quot;更难。ArcFace margin 进一步在角度空间中推开嵌入向量，产生更具判别力的表征。">Each label gets a full softmax over the entire vocabulary (~365K classes). This forces the model to discriminate each OCR word against all other possible words &mdash; much harder than binary "present/not present". The ArcFace margin further pushes embeddings apart in angular space, producing more discriminative representations.</span></p>
+        </div>
+    </section>
+
+    <!-- Section 4: Training Architecture -->
+    <section class="reveal">
+        <h2><span class="lang-span" data-en="4. Multi-Head Training Architecture" data-zh="4. 多头训练架构">4. Multi-Head Training Architecture</span></h2>
+        <p><span class="lang-span" data-en="In Stage 2, three data heads share a single ViT backbone. Each head has its own Partial FC classifier with separate class centers." data-zh="在 Stage 2 中，三个数据头共享同一个 ViT 骨干网络。每个头拥有独立的 Partial FC 分类器和各自的类中心。">In Stage 2, three data heads share a single ViT backbone. Each head has its own Partial FC classifier with separate class centers.</span></p>
+
+        <div class="arch-wrapper">
+            <div class="arch-backbone">
+                <span class="lang-span" data-en="Shared ViT Backbone (OneVision-Encoder)" data-zh="共享 ViT 骨干网络 (OneVision-Encoder)">Shared ViT Backbone (OneVision-Encoder)</span>
+                <div class="sub">Image: [B, 3, 448, 448] &nbsp;|&nbsp; OCR: [B, 3, 448, 448] &nbsp;|&nbsp; Video: [B, 3, 8, 224, 224]</div>
+                <div class="sub" style="margin-top:0.25rem;"><span class="lang-span" data-en="Output: pooler_output &amp;rarr; [B, 1024] embedding" data-zh="输出：pooler_output &amp;rarr; [B, 1024] 嵌入向量">Output: pooler_output &rarr; [B, 1024] embedding</span></div>
+            </div>
+
+            <svg class="arch-connectors" viewBox="0 0 700 40" preserveAspectRatio="xMidYMid meet">
+                <path class="conn-line" d="M350,0 C350,20 117,20 117,40"/>
+                <path class="conn-line" d="M350,0 L350,40"/>
+                <path class="conn-line" d="M350,0 C350,20 583,20 583,40"/>
+            </svg>
+
+            <div class="arch-branches">
+                <div class="arch-branch b1">
+                    <div class="head-name" style="color:var(--accent-blue)"><span class="lang-span" data-en="Head 1: Image (SI)" data-zh="头 1：图像 (SI)">Head 1: Image (SI)</span></div>
+                    <div class="head-detail">
+                        COYO-400M / LAION-260M<br>
+                        <code>num_classes = 2,000,000</code><br>
+                        <code>random_diff = 10</code><br>
+                        <code>batch_size = 16</code>
+                    </div>
+                </div>
+                <div class="arch-branch b2">
+                    <div class="head-name" style="color:var(--accent-pink)"><span class="lang-span" data-en="Head 2: OCR" data-zh="头 2：OCR">Head 2: OCR</span></div>
+                    <div class="head-detail">
+                        OBELICS / Zero250M<br>
+                        <code>num_classes = 365,187</code><br>
+                        <code>random_diff = 100</code><br>
+                        <code>batch_size = 8</code>
+                    </div>
+                </div>
+                <div class="arch-branch b3">
+                    <div class="head-name" style="color:var(--accent-indigo)"><span class="lang-span" data-en="Head 3: Video Codec" data-zh="头 3：视频 Codec">Head 3: Video Codec</span></div>
+                    <div class="head-detail">
+                        HowTo100M / Panda-70M / K710<br>
+                        Separate PFC head<br>
+                        Codec + Sampling + Collage<br>
+                        <code>batch_size = 16</code>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr><th><span class="lang-span" data-en="Config" data-zh="配置">Config</span></th><th><span class="lang-span" data-en="Image Head" data-zh="图像头">Image Head</span></th><th><span class="lang-span" data-en="OCR Head" data-zh="OCR 头">OCR Head</span></th><th><span class="lang-span" data-en="Video Head" data-zh="视频头">Video Head</span></th></tr>
+            </thead>
+            <tbody>
+                <tr><td><span class="lang-span" data-en="Data Source" data-zh="数据来源">Data Source</span></td><td>COYO / LAION</td><td>OBELICS / Zero250M</td><td>HowTo100M / Panda-70M / K710</td></tr>
+                <tr><td>num_classes</td><td>2,000,000</td><td>365,187</td><td>Separate</td></tr>
+                <tr><td>random_diff</td><td>10</td><td>100</td><td>N/A</td></tr>
+                <tr><td><span class="lang-span" data-en="Labels sampled per image" data-zh="每张图采样标签数">Labels sampled per image</span></td><td>8 of 10</td><td>8 of 100</td><td>8</td></tr>
+                <tr><td>sample_rate (PFC)</td><td>0.1</td><td>0.1</td><td>0.1</td></tr>
+                <tr><td><span class="lang-span" data-en="Input processing" data-zh="输入处理">Input processing</span></td><td><span class="lang-span" data-en="2D image (448x448)" data-zh="2D 图像 (448x448)">2D image (448x448)</span></td><td><span class="lang-span" data-en="2D image (448x448)" data-zh="2D 图像 (448x448)">2D image (448x448)</span></td><td>Video (8x224x224)</td></tr>
+                <tr><td>loss_weight</td><td>1.0</td><td>1.0</td><td>1.0</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Section 5: Training Loss -->
+    <section class="reveal">
+        <h2><span class="lang-span" data-en="5. Total Training Loss" data-zh="5. 总训练损失">5. Total Training Loss</span></h2>
+
+        <div class="formula" style="font-size: 1.1rem;">
+            <div class="katex-formula" id="formula-total-loss"></div>
+            <div class="note"><span class="lang-span" data-en="All three losses are weighted equally (weight = 1.0). The shared backbone receives gradients from all three heads simultaneously." data-zh="三个损失等权重（weight = 1.0）。共享骨干网络同时接收来自三个头的梯度。">All three losses are weighted equally (weight = 1.0). The shared backbone receives gradients from all three heads simultaneously.</span></div>
+        </div>
+
+<pre><code><span class="cm">// training/train.py line 641-657</span>
+<span class="kw">for</span> head_id, pfc <span class="kw">in</span> <span class="fn">enumerate</span>(list_module_pfc):
+    head_embedding = list_embedding[head_id]          <span class="cm">// [B, 1024]</span>
+    head_label = list_data_batch[head_id][<span class="str">"labels"</span>]   <span class="cm">// [B, random_diff]</span>
+    head_label = head_label[:, label_select : label_select + random_diff]
+    head_loss = pfc(head_embedding, head_label, random_diff) * loss_weight
+    list_loss.append(head_loss)
+
+scaled_loss = <span class="fn">sum</span>(list_loss) / backward_passes_per_step
+scaled_loss.<span class="fn">backward</span>()</code></pre>
+    </section>
+
+    <!-- Section 6: Summary -->
+    <section class="reveal">
+        <h2><span class="lang-span" data-en="6. Two-Stage Training Summary" data-zh="6. 两阶段训练总结">6. Two-Stage Training Summary</span></h2>
+
+        <div class="callout blue">
+            <h3 style="margin-top:0;"><span class="lang-span" data-en="Stage 1: Image-only Pretraining" data-zh="Stage 1：纯图像预训练">Stage 1: Image-only Pretraining</span></h3>
+            <p><span class="lang-span" data-en="Train the backbone on COYO/LAION images with 2M cluster centers. The ViT learns general visual representations." data-zh="使用 COYO/LAION 图像和 200 万类中心训练骨干网络。ViT 学习通用视觉表征。">Train the backbone on COYO/LAION images with 2M cluster centers. The ViT learns general visual representations.</span></p>
+        </div>
+
+        <div class="callout pink">
+            <h3 style="margin-top:0;"><span class="lang-span" data-en="Stage 2: Joint Multi-Modal Training" data-zh="Stage 2：联合多模态训练">Stage 2: Joint Multi-Modal Training</span></h3>
+            <p><span class="lang-span" data-en="Add OCR and Video heads. The OCR head forces the encoder to become &lt;strong&gt;text-aware&lt;/strong&gt; &amp;mdash; by classifying word-level tags, the ViT learns to represent text regions with high fidelity. This is why OneVision-Encoder excels at &lt;strong&gt;DocVQA&lt;/strong&gt;, &lt;strong&gt;ChartQA&lt;/strong&gt;, and &lt;strong&gt;OCRBench&lt;/strong&gt; despite being a general-purpose vision encoder." data-zh="加入 OCR 和视频头。OCR 头迫使编码器具备&lt;strong&gt;文本感知能力&lt;/strong&gt;——通过分类词级标签，ViT 学会高保真地表征文本区域。这就是为什么 OneVision-Encoder 作为通用视觉编码器却在 &lt;strong&gt;DocVQA&lt;/strong&gt;、&lt;strong&gt;ChartQA&lt;/strong&gt; 和 &lt;strong&gt;OCRBench&lt;/strong&gt; 上表现出色。">Add OCR and Video heads. The OCR head forces the encoder to become <strong>text-aware</strong> &mdash; by classifying word-level tags, the ViT learns to represent text regions with high fidelity. This is why OneVision-Encoder excels at <strong>DocVQA</strong>, <strong>ChartQA</strong>, and <strong>OCRBench</strong> despite being a general-purpose vision encoder.</span></p>
+        </div>
+
+        <div class="callout emerald">
+            <h3 style="margin-top:0;"><span class="lang-span" data-en="Key Insight" data-zh="核心洞察">Key Insight</span></h3>
+            <p><span class="lang-span" data-en="The OCR tags are &lt;strong&gt;not used for text decoding&lt;/strong&gt;. They serve as a &lt;strong&gt;discriminative classification signal&lt;/strong&gt;: by forcing the encoder to distinguish between 365K possible words for each detected text token, the learned representations become highly sensitive to text content. This is fundamentally different from contrastive image-text approaches (like CLIP) which only align global image and sentence embeddings." data-zh="OCR 标签&lt;strong&gt;并非用于文本解码&lt;/strong&gt;。它们作为&lt;strong&gt;判别性分类信号&lt;/strong&gt;：通过迫使编码器为每个检测到的文本 token 在 365K 个可能的词中进行区分，学到的表征对文本内容变得高度敏感。这与对比式图文方法（如 CLIP）只对齐全局图像和句子嵌入有本质不同。">The OCR tags are <strong>not used for text decoding</strong>. They serve as a <strong>discriminative classification signal</strong>: by forcing the encoder to distinguish between 365K possible words for each detected text token, the learned representations become highly sensitive to text content. This is fundamentally different from contrastive image-text approaches (like CLIP) which only align global image and sentence embeddings.</span></p>
+        </div>
+    </section>
+
+</div>
+
+<script>
+    
+    // Language Toggle
+    let currentLang = 'en';
+    function toggleLanguage() {
+        currentLang = currentLang === 'en' ? 'zh' : 'en';
+        document.documentElement.setAttribute('data-lang', currentLang);
+        
+        document.getElementById('btn-en').classList.toggle('active', currentLang === 'en');
+        document.getElementById('btn-zh').classList.toggle('active', currentLang === 'zh');
+        
+        document.querySelectorAll('.lang-span').forEach(el => {
+            el.innerHTML = el.getAttribute(`data-${currentLang}`);
+        });
+        
+        // Also update <title>
+        const titleSpan = document.querySelector('title.lang-span');
+        if(titleSpan) {
+            document.title = titleSpan.getAttribute(`data-${currentLang}`);
+        }
+    }
+
+    // Scroll reveal
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('active'); });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    // Generate 100-tag row (Step 1)
+    const tagRow100 = document.getElementById('tag-row-100');
+    const words = ['revenue','total','net','q3','2025','growth','margin','tax','invoice','receipt','balance','due','date','chart','graph','index','volume','sales','account','report','price','cost','profit','year','month','rate','amount','stock','share','market','fund','debt','loan','credit','return','yield','asset','bonus','value','trade'];
+    const allTags = [];
+    for (let i = 0; i < 100; i++) {
+        const span = document.createElement('span');
+        span.className = 'tag';
+        span.textContent = words[i % words.length] + '_' + (10000 + Math.floor(Math.random() * 355187));
+        tagRow100.appendChild(span);
+        allTags.push(span);
+    }
+
+    // Generate 8-tag row (Step 2) - animated sampling
+    const tagRow8 = document.getElementById('tag-row-8');
+    const sampledSlots = [];
+    for (let i = 0; i < 8; i++) {
+        const span = document.createElement('span');
+        span.className = 'tag active';
+        span.textContent = '...';
+        tagRow8.appendChild(span);
+        sampledSlots.push(span);
+    }
+
+    // Resample animation
+    function resampleTags() {
+        // Reset all
+        allTags.forEach(t => { t.classList.remove('active'); t.classList.remove('dim'); });
+
+        // Pick 8 random indices
+        const indices = [];
+        while (indices.length < 8) {
+            const r = Math.floor(Math.random() * 100);
+            if (!indices.includes(r)) indices.push(r);
+        }
+        indices.sort((a, b) => a - b);
+
+        // Highlight picked, dim others
+        allTags.forEach((t, i) => {
+            if (indices.includes(i)) {
+                t.classList.add('active');
+            } else {
+                t.classList.add('dim');
+            }
+        });
+
+        // Update step 2 display
+        indices.forEach((idx, i) => {
+            sampledSlots[i].textContent = allTags[idx].textContent;
+        });
+    }
+    resampleTags();
+    setInterval(resampleTags, 3000);
+
+    // Weight matrix visualization (Step 3)
+    const weightGrid = document.getElementById('weight-grid');
+    const totalCenters = 20; // visual representation (each cell = ~18K real centers)
+    for (let col = 0; col < 8; col++) {
+        const colDiv = document.createElement('div');
+        colDiv.className = 'weight-col';
+        const label = document.createElement('div');
+        label.className = 'weight-col-label';
+        label.style.color = 'var(--accent-pink)';
+        label.style.background = '#fff1f2';
+        label.textContent = 'y' + col;
+        colDiv.appendChild(label);
+
+        for (let row = 0; row < totalCenters; row++) {
+            const cell = document.createElement('div');
+            cell.className = 'weight-cell';
+            if (row === col % totalCenters) {
+                cell.classList.add('pos');
+            } else if (Math.random() < 0.1) {
+                cell.classList.add('neg', 'sampled');
+            } else {
+                cell.classList.add('neg', 'unsampled');
+            }
+            colDiv.appendChild(cell);
+        }
+        weightGrid.appendChild(colDiv);
+    }
+
+    // Loss row (Step 4)
+    const lossRow = document.getElementById('loss-row');
+    for (let i = 0; i < 8; i++) {
+        if (i > 0) {
+            const plus = document.createElement('span');
+            plus.className = 'loss-plus';
+            plus.textContent = '+';
+            lossRow.appendChild(plus);
+        }
+        const box = document.createElement('div');
+        box.className = 'loss-box';
+        box.textContent = 'CE' + i;
+        lossRow.appendChild(box);
+    }
+    const eq = document.createElement('span');
+    eq.className = 'loss-plus';
+    eq.textContent = ' ) / 8';
+    lossRow.insertBefore((() => { const s = document.createElement('span'); s.className = 'loss-plus'; s.textContent = '( '; return s; })(), lossRow.firstChild);
+    lossRow.appendChild(eq);
+</script>
+
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script>
+    // Pre-render formulas with KaTeX once loaded
+    function renderFormulas() {
+        if (typeof katex === 'undefined') {
+            setTimeout(renderFormulas, 100);
+            return;
+        }
+        const displayFormulas = {
+            'formula-ocr-loss': String.raw`\mathcal{L}_{\text{OCR}} = \frac{1}{8}\sum_{i=0}^{7} \text{CE}_i`,
+            'formula-ce-def': String.raw`\text{CE}_i = -\log\!\left(\text{softmax}\!\left(\cos(\theta_{y_i} + m) \cdot s\right)\right)`,
+            'formula-total-loss': String.raw`\mathcal{L}_{\text{total}} = \color{#2563eb}{\mathcal{L}_{\text{image}}} + \color{#e11d48}{\mathcal{L}_{\text{OCR}}} + \mathcal{L}_{\text{video}}`
+        };
+        for (const [id, tex] of Object.entries(displayFormulas)) {
+            const el = document.getElementById(id);
+            if (el) katex.render(tex, el, { displayMode: true, throwOnError: false });
+        }
+        // Inline formulas
+        document.querySelectorAll('.katex-inline').forEach(el => {
+            const tex = el.getAttribute('data-formula');
+            if (tex) katex.render(tex, el, { displayMode: false, throwOnError: false });
+        });
+    }
+    renderFormulas();
+</script>
+
+</body>
+</html>
