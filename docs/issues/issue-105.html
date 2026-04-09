@@ -249,6 +249,24 @@
         .callout.emerald { border-color: var(--accent-emerald); }
         .callout p:last-child { margin-bottom: 0; }
 
+        /* Original Issue Question */
+        .issue-question {
+            background: var(--bg-alt); border: 1px solid var(--border);
+            border-left: 4px solid var(--accent-indigo); border-radius: 0 10px 10px 0;
+            padding: 1.5rem 1.75rem; margin-bottom: 3rem;
+        }
+        .issue-question-header {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 0.75rem;
+            font-size: 0.85rem; color: var(--text-muted);
+        }
+        .issue-question-header a {
+            color: var(--accent-indigo); text-decoration: none; font-weight: 600;
+        }
+        .issue-question-header a:hover { text-decoration: underline; }
+        .issue-question-body { font-size: 0.95rem; color: var(--text); line-height: 1.7; }
+        .issue-question-body ul { margin: 0.5rem 0; padding-left: 1.25rem; }
+        .issue-question-body li { margin-bottom: 0.25rem; }
+
         /* Table */
         table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
         th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
@@ -332,6 +350,29 @@
         <h1><span class="lang-span" data-en="How OCR Training Works in OneVision-Encoder" data-zh="OneVision-Encoder 中 OCR 训练的工作原理">How OCR Training Works in OneVision-Encoder</span></h1>
         <p class="subtitle"><span class="lang-span" data-en="Explaining multi-label Partial FC for OCR-based supervision" data-zh="解析基于 OCR 监督的多标签 Partial FC 机制">Explaining multi-label Partial FC for OCR-based supervision</span></p>
     </header>
+
+    <!-- Original Issue Question -->
+    <div class="issue-question reveal">
+        <div class="issue-question-header">
+            💬 <a href="https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/105" target="_blank">Issue #105</a>
+            <span class="lang-span" data-en="opened by &lt;strong&gt;JerryPW&lt;/strong&gt;" data-zh="由 &lt;strong&gt;JerryPW&lt;/strong&gt; 提出">opened by <strong>JerryPW</strong></span>
+        </div>
+        <div class="issue-question-body">
+            <p><span class="lang-span"
+                data-en="Hi, thank you for releasing this excellent work. While reading the paper, there seems to be one point that is still unclear: &lt;strong&gt;how the OCR annotations are actually incorporated into training.&lt;/strong&gt;"
+                data-zh="你好，感谢你们发布这项出色的工作。在阅读论文时，有一个点似乎仍不清楚：&lt;strong&gt;OCR 标注究竟是如何纳入训练的。&lt;/strong&gt;">Hi, thank you for releasing this excellent work. While reading the paper, there seems to be one point that is still unclear: <strong>how the OCR annotations are actually incorporated into training.</strong></span></p>
+            <p><span class="lang-span" data-en="From the paper, the following part is understood:" data-zh="从论文中，以下部分是已知的：">From the paper, the following part is understood:</span></p>
+            <ul>
+                <li><span class="lang-span" data-en="PaddleOCR is applied to images from OBELICS and Zero250M" data-zh="对 OBELICS 和 Zero250M 的图像使用 PaddleOCR">PaddleOCR is applied to images from OBELICS and Zero250M</span></li>
+                <li><span class="lang-span" data-en="The recognized text is tokenized" data-zh="识别出的文本被分词">The recognized text is tokenized</span></li>
+                <li><span class="lang-span" data-en="100 fine-grained tags are constructed for each image" data-zh="为每张图构建 100 个细粒度标签">100 fine-grained tags are constructed for each image</span></li>
+                <li><span class="lang-span" data-en="OCR data is introduced in Stage 2 together with video supervision" data-zh="OCR 数据在 Stage 2 与视频监督一起引入">OCR data is introduced in Stage 2 together with video supervision</span></li>
+            </ul>
+            <p><span class="lang-span"
+                data-en="However, the paper does not seem to explicitly describe how these OCR-derived tags are optimized in the training objective."
+                data-zh="然而，论文似乎没有明确描述这些 OCR 标签在训练目标中是如何优化的。">However, the paper does not seem to explicitly describe how these OCR-derived tags are optimized in the training objective.</span></p>
+        </div>
+    </div>
 
     <!-- Section 1: Overview -->
     <section class="reveal">
