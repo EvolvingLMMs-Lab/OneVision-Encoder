@@ -26,12 +26,14 @@
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
+        html { scroll-behavior: smooth; }
         body {
             background: var(--bg);
             color: var(--text);
             font-family: var(--font-sans);
             line-height: 1.75;
             font-size: 16px;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .container { max-width: 860px; margin: 0 auto; padding: 3rem 1.5rem 6rem; padding-top: 3.5rem; }
@@ -164,7 +166,7 @@
 
         /* Weight matrix viz */
         .weight-grid {
-            display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 1rem 0;
+            display: flex; gap: 8px; flex-wrap: nowrap; margin: 1rem 0; overflow-x: auto; padding-bottom: 0.5rem; justify-content: center;
         }
         .weight-col {
             display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -274,31 +276,49 @@
 
         /* Responsive */
         @media (max-width: 640px) {
-            h1 { font-size: 1.5rem; }
+            h1 { font-size: 1.5rem; word-break: break-word; }
             .subtitle { font-size: 1rem; }
-            .container { padding: 2rem 1rem 4rem; padding-top: 3.5rem; }
+            .container { padding: 4rem 1rem 4rem; }
+            section { margin-bottom: 2.5rem; }
+            .issue-question { padding: 1rem 1.25rem; font-size: 0.9rem; }
             .flow-h { flex-direction: column; align-items: center; }
-            .flow-box { min-width: 0; width: 100%; }
+            .flow-box { min-width: 0; width: 100%; word-break: break-word; }
             .arrow-r { width: 0; height: 24px; border-top: none; border-left: 1.5px solid var(--border-strong); }
             .arrow-r::after { right: auto; top: auto; bottom: -1px; left: -5px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--border-strong); border-bottom: none; }
             .arrow-r.animated::before { display: none; }
+            .arrow-d-container { margin-left: 0 !important; text-align: center; }
+            .arrow-d { margin: 0 auto !important; }
             .pfc-stage { flex-direction: column; }
-            .pfc-stage-label { width: auto; text-align: left; padding-top: 0; }
+            .pfc-stage-label { width: auto; text-align: left; padding: 0.25rem 0 0.5rem 0.5rem; border-left: 3px solid var(--accent-indigo); }
             .stat-row { flex-direction: column; }
             .stat-card { min-width: 0; }
             .arch-branches { flex-direction: column; }
-            .arch-branch { min-width: 0; }
-            table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-            pre { font-size: 0.75rem; padding: 1rem; }
+            .arch-branch { min-width: 0; padding: 1rem; }
+            .arch-branch code { font-size: 0.7rem; word-break: break-all; }
+            table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; font-size: 0.8rem; }
+            th, td { padding: 0.5rem; }
+            pre { font-size: 0.75rem; padding: 1rem; overflow-x: auto; }
             .formula { padding: 1rem; overflow-x: auto; }
             .formula .katex { font-size: 1em; }
-            .loss-row { gap: 4px; }
-            .loss-box { padding: 4px 8px; font-size: 0.7rem; }
-            .loss-plus { font-size: 1rem; }
-            .weight-grid { gap: 4px; }
+            .loss-row { gap: 4px; justify-content: center; }
+            .loss-box { padding: 4px 6px; font-size: 0.65rem; word-break: break-all; }
+            .loss-plus { font-size: 0.85rem; margin: 0 2px; }
+            .weight-grid { gap: 2px; overflow-x: auto; padding-bottom: 0.5rem; justify-content: flex-start; }
+            .weight-col-label { font-size: 0.6rem; padding: 2px 4px; }
+            .weight-cell { width: 10px; height: 10px; }
             .arcface-anim .card { padding: 1rem; }
+            .arcface-anim .card > div { flex-direction: column; }
+            .arcface-anim canvas { max-width: 100%; height: auto; }
+            .tag-row { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+            .tag-row#tag-row-8 { max-height: none; overflow-y: visible; border: none; padding: 0; }
+            .tag { padding: 6px 12px; font-size: 0.75rem; }
+            #af-tabs { grid-template-columns: repeat(4, 1fr); }
+            .af-tab { padding: 10px 0 !important; }
+            .arch-backbone { font-size: 0.95rem; word-break: break-word; }
+            .arch-backbone .sub { font-size: 0.75rem; display: block; line-height: 1.4; margin-top: 0.25rem; }
+            .arch-connectors { display: none; }
             .lang-toggle { padding: 6px 4px; }
-            .lang-toggle-btn { padding: 6px 16px; font-size: 0.85rem; }
+            .lang-toggle-btn { padding: 10px 16px; font-size: 0.85rem; min-height: 44px; display: flex; align-items: center; }
         }
     
         /* Language Toggle */
@@ -431,7 +451,7 @@
                 </div>
             </div>
 
-            <div style="margin:0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
+            <div class="arrow-d-container" style="margin: 0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
 
             <!-- Step 2: Random sample 8 -->
             <div class="pfc-stage">
@@ -448,7 +468,7 @@ local_labels = torch.<span class="fn">gather</span>(local_labels, dim=<span clas
                 </div>
             </div>
 
-            <div style="margin:0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
+            <div class="arrow-d-container" style="margin: 0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
 
             <!-- Step 3: 8 independent classifiers -->
             <div class="pfc-stage">
@@ -468,10 +488,10 @@ local_labels = torch.<span class="fn">gather</span>(local_labels, dim=<span clas
                             <span class="lang-span" data-en="Multi-label ArcFace Visualization" data-zh="多标签 ArcFace 可视化">Multi-label ArcFace Visualization</span>
                         </h4>
                         <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center;">
-                            <div style="flex: 1 1 50%; min-width: 250px; text-align: center; position: relative;">
+                            <div style="flex: 1 1 100%; min-width: 0; text-align: center; position: relative;">
                                 <canvas id="af-canvas" width="400" height="400" style="max-width: 100%; height: auto; display: block; margin: 0 auto;"></canvas>
                             </div>
-                            <div style="flex: 1 1 40%; min-width: 220px; display: flex; flex-direction: column; gap: 1rem;">
+                            <div style="flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 1rem;">
                                 <div>
                                     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; display: flex; justify-content: space-between;">
                                         <span class="lang-span" data-en="Click to select label" data-zh="点击选择标签">Click to select label</span>
@@ -487,7 +507,7 @@ local_labels = torch.<span class="fn">gather</span>(local_labels, dim=<span clas
                                     <div><strong>θ + m (margin):</strong> <span id="af-info-margin">0°</span></div>
                                     <div><strong><span class="lang-span" data-en="Sampled negatives" data-zh="采样的负类">Sampled negatives</span>:</strong> <span style="color: var(--text-muted);">5 / 36K</span></div>
                                 </div>
-                                <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                                <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; justify-content: center;">
                                     <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#2563eb;"></span> <span class="lang-span" data-en="Embedding" data-zh="嵌入向量">Embedding</span></div>
                                     <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#e11d48;"></span> <span class="lang-span" data-en="Positive center" data-zh="正类中心">Positive center</span></div>
                                     <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#94a3b8;"></span> <span class="lang-span" data-en="Negative center" data-zh="负类中心">Negative center</span></div>
@@ -696,7 +716,7 @@ local_labels = torch.<span class="fn">gather</span>(local_labels, dim=<span clas
                 </div>
             </div>
 
-            <div style="margin:0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
+            <div class="arrow-d-container" style="margin: 0.5rem 0 0.5rem 112px;"><div class="arrow-d"></div></div>
 
             <!-- Step 4: Average loss -->
             <div class="pfc-stage">
