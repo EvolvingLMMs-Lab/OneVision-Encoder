@@ -39,6 +39,29 @@ docs/
     issue-<N>.html        ← New page you create
 ```
 
+#### Original Issue Question (MANDATORY)
+
+Every explainer page MUST include the original issue question right after the header,
+before the first content section. Use a styled blockquote with:
+
+- Left border accent (`border-left: 4px solid var(--accent-indigo)`)
+- Link to the original GitHub issue
+- Author attribution
+- Full original question text with CN/EN translations
+- HTML structure:
+
+```html
+<div class="issue-question reveal">
+    <div class="issue-question-header">
+        💬 <a href="https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/<N>" target="_blank">Issue #<N></a>
+        <span class="lang-span" data-en="opened by <strong>AuthorName</strong>" data-zh="由 <strong>AuthorName</strong> 提出">...</span>
+    </div>
+    <div class="issue-question-body">
+        <!-- Original question text with lang-span translations -->
+    </div>
+</div>
+```
+
 #### Design System (MUST follow)
 
 - **White background** (`#ffffff`), clean typography
@@ -108,6 +131,7 @@ Draft a concise reply for the GitHub issue:
 ## Hard Rules
 
 - Single self-contained HTML file per issue — NO build tools, NO frameworks
+- MUST include the original issue question as a styled blockquote after the page header
 - ALL text must have CN/EN translations via `data-en`/`data-zh`
 - NO external JS libraries except KaTeX CDN
 - NO `as any`, `@ts-ignore` or type suppressions
