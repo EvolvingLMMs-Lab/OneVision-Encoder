@@ -38,7 +38,7 @@
 - [Related Projects](#-related-projects)
 - [Citation](#-citation)
 - [License](#-license)
-- [Documentation](#-documentation)
+- [Interactive Explainers](#-interactive-explainers)
 
 ---
 
@@ -482,6 +482,20 @@ The codec-inspired patch selection mechanism identifies and processes only the m
 - **Model**: [`llava/model/llava_arch.py`](llava_next/llava/model/llava_arch.py) - Passes positions to vision encoder
 
 For detailed usage, see the [LLaVA-Next README](llava_next/README.md).
+
+---
+
+## 📖 Interactive Explainers
+
+We publish interactive visual explainers for frequently asked questions. Each issue gets a dedicated page with animations, code references, and CN/EN bilingual support.
+
+🔗 **[Hub Page](https://evolvinglmms-lab.github.io/OneVision-Encoder/)**
+
+| Issue | Topic | Page |
+|-------|-------|------|
+| [#105](https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/105) | How OCR annotations are used during training | [issue-105.html](https://evolvinglmms-lab.github.io/OneVision-Encoder/issues/issue-105.html) |
+
+This table will be updated as more explainers are added. If you have a question that would benefit from a visual explanation, feel free to [open an issue](https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/new).
 
 ---
 
