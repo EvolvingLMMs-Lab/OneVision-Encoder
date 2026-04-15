@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issue #112 Explainer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <style>
+        :root {
+            --accent-blue: #2563eb;
+            --accent-pink: #e11d48;
+            --accent-emerald: #059669;
+            --accent-indigo: #4f46e5;
+            --accent-amber: #d97706;
+            --bg: #ffffff;
+            --text: #0f172a;
+            --muted: #475569;
+            --border: #e2e8f0;
+            --code-bg: #1e293b;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .lang-toggle {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-indigo));
+            border-radius: 999px;
+            padding: 4px;
+            display: flex;
+            gap: 4px;
+            box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+        }
+        .lang-toggle button {
+            border: none;
+            background: transparent;
+            color: rgba(255,255,255,0.9);
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            min-width: 44px;
+        }
+        .lang-toggle button.active {
+            background: #fff;
+            color: var(--accent-blue);
+        }
+        .container {
+            max-width: 880px;
+            margin: 0 auto;
+            padding: 88px 18px 48px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 36px;
+        }
+        header h1 {
+            font-size: clamp(26px, 5vw, 36px);
+            margin: 0 0 8px;
+            letter-spacing: -0.5px;
+        }
+        header p {
+            color: var(--muted);
+            margin: 0;
+            font-size: 15px;
+        }
+        .issue-question {
+            border-left: 4px solid var(--accent-indigo);
+            background: #f8fafc;
+            padding: 18px 20px;
+            border-radius: 0 10px 10px 0;
+            margin-bottom: 28px;
+        }
+        .issue-question-header {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 10px;
+        }
+        .issue-question-header a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .issue-question-body {
+            font-size: 15px;
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .issue-question-body ul { margin: 0.5rem 0; padding-left: 1.25rem; }
+        .issue-question-body li { margin-bottom: 0.25rem; }
+        h2 {
+            font-size: 22px;
+            margin: 36px 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h2 .dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+        }
+        .card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+            color: var(--text);
+        }
+        .card p, .card li {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14.5px;
+        }
+        .card ul { margin: 8px 0 0; padding-left: 20px; }
+        .card li { margin-bottom: 6px; }
+        .tag {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 6px;
+            margin-right: 6px;
+        }
+        .tag-blue { background: #eff6ff; color: var(--accent-blue); }
+        .tag-pink { background: #fff1f2; color: var(--accent-pink); }
+        .tag-emerald { background: #ecfdf5; color: var(--accent-emerald); }
+        .tag-amber { background: #fffbeb; color: var(--accent-amber); }
+        pre.code {
+            background: var(--code-bg);
+            color: #e2e8f0;
+            padding: 14px 16px;
+            border-radius: 10px;
+            overflow-x: auto;
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 10px 0 0;
+        }
+        pre.code .kw { color: #c678dd; }
+        pre.code .fn { color: #61afef; }
+        pre.code .str { color: #98c379; }
+        pre.code .num { color: #d19a66; }
+        pre.code .cm { color: #5c6370; font-style: italic; }
+        .katex-formula {
+            margin: 14px 0;
+            overflow-x: auto;
+        }
+        .canvas-wrap {
+            text-align: center;
+            margin: 18px 0;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: #fafafa;
+        }
+        .flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin: 14px 0;
+        }
+        .flow-box {
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #fff;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .flow-arrow {
+            color: var(--muted);
+            font-size: 18px;
+        }
+        .pipeline {
+            position: relative;
+            margin: 8px 0;
+            padding-left: 58px;
+        }
+        .pipeline::before {
+            content: "";
+            position: absolute;
+            left: 18px;
+            top: 10px;
+            bottom: 10px;
+            width: 2px;
+            background: linear-gradient(180deg, #bfdbfe 0%, #60a5fa 45%, #cbd5e1 100%);
+        }
+        .p-step {
+            position: relative;
+            margin-bottom: 14px;
+        }
+        .p-step:last-child { margin-bottom: 0; }
+        .p-num {
+            position: absolute;
+            left: -58px;
+            top: 14px;
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-blue), #60a5fa);
+            color: #fff;
+            display: grid;
+            place-items: center;
+            font-size: 13px;
+            font-weight: 800;
+            box-shadow: 0 6px 14px rgba(37,99,235,0.18);
+        }
+        .p-card {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            padding: 14px 16px;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .p-title {
+            font-size: 15px;
+            line-height: 1.5;
+            color: var(--text);
+            font-weight: 700;
+            margin: 0;
+        }
+        .p-desc {
+            display: block;
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 5px;
+            line-height: 1.55;
+        }
+        .p-step.is-output .p-card {
+            border-color: #bbf7d0;
+            background: linear-gradient(180deg, #f0fdf4 0%, #f8fffb 100%);
+        }
+        .p-chip {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            background: #ffffff;
+            border: 1px solid #dbeafe;
+            color: var(--accent-blue);
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .example-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .example-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            color: var(--muted);
+        }
+        .example-table td:first-child {
+            width: 42%;
+            color: var(--text);
+            font-weight: 500;
+        }
+        .pill-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .pill {
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: #fff;
+            font-size: 13px;
+            color: var(--text);
+            font-weight: 600;
+        }
+        .file-ref {
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 12.5px;
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 5px;
+            color: var(--accent-indigo);
+        }
+        .summary-box {
+            background: linear-gradient(135deg, #eff6ff, #f5f3ff);
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+            padding: 18px;
+            margin: 20px 0;
+        }
+        .summary-box p {
+            margin: 0;
+            font-size: 15px;
+        }
+        .qa-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .qa-card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            background: linear-gradient(180deg, #ffffff, #f8fafc);
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .qa-card .q-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--accent-indigo);
+            margin-bottom: 8px;
+        }
+        .qa-card h3 {
+            margin: 0 0 8px;
+            font-size: 17px;
+        }
+        .qa-card p {
+            margin: 0;
+            font-size: 14.5px;
+            color: var(--muted);
+        }
+        .mini-note {
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            color: #9a3412;
+            font-size: 13.5px;
+        }
+        .three-up {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .compare-card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            background: #fff;
+        }
+        .compare-card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+        }
+        .compare-card p {
+            margin: 0 0 10px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .compare-card strong {
+            color: var(--text);
+        }
+        .math-note {
+            margin-top: 12px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .dark-panel {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 18px;
+            padding: 26px 26px 22px;
+            color: #0f172a;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .dark-panel p,
+        .dark-panel li {
+            color: #475569;
+        }
+        .dark-intro {
+            font-size: 15px;
+            line-height: 1.8;
+            margin: 0 0 18px;
+        }
+        .inline-chip {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            color: #334155;
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 12px;
+            vertical-align: middle;
+        }
+        .step-list {
+            display: grid;
+            gap: 12px;
+            margin: 0;
+        }
+        .step-row {
+            display: grid;
+            grid-template-columns: 28px 1fr;
+            gap: 12px;
+            align-items: start;
+        }
+        .step-no {
+            color: #2563eb;
+            font-weight: 800;
+            font-size: 16px;
+            line-height: 1.5;
+            text-align: right;
+        }
+        .step-body {
+            font-size: 15px;
+            line-height: 1.8;
+            color: #475569;
+        }
+        .formula-shell {
+            position: relative;
+            margin: 18px 0 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 28px 22px 22px;
+            overflow: hidden;
+        }
+        .formula-badge {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 2px 8px;
+        }
+        .formula-text {
+            margin: 0;
+            color: #0ea5e9;
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.7;
+            letter-spacing: 0.01em;
+        }
+        @media (max-width: 640px) {
+            .container { padding-top: 80px; }
+            .flow { flex-direction: column; }
+            .flow-arrow { transform: rotate(90deg); }
+            h2 { font-size: 20px; }
+            .side-by-side { grid-template-columns: 1fr; }
+            .qa-grid,
+            .three-up { grid-template-columns: 1fr; }
+            .dark-panel { padding: 22px 18px 18px; }
+            .step-row { grid-template-columns: 24px 1fr; gap: 10px; }
+            .pipeline { padding-left: 50px; }
+            .p-num { left: -50px; width: 30px; height: 30px; top: 16px; font-size: 12px; }
+        }
+        .reveal {
+            opacity: 0;
+            transform: translateY(18px);
+            transition: opacity .6s ease, transform .6s ease;
+        }
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        footer {
+            text-align: center;
+            margin-top: 48px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="lang-toggle" role="group" aria-label="Language switch">
+        <button id="btn-en" class="active" onclick="toggleLanguage('en')">EN</button>
+        <button id="btn-zh" onclick="toggleLanguage('zh')">中文</button>
+    </div>
+
+    <div class="container">
+        <header class="reveal">
+            <h1>
+                <span class="lang-span" data-en="Codec-Guided Preprocessing Pipeline" data-zh="基于编码器引导的预处理流程">Codec-Guided Preprocessing Pipeline</span>
+            </h1>
+            <p>
+                <span class="lang-span" data-en="Interactive explainer for Issue #112 — uniform temporal sampling + sparse patch selection" data-zh="Issue #112 交互式解释页 — 均匀时间采样 + 稀疏 Patch 选择">Interactive explainer for Issue #112 — uniform temporal sampling + sparse patch selection</span>
+            </p>
+        </header>
+
+        <div class="issue-question reveal">
+            <div class="issue-question-header">
+                💬 <a href="https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/112" target="_blank">Issue #112</a>
+                <span class="lang-span" data-en="opened by <strong>RRooyyCChheenn</strong>" data-zh="由 <strong>RRooyyCChheenn</strong> 提出">opened by <strong>RRooyyCChheenn</strong></span>
+            </div>
+            <div class="issue-question-body">
+                <p><span class="lang-span" data-en="Hi, I am currently reviewing the data preprocessing pipeline and had a question regarding tools/tools_for_hevc/step3_generate_video_mv_residual_index.py. Specifically, I noticed that the script does not explicitly define a fixed interval for sampling full frames (Intra-frames). Could you please clarify:" data-zh="你好，我正在查看数据预处理流程，对 tools/tools_for_hevc/step3_generate_video_mv_residual_index.py 有个疑问。具体来说，我注意到该脚本没有显式定义采样全帧（Intra-frames）的固定间隔。请澄清：">Hi, I am currently reviewing the data preprocessing pipeline and had a question regarding tools/tools_for_hevc/step3_generate_video_mv_residual_index.py. Specifically, I noticed that the script does not explicitly define a fixed interval for sampling full frames (Intra-frames). Could you please clarify:</span></p>
+                <ul>
+                    <li><span class="lang-span" data-en="1. Is there a default interval being used (e.g., every 32 or 64 frames)?" data-zh="1. 是否使用了默认间隔（例如每 32 或 64 帧）？">1. Is there a default interval being used (e.g., every 32 or 64 frames)?</span></li>
+                    <li><span class="lang-span" data-en="2. Does the script process the video entirely without full-frame sampling, or does it rely on the GOP structure predefined during the HEVC encoding step?" data-zh="2. 脚本是在完全不进行全帧采样的情况下处理视频，还是依赖于 HEVC 编码阶段预定义的 GOP 结构？">2. Does the script process the video entirely without full-frame sampling, or does it rely on the GOP structure predefined during the HEVC encoding step?</span></li>
+                </ul>
+                <p><span class="lang-span" data-en="Understanding this sampling frequency is critical for me to align the training data correctly with the model architecture." data-zh="理解该采样频率对我正确对齐训练数据与模型架构至关重要。">Understanding this sampling frequency is critical for me to align the training data correctly with the model architecture.</span></p>
+            </div>
+        </div>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-emerald)"></span>
+                <span class="lang-span" data-en="Short Answer" data-zh="简短回答">Short Answer</span>
+            </h2>
+            <div class="summary-box">
+                <p>
+                    <span class="lang-span" data-en="A friendly way to read the pipeline is this: it is built around <strong>64 uniformly sampled temporal positions</strong> plus <strong>sparse patch selection</strong>. In other words, Step 3 is mainly producing a <strong>top-k patch index</strong> that tells us where the informative content is, while the codec-side GOP setting stays in the background to keep motion-vector and residual extraction stable." data-zh="一个更容易理解这条流程的方式是：它主要围绕<strong>64 个均匀采样的时间位置</strong>和<strong>稀疏 Patch 选择</strong>来组织。换句话说，Step 3 更像是在生成一个<strong>top-k patch 索引</strong>，告诉我们哪些位置更有信息量；而 codec 侧的 GOP 设置更多是在后台帮助运动向量和残差提取保持稳定。">A friendly way to read the pipeline is this: it is built around <strong>64 uniformly sampled temporal positions</strong> plus <strong>sparse patch selection</strong>. In other words, Step 3 is mainly producing a <strong>top-k patch index</strong> that tells us where the informative content is, while the codec-side GOP setting stays in the background to keep motion-vector and residual extraction stable.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#0f766e"></span>
+                <span class="lang-span" data-en="Direct Answers to the Issue" data-zh="对 Issue 问题的直接回答">Direct Answers to the Issue</span>
+            </h2>
+            <div class="qa-grid">
+                <div class="qa-card">
+                    <div class="q-label">
+                        <span class="lang-span" data-en="Question 1" data-zh="问题 1">Question 1</span>
+                    </div>
+                    <h3>
+                        <span class="lang-span" data-en="Is there a fixed I-frame interval like 32 or 64?" data-zh="是否存在固定的 I-frame 间隔，比如 32 或 64？">Is there a fixed I-frame interval like 32 or 64?</span>
+                    </h3>
+                    <p>
+                        <span class="lang-span" data-en="A more accurate way to think about it is that Step 3 does <strong>not</strong> hard-code a fixed full-frame interval such as 32 or 64. Instead, it builds <strong>64 uniformly spaced sample positions</strong> over the whole video using <code class=&quot;file-ref&quot;>np.linspace(..., num=seq_len)</code>, so the actual spacing naturally depends on the video length." data-zh="更贴近实际的理解是，Step 3 <strong>不会</strong>硬编码一个像 32 或 64 这样的固定 full-frame 间隔。它是通过 <code class=&quot;file-ref&quot;>np.linspace(..., num=seq_len)</code> 在整段视频上构造 <strong>64 个均匀分布的采样位置</strong>，所以相邻位置之间的真实间隔会自然地随着视频长度变化。">A more accurate way to think about it is that Step 3 does <strong>not</strong> hard-code a fixed full-frame interval such as 32 or 64. Instead, it builds <strong>64 uniformly spaced sample positions</strong> over the whole video using <code class="file-ref">np.linspace(..., num=seq_len)</code>, so the actual spacing naturally depends on the video length.</span>
+                    </p>
+                </div>
+                <div class="qa-card">
+                    <div class="q-label">
+                        <span class="lang-span" data-en="Question 2" data-zh="问题 2">Question 2</span>
+                    </div>
+                    <h3>
+                        <span class="lang-span" data-en="Does Step 3 rely on the HEVC GOP structure?" data-zh="Step 3 是否依赖 HEVC 的 GOP 结构？">Does Step 3 rely on the HEVC GOP structure?</span>
+                    </h3>
+                    <p>
+                        <span class="lang-span" data-en="Yes, but in a fairly gentle sense: Step 3 reads MV and residual from an already encoded HEVC stream, so the GOP structure matters as a <strong>compressed-domain prerequisite</strong>. At the same time, it is still helpful to separate that from the training-side temporal layout, which is organized by the 64 sampled positions." data-zh="是的，但更准确地说是一种比较间接的依赖：Step 3 读取的是已经编码好的 HEVC 码流里的 MV 和残差，所以 GOP 结构会作为一种<strong>压缩域前提</strong>影响这些信号。与此同时，也最好把这一点和训练侧的时间布局区分开来看，因为训练侧仍然是围绕那 64 个采样位置来组织的。">Yes, but in a fairly gentle sense: Step 3 reads MV and residual from an already encoded HEVC stream, so the GOP structure matters as a <strong>compressed-domain prerequisite</strong>. At the same time, it is still helpful to separate that from the training-side temporal layout, which is organized by the 64 sampled positions.</span>
+                    </p>
+                </div>
+            </div>
+            <div class="mini-note">
+                <span class="lang-span" data-en="So if you want one compact mental model, it is usually safest to think: first sample 64 temporal positions, then use those positions to guide top-k patch selection." data-zh="如果想用一句话来记这个流程，通常最稳妥的理解就是：先采样 64 个时间位置，再用这些位置去引导后续的 top-k patch 选择。">So if you want one compact mental model, it is usually safest to think: first sample 64 temporal positions, then use those positions to guide top-k patch selection.</span>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-blue)"></span>
+                <span class="lang-span" data-en="What the Model Actually Receives" data-zh="模型实际接收到什么">What the Model Actually Receives</span>
+            </h2>
+            <div class="card">
+                <div style="margin-bottom:10px;">
+                    <span class="tag tag-blue">RGB video</span>
+                    <span class="tag tag-emerald">top-k patch index</span>
+                    <span class="tag tag-amber">sparse patch input</span>
+                </div>
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="The input is <strong>not</strong> a dense stack of decoded frames." data-zh="输入<strong>不是</strong>一堆密集解码帧。">The input is <strong>not</strong> a dense stack of decoded frames.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Instead, the input pair is: <strong>raw video</strong> + <strong>top-k patch index</strong> (produced by Step 3)." data-zh="相反，输入对是：<strong>原始视频</strong> + <strong>top-k patch 索引</strong>（由 Step 3 生成）。">Instead, the input pair is: <strong>raw video</strong> + <strong>top-k patch index</strong> (produced by Step 3).</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="During training: decode video → extract patches → <strong>keep only patches selected by the index</strong> → feed them into the model." data-zh="训练时：解码视频 → 提取 patch → <strong>仅保留索引选中的 patch</strong> → 送入模型。">During training: decode video → extract patches → <strong>keep only patches selected by the index</strong> → feed them into the model.</span>
+                    </li>
+                </ul>
+                <p style="margin-top:12px;font-size:14px;color:var(--muted);">
+                    <span class="lang-span" data-en="In other words, Step 3 is a <em>scout</em> that looks at compressed-domain signals (MV + residual) to decide <em>which</em> space-time patches are informative. The actual pixel data is decoded later, and only the chosen patches are retained." data-zh="换句话说，Step 3 是一个<em>侦察兵</em>，它查看压缩域信号（MV + 残差）来决定<em>哪些</em>时空 patch 具有信息量。实际的像素数据在后续解码，且仅保留被选中的 patch。">In other words, Step 3 is a <em>scout</em> that looks at compressed-domain signals (MV + residual) to decide <em>which</em> space-time patches are informative. The actual pixel data is decoded later, and only the chosen patches are retained.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-indigo)"></span>
+                <span class="lang-span" data-en="Temporal Sampling" data-zh="时间采样">Temporal Sampling</span>
+            </h2>
+            <div class="card">
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="<strong>seq_len = 64</strong> — every video is represented by 64 temporal positions." data-zh="<strong>seq_len = 64</strong> — 每个视频由 64 个时间位置表示。"><strong>seq_len = 64</strong> — every video is represented by 64 temporal positions.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="These positions are <strong>uniformly spaced</strong> across the entire video duration." data-zh="这些位置在整段视频时长上<strong>均匀分布</strong>。">These positions are <strong>uniformly spaced</strong> across the entire video duration.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Sampling is <strong>independent of GOP boundaries</strong>." data-zh="采样<strong>与 GOP 边界无关</strong>。">Sampling is <strong>independent of GOP boundaries</strong>.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Goal: build a fixed-length training representation regardless of original video length." data-zh="目的：无论原始视频长度如何，都构建一个固定长度的训练表示。">Goal: build a fixed-length training representation regardless of original video length.</span>
+                    </li>
+                </ul>
+                <div class="math-note">
+                    <span class="lang-span" data-en="If a video has <code class=&quot;file-ref&quot;>duration</code> frames, the average spacing is approximately" data-zh="如果一个视频有 <code class=&quot;file-ref&quot;>duration</code> 帧，那么平均采样间隔大约是">If a video has <code class="file-ref">duration</code> frames, the average spacing is approximately</span>
+                    <span class="katex-inline" data-formula="\frac{\text{duration} - 1}{\text{seq\_len} - 1}"></span>
+                    <span class="lang-span" data-en="frames, so it changes from one video to another." data-zh="帧，因此它会随着视频长度变化。">frames, so it changes from one video to another.</span>
+                </div>
+            </div>
+            <p style="font-size:14px;color:var(--muted);margin:10px 0 8px;">
+                <span class="lang-span" data-en="Below: 64 sampled positions drawn uniformly from a 320-frame video. The highlight moves across the temporal scaffold." data-zh="下图：从 320 帧视频中均匀抽取的 64 个采样位置。高亮点在时间上移动。">Below: 64 sampled positions drawn uniformly from a 320-frame video. The highlight moves across the temporal scaffold.</span>
+            </p>
+            <div class="canvas-wrap">
+                <canvas id="sampleCanvas" width="720" height="180"></canvas>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-pink)"></span>
+                <span class="lang-span" data-en="Pipeline Overview" data-zh="流程总览">Pipeline Overview</span>
+            </h2>
+            <div class="card">
+                <div class="pipeline">
+                    <div class="p-step">
+                        <div class="p-num">1</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Raw Video -> HEVC Transcoding" data-zh="原始视频 -> HEVC 转码">Raw Video -> HEVC Transcoding</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="The codec-side setup fixes GOP=16 so motion vectors and residuals stay stable and easy to read later." data-zh="编码器侧先固定 GOP=16，这样后面读取运动向量和残差信号时会更稳定。">The codec-side setup fixes GOP=16 so motion vectors and residuals stay stable and easy to read later.</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">2</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Uniform Temporal Sampling (64 positions)" data-zh="均匀时间采样（64 个位置）">Uniform Temporal Sampling (64 positions)</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Each video is reduced to a fixed temporal scaffold so later selection happens on a consistent sequence length." data-zh="每个视频先被整理成固定长度的时间支架，后续选择都在这条统一长度的序列上进行。">Each video is reduced to a fixed temporal scaffold so later selection happens on a consistent sequence length.</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">3</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="MV / Residual Extraction" data-zh="MV / 残差提取">MV / Residual Extraction</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Compressed-domain signals are extracted only at the sampled positions instead of decoding every frame densely." data-zh="只在采样位置上提取压缩域信号，而不是把整段视频逐帧密集解码。">Compressed-domain signals are extracted only at the sampled positions instead of decoding every frame densely.</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">4</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Score Map Computation" data-zh="评分图计算">Score Map Computation</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Motion and residual cues are fused into a spatial-temporal importance map." data-zh="运动和残差信号会被融合成一张时空重要性评分图。">Motion and residual cues are fused into a spatial-temporal importance map.</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">5</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Top-K Patch Index Generation" data-zh="Top-K Patch 索引生成">Top-K Patch Index Generation</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="The pipeline converts the score map into sparse patch indices rather than dense frame tensors." data-zh="这一步会把评分图转成稀疏 patch 索引，而不是稠密的整帧张量。">The pipeline converts the score map into sparse patch indices rather than dense frame tensors.</span>
+                            </span>
+                            <span class="p-chip">.visidx.npy</span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">6</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Decode Video -> Keep Selected Patches" data-zh="解码视频 -> 保留选中 Patch">Decode Video -> Keep Selected Patches</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="RGB pixels are only retained where the sparse selection index says they matter." data-zh="只有被稀疏索引选中的位置，才会在后续真正保留 RGB 像素。">RGB pixels are only retained where the sparse selection index says they matter.</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-step is-output">
+                        <div class="p-num">7</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Model Input" data-zh="模型输入">Model Input</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="The final input is a sparse representation guided by compressed-domain selection." data-zh="最终送入模型的是一个由压缩域选择机制引导出来的稀疏表示。">The final input is a sparse representation guided by compressed-domain selection.</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#7c3aed"></span>
+                <span class="lang-span" data-en="GOP vs. Sampled Sequence" data-zh="GOP 与采样序列">GOP vs. Sampled Sequence</span>
+            </h2>
+            <div class="side-by-side">
+                <div class="card">
+                    <h3>
+                        <span class="lang-span" data-en="Codec-side GOP" data-zh="编码器侧 GOP">Codec-side GOP</span>
+                    </h3>
+                    <ul>
+                        <li>
+                            <span class="lang-span" data-en="Defines the compressed-domain representation" data-zh="定义压缩域表示">Defines the compressed-domain representation</span>
+                        </li>
+                        <li>
+                            <span class="lang-span" data-en="Determines how MV and residual are structured in the bitstream" data-zh="决定码流中 MV 和残差的结构">Determines how MV and residual are structured in the bitstream</span>
+                        </li>
+                        <li>
+                            <span class="lang-span" data-en="Background setting (default GOP = 16)" data-zh="后台设置（默认 GOP = 16）">Background setting (default GOP = 16)</span>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>
+                        <span class="lang-span" data-en="Training-side Sampled Sequence" data-zh="训练侧采样序列">Training-side Sampled Sequence</span>
+                    </h3>
+                    <ul>
+                        <li>
+                            <span class="lang-span" data-en="Defines the temporal scaffold for patch selection" data-zh="定义用于 Patch 选择的时间支架">Defines the temporal scaffold for patch selection</span>
+                        </li>
+                        <li>
+                            <span class="lang-span" data-en="Fixed 64 positions, uniform over video length" data-zh="固定 64 个位置，均匀分布于视频长度">Fixed 64 positions, uniform over video length</span>
+                        </li>
+                        <li>
+                            <span class="lang-span" data-en="Operates independently of GOP boundaries" data-zh="独立于 GOP 边界运作">Operates independently of GOP boundaries</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            <div class="summary-box" style="margin-top:12px;">
+                <p>
+                    <span class="lang-span" data-en="<strong>Key takeaway:</strong> The codec GOP defines the compressed-domain representation, while the sampled sequence defines the temporal scaffold used for patch selection. They operate at different levels." data-zh="<strong>关键结论：</strong>编码器 GOP 定义压缩域表示，而采样序列定义用于 Patch 选择的时间支架。它们在不同层级运作。"><strong>Key takeaway:</strong> The codec GOP defines the compressed-domain representation, while the sampled sequence defines the temporal scaffold used for patch selection. They operate at different levels.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#0ea5e9"></span>
+                <span class="lang-span" data-en="Local Anchor vs. Real I-frame" data-zh="局部锚点与真实 I-frame">Local Anchor vs. Real I-frame</span>
+            </h2>
+            <div class="three-up">
+                <div class="compare-card">
+                    <h3><span class="lang-span" data-en="1. Real codec I-frame" data-zh="1. 真实 codec I-frame">1. Real codec I-frame</span></h3>
+                    <p>
+                        <span class="lang-span" data-en="Created by the HEVC encoder in Step 2. With the default config, the script requests <code class=&quot;file-ref&quot;>GOP_SIZE=16</code> and <code class=&quot;file-ref&quot;>keyint=16:min-keyint=16</code>." data-zh="由 Step 2 的 HEVC 编码器生成。默认配置下，脚本请求 <code class=&quot;file-ref&quot;>GOP_SIZE=16</code> 和 <code class=&quot;file-ref&quot;>keyint=16:min-keyint=16</code>。">Created by the HEVC encoder in Step 2. With the default config, the script requests <code class="file-ref">GOP_SIZE=16</code> and <code class="file-ref">keyint=16:min-keyint=16</code>.</span>
+                    </p>
+                    <strong><span class="lang-span" data-en="Role: define compressed-stream structure" data-zh="作用：定义压缩码流结构">Role: define compressed-stream structure</span></strong>
+                </div>
+                <div class="compare-card">
+                    <h3><span class="lang-span" data-en="2. Sampled temporal position" data-zh="2. 采样时间位置">2. Sampled temporal position</span></h3>
+                    <p>
+                        <span class="lang-span" data-en="Constructed in Step 3 by <code class=&quot;file-ref&quot;>np.linspace</code>. These 64 positions are the training-side temporal scaffold, independent of GOP boundaries." data-zh="在 Step 3 中由 <code class=&quot;file-ref&quot;>np.linspace</code> 构造。这 64 个位置才是训练侧的时间支架，独立于 GOP 边界。">Constructed in Step 3 by <code class="file-ref">np.linspace</code>. These 64 positions are the training-side temporal scaffold, independent of GOP boundaries.</span>
+                    </p>
+                    <strong><span class="lang-span" data-en="Role: define where we evaluate patch importance" data-zh="作用：定义在哪些时间位置评估 patch 重要性">Role: define where we evaluate patch importance</span></strong>
+                </div>
+                <div class="compare-card">
+                    <h3><span class="lang-span" data-en="3. Local anchor" data-zh="3. 局部锚点">3. Local anchor</span></h3>
+                    <p>
+                        <span class="lang-span" data-en="A local convention in Step 3: <code class=&quot;file-ref&quot;>I_pos = {0}</code>. It simply forces the <em>first sampled position</em> to have zero fusion energy." data-zh="Step 3 中的一个局部约定：<code class=&quot;file-ref&quot;>I_pos = {0}</code>。它只是让<em>第一个采样位置</em>的融合能量置零。">A local convention in Step 3: <code class="file-ref">I_pos = {0}</code>. It simply forces the <em>first sampled position</em> to have zero fusion energy.</span>
+                    </p>
+                    <strong><span class="lang-span" data-en="Role: initialization convention, not real keyframe sampling" data-zh="作用：初始化约定，而不是真实关键帧采样">Role: initialization convention, not real keyframe sampling</span></strong>
+                </div>
+            </div>
+            <div class="summary-box" style="margin-top:12px;">
+                <p>
+                    <span class="lang-span" data-en="These three concepts live at different levels. The confusion in Issue #112 comes from treating the <strong>local anchor</strong> as if it were a <strong>real codec I-frame</strong>. The code does not do that." data-zh="这三者处在不同层级。Issue #112 的混淆点就在于把<strong>局部锚点</strong>误当成了<strong>真实 codec I-frame</strong>。而代码实际上并不是这么做的。">These three concepts live at different levels. The confusion in Issue #112 comes from treating the <strong>local anchor</strong> as if it were a <strong>real codec I-frame</strong>. The code does not do that.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#d97706"></span>
+                <span class="lang-span" data-en="Why Not Sample Every I-frame?" data-zh="为什么不逐个采样 I-frame？">Why Not Sample Every I-frame?</span>
+            </h2>
+            <div class="card">
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="I-frame spacing depends on encoding parameters and can vary if settings change." data-zh="I-frame 间隔取决于编码参数，设置改变时可能变化。">I-frame spacing depends on encoding parameters and can vary if settings change.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="It does <strong>not</strong> guarantee a fixed-length input (videos of different lengths would yield different numbers of I-frames)." data-zh="它<strong>无法</strong>保证固定长度输入（不同长度的视频会产生不同数量的 I-frame）。">It does <strong>not</strong> guarantee a fixed-length input (videos of different lengths would yield different numbers of I-frames).</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Sampling I-frames is not aligned with the goal of patch selection." data-zh="采样 I-frame 与 Patch 选择的目标不一致。">Sampling I-frames is not aligned with the goal of patch selection.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Uniform sampling + scoring is simpler, more flexible, and length-invariant." data-zh="均匀采样 + 评分更简单、更灵活，且与长度无关。">Uniform sampling + scoring is simpler, more flexible, and length-invariant.</span>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#059669"></span>
+                <span class="lang-span" data-en="Concrete Example" data-zh="具体示例">Concrete Example</span>
+            </h2>
+            <div class="card">
+                <table class="example-table">
+                    <tr>
+                        <td>
+                            <span class="lang-span" data-en="Video length" data-zh="视频长度">Video length</span>
+                        </td>
+                        <td>320 <span class="lang-span" data-en="frames" data-zh="帧">frames</span></td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="lang-span" data-en="Temporal sampling" data-zh="时间采样">Temporal sampling</span>
+                        </td>
+                        <td>
+                            <span class="lang-span" data-en="seq_len = 64 (positions 0, 5, 10, ..., 315)" data-zh="seq_len = 64（位置 0, 5, 10, ..., 315）">seq_len = 64 (positions 0, 5, 10, ..., 315)</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="lang-span" data-en="Local anchor" data-zh="局部锚点">Local anchor</span>
+                        </td>
+                        <td>
+                            <span class="lang-span" data-en="Position 0 (first sampled frame) → energy set to 0" data-zh="位置 0（第一个采样帧）→ 能量置 0">Position 0 (first sampled frame) → energy set to 0</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="lang-span" data-en="Step 3 output" data-zh="Step 3 输出">Step 3 output</span>
+                        </td>
+                        <td>
+                            <span class="lang-span" data-en="Top-k patch index across the 64 sampled positions" data-zh="跨越 64 个采样位置的 top-k patch 索引">Top-k patch index across the 64 sampled positions</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="lang-span" data-en="Training usage" data-zh="训练使用">Training usage</span>
+                        </td>
+                        <td>
+                            <span class="lang-span" data-en="Decode the same 64 positions, keep only selected patches" data-zh="解码相同的 64 个位置，仅保留选中的 patch">Decode the same 64 positions, keep only selected patches</span>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div class="card">
+                <h3><span class="lang-span" data-en="The right interpretation" data-zh="正确理解方式">The right interpretation</span></h3>
+                <p>
+                    <span class="lang-span" data-en="Even if the original 320-frame video contains multiple true I-frames in the codec-side GOP, the training representation is still organized as 64 temporal positions for sparse selection. The practical rule is not \"one dense full frame every 16 steps,\" but \"64 sampled positions followed by top-k patch selection.\"" data-zh="即使原始 320 帧视频在 codec 侧 GOP 中包含多个真实 I-frame，训练表示依然是围绕 64 个时间位置来组织稀疏选择。因此实际规则不是“每 16 步输入一个稠密 full frame”，而是“64 个采样位置，然后做 top-k patch 选择”。">Even if the original 320-frame video contains multiple true I-frames in the codec-side GOP, the training representation is still organized as 64 temporal positions for sparse selection. The practical rule is not "one dense full frame every 16 steps," but "64 sampled positions followed by top-k patch selection."</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#64748b"></span>
+                <span class="lang-span" data-en="What Step 3 Actually Does" data-zh="Step 3 实际在做什么">What Step 3 Actually Does</span>
+            </h2>
+            <div class="card">
+                <p><span class="file-ref">tools/tools_for_hevc/step3_generate_video_mv_residual_index.py</span></p>
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="Line 256: constructs uniformly sampled temporal positions across the video." data-zh="第 256 行：构造整段视频上均匀分布的时间位置。">Line 256: constructs uniformly sampled temporal positions across the video.</span>
+                        <pre class="code">frame_id_list = np.<span class="fn">linspace</span>(<span class="num">0</span>, duration - <span class="num">1</span>, num=seq_len, dtype=<span class="fn">int</span>).<span class="fn">tolist</span>()</pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Line 258: hard-codes the first sampled position as the local anchor." data-zh="第 258 行：将第一个采样位置硬编码为局部锚点。">Line 258: hard-codes the first sampled position as the local anchor.</span>
+                        <pre class="code">I_pos = {<span class="num">0</span>}</pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Lines 306–308: skip MV/residual fusion for the anchor by setting energy to 0." data-zh="第 306–308 行：通过将能量置 0 跳过锚点处的 MV/残差融合。">Lines 306–308: skip MV/residual fusion for the anchor by setting energy to 0.</span>
+                        <pre class="code"><span class="kw">if</span> i <span class="kw">in</span> I_pos:
+    fused_list[i] = np.<span class="fn">zeros</span>((H, W), dtype=np.float32)
+    <span class="kw">continue</span></pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Line 399: generates the top-k patch index." data-zh="第 399 行：生成 top-k patch 索引。">Line 399: generates the top-k patch index.</span>
+                        <pre class="code">vis_idx = <span class="fn">mask_by_residual_topk</span>(res_torch, K, patch_size)</pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Lines 619–620: saves the index as" data-zh="第 619–620 行：将索引保存为">Lines 619–620: saves the index as</span>
+                        <span class="file-ref">.visidx.npy</span>
+                        <span class="lang-span" data-en="— a selection signal, not RGB tensors." data-zh="—— 一种选择信号，而非 RGB 张量。">— a selection signal, not RGB tensors.</span>
+                    </li>
+                </ul>
+                <p style="margin-top:12px;font-size:14px;color:var(--muted);">
+                    <span class="lang-span" data-en="Step 3 does <strong>not</strong> re-encode the video or insert new keyframes. It also does <strong>not</strong> sample real I-frames explicitly; it only uses" data-zh="Step 3 <strong>不会</strong>重新编码视频或插入新的关键帧。它也<strong>不会</strong>显式采样真实 I-frame；它仅使用">Step 3 does <strong>not</strong> re-encode the video or insert new keyframes. It also does <strong>not</strong> sample real I-frames explicitly; it only uses</span>
+                    <code class="file-ref">I_pos = {0}</code>
+                    <span class="lang-span" data-en="as a local convention for the sampled clip." data-zh="作为采样片段的局部约定。">as a local convention for the sampled clip.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#94a3b8"></span>
+                <span class="lang-span" data-en="Codec-side Background: GOP Setting" data-zh="编码器侧背景：GOP 设置">Codec-side Background: GOP Setting</span>
+            </h2>
+            <div class="card">
+                <p>
+                    <span class="lang-span" data-en="For completeness, the HEVC transcoding script" data-zh="为了完整起见，HEVC 转码脚本">For completeness, the HEVC transcoding script</span>
+                    <span class="file-ref">tools/tools_for_hevc/step2_convert_videos2hevc.py</span>
+                    <span class="lang-span" data-en="uses a default GOP size of 16 (line 42) and passes" data-zh="默认使用 GOP 大小 16（第 42 行），并传入">uses a default GOP size of 16 (line 42) and passes</span>
+                    <span class="file-ref">keyint=16:min-keyint=16</span>
+                    <span class="lang-span" data-en="to FFmpeg (line 117). This is a <em>background</em> parameter that stabilizes MV/residual extraction; it does not dictate the training sampling strategy." data-zh="给 FFmpeg（第 117 行）。这是一个<em>后台</em>参数，用于稳定 MV/residual 提取；它并不决定训练采样策略。">to FFmpeg (line 117). This is a <em>background</em> parameter that stabilizes MV/residual extraction; it does not dictate the training sampling strategy.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#7c2d12"></span>
+                <span class="lang-span" data-en="FAQ for Readers" data-zh="读者常见问题">FAQ for Readers</span>
+            </h2>
+            <div class="card">
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="<strong>Does Step 3 re-encode the video?</strong> No. Re-encoding happens in Step 2. Step 3 only reads the existing HEVC bitstream and computes selection indices." data-zh="<strong>Step 3 会重新编码视频吗？</strong> 不会。重新编码发生在 Step 2。Step 3 只是读取现有 HEVC 码流并计算选择索引。"><strong>Does Step 3 re-encode the video?</strong> No. Re-encoding happens in Step 2. Step 3 only reads the existing HEVC bitstream and computes selection indices.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="<strong>Does the model receive every sampled frame densely?</strong> No. The sampled positions are used to score space-time regions, and only the selected patches are kept." data-zh="<strong>模型会把每个采样帧都完整接收吗？</strong> 不会。采样位置先用于给时空区域打分，最后只保留被选中的 patch。"><strong>Does the model receive every sampled frame densely?</strong> No. The sampled positions are used to score space-time regions, and only the selected patches are kept.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="<strong>If the video is longer, does the interval become larger?</strong> Yes. Because the code samples 64 positions over the whole duration, longer videos naturally produce a larger average gap between sampled positions." data-zh="<strong>如果视频更长，采样间隔会变大吗？</strong> 会。因为代码是在整段视频上采样 64 个位置，所以视频越长，相邻采样位置的平均间隔就越大。"><strong>If the video is longer, does the interval become larger?</strong> Yes. Because the code samples 64 positions over the whole duration, longer videos naturally produce a larger average gap between sampled positions.</span>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#1d4ed8"></span>
+                <span class="lang-span" data-en="Looking Ahead" data-zh="后续思路">Looking Ahead</span>
+            </h2>
+            <div class="card">
+                <p>
+                    <span class="lang-span" data-en="For the next stage, we are thinking about moving from fully uniform candidate-frame selection to a more codec-aware strategy. The intuition is that different temporal regions do not carry the same amount of compressed-domain activity, so it is reasonable to spend more sampling budget on the bins where the packet-size signal is stronger." data-zh="在后续阶段里，我们更倾向于把候选帧选择从完全均匀采样，逐步推进到一种更 codec-aware 的策略。直觉上，不同时间区域携带的压缩域活动强度并不相同，因此把更多采样预算分配给 packet-size 信号更强的 bin，会是一个更自然的方向。">For the next stage, we are thinking about moving from fully uniform candidate-frame selection to a more codec-aware strategy. The intuition is that different temporal regions do not carry the same amount of compressed-domain activity, so it is reasonable to spend more sampling budget on the bins where the packet-size signal is stronger.</span>
+                </p>
+                <p style="margin-top:12px;">
+                    <span class="lang-span" data-en="Concretely, we can first summarize <code class=&quot;file-ref&quot;>pkt_size</code> over short time bins, turn those energies into a cumulative distribution, and then sample frame locations according to that distribution. This still keeps the pipeline sparse, but it makes the selected frames more likely to land in the segments that contain stronger motion or structural change." data-zh="更具体地说，我们可以先在较短的时间 bin 上汇总 <code class=&quot;file-ref&quot;>pkt_size</code>，再把这些能量组织成一条累积分布，然后按这条分布去采样候选帧位置。这样做仍然保持了整体流程的稀疏性，但会让最终选到的帧更容易落在运动更强、结构变化更明显的片段中。">Concretely, we can first summarize <code class="file-ref">pkt_size</code> over short time bins, turn those energies into a cumulative distribution, and then sample frame locations according to that distribution. This still keeps the pipeline sparse, but it makes the selected frames more likely to land in the segments that contain stronger motion or structural change.</span>
+                </p>
+                <p style="margin-top:12px;">
+                    <span class="lang-span" data-en="The sketch below is only meant to convey the intuition: the bars represent temporal bins with different compressed-domain energy, the cyan curve shows the accumulated sampling preference, and the yellow markers indicate that more samples are naturally drawn from the higher-energy part of the video." data-zh="下图只是为了表达这个直觉：柱状表示不同时间 bin 的压缩域能量，青色曲线表示累积后的采样偏好，黄色采样点则说明最终更多样本会自然地落在高能量区域。">The sketch below is only meant to convey the intuition: the bars represent temporal bins with different compressed-domain energy, the cyan curve shows the accumulated sampling preference, and the yellow markers indicate that more samples are naturally drawn from the higher-energy part of the video.</span>
+                </p>
+
+                <div class="canvas-wrap" style="margin-top:20px;">
+                    <canvas id="futureCanvas" width="720" height="300"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-emerald)"></span>
+                <span class="lang-span" data-en="Takeaway for Training Alignment" data-zh="训练对齐要点">Takeaway for Training Alignment</span>
+            </h2>
+            <div class="card">
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="Think of the training-side sequence as <strong>64 uniformly sampled positions</strong>." data-zh="把训练侧序列理解为 <strong>64 个均匀采样位置</strong>。">Think of the training-side sequence as <strong>64 uniformly sampled positions</strong>.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Think of Step 3 as producing a <strong>top-k patch index</strong>, not dense full-frame input." data-zh="把 Step 3 理解为生成 <strong>top-k patch index</strong>，而不是生成稠密 full-frame 输入。">Think of Step 3 as producing a <strong>top-k patch index</strong>, not dense full-frame input.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Treat the codec GOP as a representation constraint that stabilizes MV/residual extraction, not as the direct temporal layout of model input." data-zh="把 codec GOP 理解为一种用于稳定 MV/residual 提取的表示约束，而不是模型输入的直接时间布局。">Treat the codec GOP as a representation constraint that stabilizes MV/residual extraction, not as the direct temporal layout of model input.</span>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <footer class="reveal">
+            <p>
+                <span class="lang-span" data-en="Built for OneVision-Encoder · Issue #112" data-zh="为 OneVision-Encoder 构建 · Issue #112">Built for OneVision-Encoder · Issue #112</span>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        let currentLang = 'en';
+        function toggleLanguage(lang) {
+            currentLang = lang;
+            document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+            document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+            document.querySelectorAll('.lang-span').forEach(el => {
+                const text = el.getAttribute('data-' + lang);
+                if (text !== null) el.innerHTML = text;
+            });
+            document.title = lang === 'zh' ? 'Issue #112 解释页' : 'Issue #112 Explainer';
+            renderMath();
+        }
+        function renderMath() {
+            if (typeof katex === 'undefined') return;
+            document.querySelectorAll('.katex-formula').forEach(el => {
+                const tex = el.getAttribute('data-formula');
+                if (tex) katex.render(tex, el, { displayMode: true, throwOnError: false });
+            });
+            document.querySelectorAll('.katex-inline').forEach(el => {
+                const tex = el.getAttribute('data-formula');
+                if (tex) katex.render(tex, el, { displayMode: false, throwOnError: false });
+            });
+        }
+
+        // Scroll reveal
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+        }, { threshold: 0.1 });
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+        // Temporal Sampling Canvas Animation
+        (function() {
+            const canvas = document.getElementById('sampleCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const cssWidth = 720;
+            const cssHeight = 180;
+            canvas.width = cssWidth * dpr;
+            canvas.height = cssHeight * dpr;
+            canvas.style.width = cssWidth + 'px';
+            canvas.style.height = cssHeight + 'px';
+            ctx.scale(dpr, dpr);
+
+            const totalFrames = 320;
+            const seqLen = 64;
+            const timelineY = 100;
+            const startX = 40;
+            const endX = 680;
+            const positions = [];
+            for (let i = 0; i < seqLen; i++) {
+                const frameIdx = Math.round(i * (totalFrames - 1) / (seqLen - 1));
+                const x = startX + (frameIdx / (totalFrames - 1)) * (endX - startX);
+                positions.push({ x, frameIdx });
+            }
+            let highlightIdx = 0;
+
+            function draw() {
+                ctx.clearRect(0, 0, cssWidth, cssHeight);
+                // timeline bar
+                ctx.strokeStyle = '#cbd5e1';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(startX, timelineY);
+                ctx.lineTo(endX, timelineY);
+                ctx.stroke();
+
+                // endpoint labels
+                ctx.fillStyle = '#64748b';
+                ctx.font = '12px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('frame 0', startX, timelineY + 22);
+                ctx.textAlign = 'right';
+                ctx.fillText('frame 319', endX, timelineY + 22);
+
+                // sampled dots
+                for (let i = 0; i < positions.length; i++) {
+                    const { x } = positions[i];
+                    const isHighlight = i === highlightIdx;
+                    ctx.beginPath();
+                    ctx.arc(x, timelineY, isHighlight ? 6 : 3, 0, Math.PI * 2);
+                    ctx.fillStyle = isHighlight ? '#2563eb' : '#94a3b8';
+                    ctx.fill();
+                    if (isHighlight) {
+                        ctx.strokeStyle = 'rgba(37,99,235,0.25)';
+                        ctx.lineWidth = 8;
+                        ctx.beginPath();
+                        ctx.arc(x, timelineY, 10, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                }
+
+                // label
+                ctx.fillStyle = '#0f172a';
+                ctx.font = '600 13px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('64 sampled positions', (startX + endX) / 2, timelineY - 28);
+            }
+
+            draw();
+            setInterval(() => {
+                highlightIdx = (highlightIdx + 1) % positions.length;
+                draw();
+            }, 120);
+
+            canvas.addEventListener('click', () => {
+                highlightIdx = (highlightIdx + 1) % positions.length;
+                draw();
+            });
+        })();
+
+        // Looking-ahead pkt_size window-selection sketch
+        (function() {
+            const canvas = document.getElementById('futureCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const cssWidth = 720;
+            const cssHeight = 300;
+            canvas.width = cssWidth * dpr;
+            canvas.height = cssHeight * dpr;
+            canvas.style.width = cssWidth + 'px';
+            canvas.style.height = cssHeight + 'px';
+            ctx.scale(dpr, dpr);
+
+            const chartX = 132;
+            const chartY = 34;
+            const chartW = 520;
+            const chartH = 178;
+            const bins = [18, 32, 12, 22, 46, 14, 25, 10, 38, 28, 8, 21, 30];
+            const samples = [1, 3, 4, 5, 7, 8, 9, 10, 12];
+            const sampleCounts = bins.map((_, i) => samples.filter(idx => idx === i).length);
+            let phase = 0;
+
+            function clamp01(t) {
+                return Math.max(0, Math.min(1, t));
+            }
+
+            function easeInOut(t) {
+                t = clamp01(t);
+                return 0.5 * (1 - Math.cos(Math.PI * t));
+            }
+
+            function drawRoundedRect(x, y, w, h, r, fill, stroke) {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.lineTo(x + w - r, y);
+                ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+                ctx.lineTo(x + w, y + h - r);
+                ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+                ctx.lineTo(x + r, y + h);
+                ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+                ctx.lineTo(x, y + r);
+                ctx.quadraticCurveTo(x, y, x + r, y);
+                if (fill) {
+                    ctx.fillStyle = fill;
+                    ctx.fill();
+                }
+                if (stroke) {
+                    ctx.strokeStyle = stroke;
+                    ctx.stroke();
+                }
+            }
+
+            function centerText(text, x, y, font, color) {
+                ctx.font = font;
+                ctx.fillStyle = color;
+                ctx.textAlign = 'center';
+                ctx.fillText(text, x, y);
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, cssWidth, cssHeight);
+                const totalDuration = 8.0;
+                const t = phase % totalDuration;
+                const revealBins = easeInOut(t / 2.2);
+                const revealLine = easeInOut((t - 0.8) / 2.6);
+                const revealSamples = easeInOut((t - 2.4) / 2.8);
+
+                drawRoundedRect(0, 0, cssWidth, cssHeight, 18, '#ffffff', '#e2e8f0');
+
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(chartX, chartY);
+                ctx.lineTo(chartX, chartY + chartH);
+                ctx.lineTo(chartX + chartW, chartY + chartH);
+                ctx.stroke();
+
+                centerText(
+                    currentLang === 'zh' ? '高能量多采' : 'sample more from high-energy bins',
+                    chartX + chartW * 0.46,
+                    chartY + 26,
+                    '700 12px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+                    '#475569'
+                );
+
+                ctx.save();
+                ctx.translate(40, chartY + chartH / 2);
+                ctx.rotate(-Math.PI / 2);
+                centerText(
+                    currentLang === 'zh' ? '累积概率' : 'Cum. Prob.',
+                    0,
+                    0,
+                    '12px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+                    '#64748b'
+                );
+                ctx.restore();
+
+                centerText(
+                    currentLang === 'zh' ? '时间 bins' : 'Time Bins',
+                    chartX + chartW / 2,
+                    chartY + chartH + 54,
+                    '12px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+                    '#64748b'
+                );
+
+                const maxBin = Math.max(...bins);
+                const barW = chartW / bins.length * 0.62;
+                const step = chartW / bins.length;
+                let cdf = [];
+                let cum = 0;
+                const total = bins.reduce((a, b) => a + b, 0);
+                bins.forEach(v => {
+                    cum += v;
+                    cdf.push(cum / total);
+                });
+
+                // baseline prior
+                ctx.strokeStyle = 'rgba(239,68,68,0.45)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([6, 6]);
+                ctx.beginPath();
+                ctx.moveTo(chartX, chartY + chartH * 0.82);
+                ctx.lineTo(chartX + chartW, chartY + chartH * 0.82);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#64748b';
+                ctx.font = '700 11px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('15%', chartX + 8, chartY + chartH * 0.82 - 8);
+
+                bins.forEach((v, i) => {
+                    const prog = clamp01(revealBins * 1.25 - i / bins.length);
+                    if (prog <= 0) return;
+                    const h = (v / maxBin) * (chartH - 26) * prog;
+                    const x = chartX + i * step + (step - barW) / 2;
+                    const y = chartY + chartH - h;
+                    const color = i === 4 || i === 8 ? '#3b82f6' : i % 2 === 0 ? 'rgba(14,165,233,0.36)' : 'rgba(34,197,94,0.22)';
+                    drawRoundedRect(x, y, barW, h, 0, color, null);
+                });
+
+                bins.forEach((_, i) => {
+                    const x = chartX + i * step + step / 2;
+                    const reveal = clamp01(revealSamples * 1.25 - i / bins.length);
+                    ctx.font = '700 11px "SF Mono", "Fira Code", Consolas, monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = sampleCounts[i] > 0
+                        ? `rgba(217,119,6,${0.55 + 0.45 * reveal})`
+                        : '#94a3b8';
+                    ctx.fillText(String(sampleCounts[i]), x, chartY + chartH + 18);
+                });
+
+                centerText(
+                    currentLang === 'zh' ? '每个 bin 的采样数' : 'sample count per bin',
+                    chartX + chartW / 2,
+                    chartY + chartH + 34,
+                    '11px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+                    '#94a3b8'
+                );
+
+                // cdf area
+                ctx.beginPath();
+                bins.forEach((v, i) => {
+                    const px = chartX + i * step + step / 2;
+                    const py = chartY + chartH - cdf[i] * (chartH - 26) * revealLine;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                });
+                ctx.lineTo(chartX + chartW - step / 2, chartY + chartH);
+                ctx.lineTo(chartX + step / 2, chartY + chartH);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(14,165,233,0.10)';
+                ctx.fill();
+
+                ctx.beginPath();
+                bins.forEach((v, i) => {
+                    const px = chartX + i * step + step / 2;
+                    const py = chartY + chartH - cdf[i] * (chartH - 26) * revealLine;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                });
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+
+                samples.forEach((idx, j) => {
+                    const reveal = clamp01(revealSamples * 1.2 - j / samples.length);
+                    if (reveal <= 0) return;
+                    const px = chartX + idx * step + step / 2;
+                    const py = chartY + chartH - cdf[idx] * (chartH - 26) * revealLine;
+                    ctx.strokeStyle = 'rgba(234,179,8,0.45)';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([6, 6]);
+                    ctx.beginPath();
+                    ctx.moveTo(px, py);
+                    ctx.lineTo(px, chartY + chartH);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    ctx.beginPath();
+                    ctx.arc(px, py, 6 * reveal, 0, Math.PI * 2);
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.fill();
+                });
+
+                ctx.fillStyle = '#d97706';
+                ctx.font = '700 11px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText(
+                    currentLang === 'zh' ? '高能量多采' : 'more samples in high-energy bins',
+                    chartX + chartW * 0.58,
+                    chartY + 52
+                );
+                ctx.fillStyle = '#d97706';
+                ctx.fillText(
+                    currentLang === 'zh' ? '黄色点：CDF 采样' : 'yellow dots: CDF sampling',
+                    chartX + chartW * 0.58,
+                    chartY + 72
+                );
+                ctx.fillText(
+                    currentLang === 'zh' ? 'N = 9 个 samples' : 'N = 9 samples',
+                    chartX + chartW * 0.79,
+                    chartY + 92
+                );
+            }
+
+            draw();
+            setInterval(() => {
+                phase += 0.035;
+                draw();
+            }, 40);
+
+            canvas.addEventListener('click', () => {
+                phase += 1.4;
+                draw();
+            });
+        })();
+
+        // Initial render
+        window.addEventListener('load', () => {
+            toggleLanguage('en');
+        });
+    </script>
+</body>
+</html>
