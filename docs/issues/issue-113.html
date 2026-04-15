@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issue #113 Explainer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <style>
+        :root {
+            --accent-blue: #2563eb;
+            --accent-pink: #e11d48;
+            --accent-emerald: #059669;
+            --accent-indigo: #4f46e5;
+            --accent-amber: #d97706;
+            --bg: #ffffff;
+            --text: #0f172a;
+            --muted: #475569;
+            --border: #e2e8f0;
+            --code-bg: #1e293b;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .lang-toggle {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-indigo));
+            border-radius: 999px;
+            padding: 4px;
+            display: flex;
+            gap: 4px;
+            box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+        }
+        .lang-toggle button {
+            border: none;
+            background: transparent;
+            color: rgba(255,255,255,0.9);
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            min-width: 44px;
+        }
+        .lang-toggle button.active {
+            background: #fff;
+            color: var(--accent-blue);
+        }
+        .container {
+            max-width: 880px;
+            margin: 0 auto;
+            padding: 88px 18px 48px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 36px;
+        }
+        header h1 {
+            font-size: clamp(26px, 5vw, 36px);
+            margin: 0 0 8px;
+            letter-spacing: -0.5px;
+        }
+        header p {
+            color: var(--muted);
+            margin: 0;
+            font-size: 15px;
+        }
+        .issue-question {
+            border-left: 4px solid var(--accent-indigo);
+            background: #f8fafc;
+            padding: 18px 20px;
+            border-radius: 0 10px 10px 0;
+            margin-bottom: 28px;
+        }
+        .issue-question-header {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 10px;
+        }
+        .issue-question-header a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .issue-question-body {
+            font-size: 15px;
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .issue-question-body ul { margin: 0.5rem 0; padding-left: 1.25rem; }
+        .issue-question-body li { margin-bottom: 0.25rem; }
+        h2 {
+            font-size: 22px;
+            margin: 36px 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h2 .dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+        }
+        .card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+            color: var(--text);
+        }
+        .card p, .card li {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14.5px;
+        }
+        .card ul { margin: 8px 0 0; padding-left: 20px; }
+        .card li { margin-bottom: 6px; }
+        .tag {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 6px;
+            margin-right: 6px;
+        }
+        .tag-blue { background: #eff6ff; color: var(--accent-blue); }
+        .tag-pink { background: #fff1f2; color: var(--accent-pink); }
+        .tag-emerald { background: #ecfdf5; color: var(--accent-emerald); }
+        .tag-amber { background: #fffbeb; color: var(--accent-amber); }
+        pre.code {
+            background: var(--code-bg);
+            color: #e2e8f0;
+            padding: 14px 16px;
+            border-radius: 10px;
+            overflow-x: auto;
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 10px 0 0;
+        }
+        pre.code .kw { color: #c678dd; }
+        pre.code .fn { color: #61afef; }
+        pre.code .str { color: #98c379; }
+        pre.code .num { color: #d19a66; }
+        pre.code .cm { color: #5c6370; font-style: italic; }
+        .katex-formula {
+            margin: 14px 0;
+            overflow-x: auto;
+        }
+        .file-ref {
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 12.5px;
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 5px;
+            color: var(--accent-indigo);
+        }
+        .summary-box {
+            background: linear-gradient(135deg, #eff6ff, #f5f3ff);
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+            padding: 18px;
+            margin: 20px 0;
+        }
+        .summary-box p {
+            margin: 0;
+            font-size: 15px;
+        }
+        .pipeline { margin: 10px 0; }
+        .p-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            padding: 8px 0;
+        }
+        .p-num {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+            color: #fff;
+            display: grid;
+            place-items: center;
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .p-text {
+            flex: 1;
+            font-size: 14.5px;
+            color: var(--text);
+        }
+        .p-text small {
+            display: block;
+            font-size: 12.5px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+        .p-arrow {
+            text-align: left;
+            color: var(--muted);
+            font-size: 18px;
+            padding-left: 42px;
+            margin: -2px 0;
+        }
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        @media (max-width: 640px) {
+            .container { padding-top: 80px; }
+            h2 { font-size: 20px; }
+            .side-by-side { grid-template-columns: 1fr; }
+        }
+        .reveal {
+            opacity: 0;
+            transform: translateY(18px);
+            transition: opacity .6s ease, transform .6s ease;
+        }
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        footer {
+            text-align: center;
+            margin-top: 48px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="lang-toggle" role="group" aria-label="Language switch">
+        <button id="btn-en" class="active" onclick="toggleLanguage('en')">EN</button>
+        <button id="btn-zh" onclick="toggleLanguage('zh')">中文</button>
+    </div>
+
+    <div class="container">
+        <header class="reveal">
+            <h1>
+                <span class="lang-span" data-en="Offline Data Preparation and I-Frame Retention" data-zh="离线数据准备与 I-Frame 保留">Offline Data Preparation and I-Frame Retention</span>
+            </h1>
+            <p>
+                <span class="lang-span" data-en="Interactive explainer for Issue #113 — aligned with the offline preprocessing pipeline used in practice" data-zh="Issue #113 交互式解释页 — 与实际使用的离线预处理流程对齐">Interactive explainer for Issue #113 — aligned with the offline preprocessing pipeline used in practice</span>
+            </p>
+        </header>
+
+        <div class="issue-question reveal">
+            <div class="issue-question-header">
+                💬 <a href="https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/113" target="_blank">Issue #113</a>
+                <span class="lang-span" data-en="opened by <strong>Wenbo-Nie</strong>" data-zh="由 <strong>Wenbo-Nie</strong> 提出">opened by <strong>Wenbo-Nie</strong></span>
+            </div>
+            <div class="issue-question-body">
+                <p><span class="lang-span" data-en="Hi, thanks for the great work on this HEVC-based token selection pipeline. I have a question about how I-frames are handled in ap_dataloader_dali_codec.py." data-zh="你好，感谢你们在基于 HEVC 的 token 选择流程上的出色工作。我对 ap_dataloader_dali_codec.py 中 I-frame 的处理方式有个疑问。">Hi, thanks for the great work on this HEVC-based token selection pipeline. I have a question about how I-frames are handled in ap_dataloader_dali_codec.py.</span></p>
+                <p><span class="lang-span" data-en="My understanding from the paper is that all tokens from I-frames are preserved, while Top-K selection is only applied to P-frame patches based on codec-derived saliency. In particular, Equation (2) seems to describe the HEVC input as keeping the full patchified I-frame and applying the visibility mask only to decoded P-frames." data-zh="根据我对论文的理解，I-frame 的所有 token 都应该被保留，而 Top-K 选择仅应用于基于编解码器显著性的 P-frame patch。特别是，公式 (2) 似乎描述的是保留完整的 patch 化 I-frame，并仅对解码后的 P-frame 应用可见性掩码。">My understanding from the paper is that all tokens from I-frames are preserved, while Top-K selection is only applied to P-frame patches based on codec-derived saliency. In particular, Equation (2) seems to describe the HEVC input as keeping the full patchified I-frame and applying the visibility mask only to decoded P-frames.</span></p>
+                <p><span class="lang-span" data-en="However, in get_frame_id_list, I noticed that residuals at I-frame positions are explicitly zeroed out:" data-zh="然而，在 get_frame_id_list 中，我注意到 I-frame 位置的残差被显式置零了：">However, in get_frame_id_list, I noticed that residuals at I-frame positions are explicitly zeroed out:</span></p>
+                <pre class="code" style="margin:10px 0;"><span class="kw">if</span> pos <span class="kw">in</span> I_pos_set:
+    residuals_y[pos] = np.<span class="fn">zeros</span>((H0, W0), dtype=dtype0 <span class="kw">or</span> np.uint8)</pre>
+                <p><span class="lang-span" data-en="Since patch scores in compute_visible_indices_cpu are computed from residual energy, this seems to imply that all I-frame patches receive a score of 0 and therefore would not be selected by Top-K, except possibly through tie-breaking or the static_fallback path." data-zh="由于在 compute_visible_indices_cpu 中 patch 分数是根据残差能量计算的，这似乎意味着所有 I-frame patch 的分数都是 0，因此不会被 Top-K 选中，除非通过打破平局或 static_fallback 路径。">Since patch scores in compute_visible_indices_cpu are computed from residual energy, this seems to imply that all I-frame patches receive a score of 0 and therefore would not be selected by Top-K, except possibly through tie-breaking or the static_fallback path.</span></p>
+                <p><span class="lang-span" data-en="So I wanted to check whether I am misunderstanding the implementation, or whether the current code is using a different behavior from what I inferred from the paper. If I-frame tokens are indeed intended to be fully preserved, could you clarify where that happens in the pipeline?" data-zh="所以我想确认一下是我误解了实现，还是当前代码使用的行为与我从论文中推断的不同。如果 I-frame token 确实应该被完整保留，能否澄清一下这在 pipeline 的哪个环节发生？">So I wanted to check whether I am misunderstanding the implementation, or whether the current code is using a different behavior from what I inferred from the paper. If I-frame tokens are indeed intended to be fully preserved, could you clarify where that happens in the pipeline?</span></p>
+                <p><span class="lang-span" data-en="Thanks!" data-zh="谢谢！">Thanks!</span></p>
+            </div>
+        </div>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-emerald)"></span>
+                <span class="lang-span" data-en="Short Answer" data-zh="简短回答">Short Answer</span>
+            </h2>
+            <div class="summary-box">
+                <p>
+                    <span class="lang-span" data-en="A friendly way to read this behavior is to start from the <strong>offline data preparation pipeline</strong>. We first re-encode videos with <strong>GOP=16</strong>, then uniformly sample <strong>64 frames</strong> for the downstream sequence, following the same overall idea explained in Issue #112. Under that setup, one frame is kept as a complete frame every 16 frames, so the preserved full-frame structure is best understood as part of offline preprocessing rather than as a separate online rule inside the dataloader." data-zh="一个更容易理解这件事的方式，是先回到<strong>离线数据准备流程</strong>。我们会先用 <strong>GOP=16</strong> 对视频重新编码，然后再均匀抽取 <strong>64 帧</strong> 作为后续序列，这和 Issue #112 里解释的整体思路是一致的。在这个设置下，每隔 16 帧会保留一个完整帧，因此这里的完整帧结构更适合被理解为离线预处理的一部分，而不是 dataloader 内部单独执行的一条在线规则。">A friendly way to read this behavior is to start from the <strong>offline data preparation pipeline</strong>. We first re-encode videos with <strong>GOP=16</strong>, then uniformly sample <strong>64 frames</strong> for the downstream sequence, following the same overall idea explained in Issue #112. Under that setup, one frame is kept as a complete frame every 16 frames, so the preserved full-frame structure is best understood as part of offline preprocessing rather than as a separate online rule inside the dataloader.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-pink)"></span>
+                <span class="lang-span" data-en="How to Read the Pipeline" data-zh="如何理解这个流程">How to Read the Pipeline</span>
+            </h2>
+            <div class="card">
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="It helps to think of this as an <strong>offline-prepared</strong> data path, rather than a purely online codec decision that is recomputed from scratch inside each batch." data-zh="把它理解成一条<strong>离线准备</strong>好的数据路径会更顺一些，而不是每个 batch 都从零开始重新做一遍纯在线 codec 决策。">It helps to think of this as an <strong>offline-prepared</strong> data path, rather than a purely online codec decision that is recomputed from scratch inside each batch.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Step 1 is very simple: videos are first transcoded with <span class='file-ref'>GOP=16</span>, which gives us a periodic full-frame structure at the codec level." data-zh="第一步其实很直接：先用 <span class='file-ref'>GOP=16</span> 对视频转码，在 codec 层面形成这种周期性的完整帧结构。">Step 1 is very simple: videos are first transcoded with <span class='file-ref'>GOP=16</span>, which gives us a periodic full-frame structure at the codec level.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Step 2 then samples <span class='file-ref'>64</span> frames uniformly from that prepared video to build the downstream sequence." data-zh="第二步则是在这个准备好的视频上均匀采样 <span class='file-ref'>64</span> 帧，用来构成后续序列。">Step 2 then samples <span class='file-ref'>64</span> frames uniformly from that prepared video to build the downstream sequence.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="So when people talk about “full I-frame preservation” here, the most practical picture is this offline codec-guided preparation: one complete frame is retained every 16 frames, and the final sampled sequence is built on top of that structure." data-zh="因此当我们在这里讨论“完整 I-frame 保留”时，更贴近实际的图景其实是这种离线的 codec-guided 准备方式：每隔 16 帧保留一个完整帧，而最终的采样序列是在这个结构之上建立起来的。">So when people talk about “full I-frame preservation” here, the most practical picture is this offline codec-guided preparation: one complete frame is retained every 16 frames, and the final sampled sequence is built on top of that structure.</span>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-indigo)"></span>
+                <span class="lang-span" data-en="Relation to Issue #112" data-zh="与 Issue #112 的关系">Relation to Issue #112</span>
+            </h2>
+            <div class="card">
+                <p>
+                    <span class="lang-span" data-en="It is helpful to read this page together with Issue #112. The two issues are really looking at the same preparation logic from different angles: Issue #112 focuses more on the <strong>offline preprocessing order</strong> (transcode first, then sample 64 frames), while this issue asks how to interpret the preserved full-frame structure. In practice, both point back to the same pipeline: <strong>GOP=16 first, then uniform 64-frame sampling</strong>." data-zh="把这页和 Issue #112 放在一起看会更容易理解。它们其实是在从不同角度讨论同一条准备逻辑：Issue #112 更强调<strong>离线预处理顺序</strong>（先转码，再采样 64 帧），而这个问题更关心应该怎样理解被保留下来的完整帧结构。落到实际流程上，两者指向的是同一条 pipeline：<strong>先设定 GOP=16，再做均匀的 64 帧采样</strong>。">It is helpful to read this page together with Issue #112. The two issues are really looking at the same preparation logic from different angles: Issue #112 focuses more on the <strong>offline preprocessing order</strong> (transcode first, then sample 64 frames), while this issue asks how to interpret the preserved full-frame structure. In practice, both point back to the same pipeline: <strong>GOP=16 first, then uniform 64-frame sampling</strong>.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#0ea5e9"></span>
+                <span class="lang-span" data-en="Takeaway" data-zh="结论">Takeaway</span>
+            </h2>
+            <div class="card">
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="The easiest way to keep the picture straight is to start from the <strong>offline prepared data</strong>, rather than reading one dataloader branch in isolation." data-zh="如果想把这件事理解得更顺，最简单的方式还是先从<strong>离线准备好的数据</strong>出发，而不是单独去看某一个 dataloader 分支。">The easiest way to keep the picture straight is to start from the <strong>offline prepared data</strong>, rather than reading one dataloader branch in isolation.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="The preparation rule can be summarized very simply: <strong>re-encode with GOP=16</strong>, then <strong>uniformly sample 64 frames</strong>." data-zh="这条准备规则其实可以很简单地概括成一句话：<strong>先用 GOP=16 重编码</strong>，然后<strong>均匀采样 64 帧</strong>。">The preparation rule can be summarized very simply: <strong>re-encode with GOP=16</strong>, then <strong>uniformly sample 64 frames</strong>.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Under this setup, one full frame is retained every 16 frames, which is the practical interpretation we want to highlight here." data-zh="在这个设置下，每隔 16 帧会保留一个完整帧，这也是这里最想强调的实际理解方式。">Under this setup, one full frame is retained every 16 frames, which is the practical interpretation we want to highlight here.</span>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <footer class="reveal">
+            <p>
+                <span class="lang-span" data-en="Built for OneVision-Encoder · Issue #113" data-zh="为 OneVision-Encoder 构建 · Issue #113">Built for OneVision-Encoder · Issue #113</span>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        let currentLang = 'en';
+        function toggleLanguage(lang) {
+            currentLang = lang;
+            document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+            document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+            document.querySelectorAll('.lang-span').forEach(el => {
+                const text = el.getAttribute('data-' + lang);
+                if (text !== null) el.innerHTML = text;
+            });
+            renderMath();
+        }
+        function renderMath() {
+            if (typeof katex === 'undefined') return;
+            document.querySelectorAll('.katex-formula').forEach(el => {
+                const tex = el.getAttribute('data-formula');
+                if (tex) katex.render(tex, el, { displayMode: true, throwOnError: false });
+            });
+            document.querySelectorAll('.katex-inline').forEach(el => {
+                const tex = el.getAttribute('data-formula');
+                if (tex) katex.render(tex, el, { displayMode: false, throwOnError: false });
+            });
+        }
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+        }, { threshold: 0.1 });
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+        window.addEventListener('load', () => {
+            toggleLanguage('en');
+        });
+    </script>
+</body>
+</html>
