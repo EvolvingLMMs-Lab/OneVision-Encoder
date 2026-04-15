@@ -494,6 +494,8 @@ We publish interactive visual explainers for frequently asked questions. Each is
 | Issue | Topic | Page |
 |-------|-------|------|
 | [#105](https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/105) | How OCR annotations are used during training | [issue-105.html](https://evolvinglmms-lab.github.io/OneVision-Encoder/issues/issue-105.html) |
+| [#112](https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/112) | Clarification on Intra-frame (I-frame) interval in data preprocessing | [issue-112.html](https://evolvinglmms-lab.github.io/OneVision-Encoder/issues/issue-112.html) |
+| [#113](https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/113) | Are all I-frame tokens intended to be preserved in the current implementation? | [issue-113.html](https://evolvinglmms-lab.github.io/OneVision-Encoder/issues/issue-113.html) |
 
 This table will be updated as more explainers are added. If you have a question that would benefit from a visual explanation, feel free to [open an issue](https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/new).
 
