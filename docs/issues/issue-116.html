@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issue #116 Explainer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <style>
+        :root {
+            --accent-blue: #2563eb;
+            --accent-pink: #e11d48;
+            --accent-emerald: #059669;
+            --accent-indigo: #4f46e5;
+            --accent-amber: #d97706;
+            --bg: #ffffff;
+            --text: #0f172a;
+            --muted: #475569;
+            --border: #e2e8f0;
+            --code-bg: #1e293b;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            margin: 0;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .lang-toggle {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-indigo));
+            border-radius: 999px;
+            padding: 4px;
+            display: flex;
+            gap: 4px;
+            box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+        }
+        .lang-toggle button {
+            border: none;
+            background: transparent;
+            color: rgba(255,255,255,0.9);
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            min-width: 44px;
+        }
+        .lang-toggle button.active {
+            background: #fff;
+            color: var(--accent-blue);
+        }
+        .container {
+            max-width: 880px;
+            margin: 0 auto;
+            padding: 88px 18px 48px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 36px;
+        }
+        header h1 {
+            font-size: clamp(26px, 5vw, 36px);
+            margin: 0 0 8px;
+            letter-spacing: -0.5px;
+        }
+        header p {
+            color: var(--muted);
+            margin: 0;
+            font-size: 15px;
+        }
+        .issue-question {
+            border-left: 4px solid var(--accent-indigo);
+            background: #f8fafc;
+            padding: 18px 20px;
+            border-radius: 0 10px 10px 0;
+            margin-bottom: 28px;
+        }
+        .issue-question-header {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 10px;
+        }
+        .issue-question-header a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .issue-question-body {
+            font-size: 15px;
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .issue-question-body ul { margin: 0.5rem 0; padding-left: 1.25rem; }
+        .issue-question-body li { margin-bottom: 0.25rem; }
+        h2 {
+            font-size: 22px;
+            margin: 36px 0 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h2 .dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+        }
+        .card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+            color: var(--text);
+        }
+        .card p, .card li {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14.5px;
+        }
+        .card ul { margin: 8px 0 0; padding-left: 20px; }
+        .card li { margin-bottom: 6px; }
+        .tag {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 6px;
+            margin-right: 6px;
+        }
+        .tag-blue { background: #eff6ff; color: var(--accent-blue); }
+        .tag-pink { background: #fff1f2; color: var(--accent-pink); }
+        .tag-emerald { background: #ecfdf5; color: var(--accent-emerald); }
+        .tag-amber { background: #fffbeb; color: var(--accent-amber); }
+        pre.code {
+            background: var(--code-bg);
+            color: #e2e8f0;
+            padding: 14px 16px;
+            border-radius: 10px;
+            overflow-x: auto;
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 10px 0 0;
+        }
+        pre.code .kw { color: #c678dd; }
+        pre.code .fn { color: #61afef; }
+        pre.code .str { color: #98c379; }
+        pre.code .num { color: #d19a66; }
+        pre.code .cm { color: #5c6370; font-style: italic; }
+        .katex-formula {
+            margin: 14px 0;
+            overflow-x: auto;
+        }
+        .canvas-wrap {
+            text-align: center;
+            margin: 18px 0;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: #fafafa;
+        }
+        .flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin: 14px 0;
+        }
+        .flow-box {
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #fff;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .flow-arrow {
+            color: var(--muted);
+            font-size: 18px;
+        }
+        .pipeline {
+            position: relative;
+            margin: 8px 0;
+            padding-left: 58px;
+        }
+        .pipeline::before {
+            content: "";
+            position: absolute;
+            left: 18px;
+            top: 10px;
+            bottom: 10px;
+            width: 2px;
+            background: linear-gradient(180deg, #bfdbfe 0%, #60a5fa 45%, #cbd5e1 100%);
+        }
+        .p-step {
+            position: relative;
+            margin-bottom: 14px;
+        }
+        .p-step:last-child { margin-bottom: 0; }
+        .p-num {
+            position: absolute;
+            left: -58px;
+            top: 14px;
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-blue), #60a5fa);
+            color: #fff;
+            display: grid;
+            place-items: center;
+            font-size: 13px;
+            font-weight: 800;
+            box-shadow: 0 6px 14px rgba(37,99,235,0.18);
+        }
+        .p-card {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            padding: 14px 16px;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .p-title {
+            font-size: 15px;
+            line-height: 1.5;
+            color: var(--text);
+            font-weight: 700;
+            margin: 0;
+        }
+        .p-desc {
+            display: block;
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 5px;
+            line-height: 1.55;
+        }
+        .p-step.is-output .p-card {
+            border-color: #bbf7d0;
+            background: linear-gradient(180deg, #f0fdf4 0%, #f8fffb 100%);
+        }
+        .p-chip {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            background: #ffffff;
+            border: 1px solid #dbeafe;
+            color: var(--accent-blue);
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .example-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .example-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            color: var(--muted);
+        }
+        .example-table td:first-child {
+            width: 42%;
+            color: var(--text);
+            font-weight: 500;
+        }
+        .pill-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .pill {
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: #fff;
+            font-size: 13px;
+            color: var(--text);
+            font-weight: 600;
+        }
+        .file-ref {
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 12.5px;
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 5px;
+            color: var(--accent-indigo);
+        }
+        .summary-box {
+            background: linear-gradient(135deg, #eff6ff, #f5f3ff);
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+            padding: 18px;
+            margin: 20px 0;
+        }
+        .summary-box p {
+            margin: 0;
+            font-size: 15px;
+        }
+        .qa-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .qa-card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            background: linear-gradient(180deg, #ffffff, #f8fafc);
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .qa-card .q-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--accent-indigo);
+            margin-bottom: 8px;
+        }
+        .qa-card h3 {
+            margin: 0 0 8px;
+            font-size: 17px;
+        }
+        .qa-card p {
+            margin: 0;
+            font-size: 14.5px;
+            color: var(--muted);
+        }
+        .mini-note {
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            color: #9a3412;
+            font-size: 13.5px;
+        }
+        .three-up {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .compare-card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            background: #fff;
+        }
+        .compare-card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+        }
+        .compare-card p {
+            margin: 0 0 10px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .compare-card strong {
+            color: var(--text);
+        }
+        .math-note {
+            margin-top: 12px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .dark-panel {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 18px;
+            padding: 26px 26px 22px;
+            color: #0f172a;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .dark-panel p,
+        .dark-panel li {
+            color: #475569;
+        }
+        .dark-intro {
+            font-size: 15px;
+            line-height: 1.8;
+            margin: 0 0 18px;
+        }
+        .inline-chip {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            color: #334155;
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 12px;
+            vertical-align: middle;
+        }
+        .step-list {
+            display: grid;
+            gap: 12px;
+            margin: 0;
+        }
+        .step-row {
+            display: grid;
+            grid-template-columns: 28px 1fr;
+            gap: 12px;
+            align-items: start;
+        }
+        .step-no {
+            color: #2563eb;
+            font-weight: 800;
+            font-size: 16px;
+            line-height: 1.5;
+            text-align: right;
+        }
+        .step-body {
+            font-size: 15px;
+            line-height: 1.8;
+            color: #475569;
+        }
+        .formula-shell {
+            position: relative;
+            margin: 18px 0 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 28px 22px 22px;
+            overflow: hidden;
+        }
+        .formula-badge {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 2px 8px;
+        }
+        .formula-text {
+            margin: 0;
+            color: #0ea5e9;
+            font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.7;
+            letter-spacing: 0.01em;
+        }
+        /* Matrix demo styles (from original issue-116) */
+        .matrix-wrap { overflow-x: auto; }
+        .matrix {
+            display: grid;
+            grid-template-columns: 84px repeat(6, 48px);
+            gap: 8px;
+            align-items: center;
+            min-width: 420px;
+        }
+        .matrix-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .matrix-cell {
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 800;
+            color: #0f172a;
+            border: 1px solid rgba(15,23,42,0.06);
+        }
+        .matrix-cell.topk {
+            outline: 3px solid rgba(37,99,235,0.32);
+            outline-offset: 1px;
+            position: relative;
+        }
+        .matrix-cell.topk::after {
+            content: "Top-K";
+            position: absolute;
+            bottom: -22px;
+            font-size: 11px;
+            font-weight: 800;
+            color: var(--accent-blue);
+        }
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 10px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        @media (max-width: 640px) {
+            .container { padding-top: 80px; }
+            .flow { flex-direction: column; }
+            .flow-arrow { transform: rotate(90deg); }
+            h2 { font-size: 20px; }
+            .side-by-side { grid-template-columns: 1fr; }
+            .qa-grid,
+            .three-up { grid-template-columns: 1fr; }
+            .dark-panel { padding: 22px 18px 18px; }
+            .step-row { grid-template-columns: 24px 1fr; gap: 10px; }
+            .pipeline { padding-left: 50px; }
+            .p-num { left: -50px; width: 30px; height: 30px; top: 16px; font-size: 12px; }
+        }
+        .reveal {
+            opacity: 0;
+            transform: translateY(18px);
+            transition: opacity .6s ease, transform .6s ease;
+        }
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        footer {
+            text-align: center;
+            margin-top: 48px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="lang-toggle" role="group" aria-label="Language switch">
+        <button id="btn-en" class="active" onclick="toggleLanguage('en')">EN</button>
+        <button id="btn-zh" onclick="toggleLanguage('zh')">中文</button>
+    </div>
+
+    <div class="container">
+        <header class="reveal">
+            <h1>
+                <span class="lang-span" data-en="Frame-wise Normalization &amp; Global Top-K" data-zh="按帧归一化与全局 Top-K">Frame-wise Normalization &amp; Global Top-K</span>
+            </h1>
+            <p>
+                <span class="lang-span" data-en="Interactive explainer for Issue #116 — why we normalize per frame before selecting patches globally" data-zh="Issue #116 交互式解释页 — 为什么先按帧归一化，再全局选 patch">Interactive explainer for Issue #116 — why we normalize per frame before selecting patches globally</span>
+            </p>
+        </header>
+
+        <div class="issue-question reveal">
+            <div class="issue-question-header">
+                💬 <a href="https://github.com/EvolvingLMMs-Lab/OneVision-Encoder/issues/116" target="_blank">Issue #116</a>
+                <span class="lang-span" data-en="opened by <strong>ThisisBillhe</strong>" data-zh="由 <strong>ThisisBillhe</strong> 提出">opened by <strong>ThisisBillhe</strong></span>
+            </div>
+            <div class="issue-question-body">
+                <p><span class="lang-span" data-en="If each frame is normalized independently, why do a global Top-K afterwards? Doesn't per-frame normalization flatten the differences across frames?" data-zh="如果每一帧都先单独归一化，为什么后面还要做 global Top-K？按帧归一化之后，不是把不同帧之间的差异拉平了吗？">If each frame is normalized independently, why do a global Top-K afterwards? Doesn't per-frame normalization flatten the differences across frames?</span></p>
+            </div>
+        </div>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-emerald)"></span>
+                <span class="lang-span" data-en="Short Answer" data-zh="简短回答">Short Answer</span>
+            </h2>
+            <div class="summary-box">
+                <p>
+                    <span class="lang-span" data-en="A simple way to read this design is that frame-wise normalization and global Top-K are doing <strong>different jobs</strong>. Normalization helps put different frames onto a more comparable scale, so one unusually strong frame does not dominate just because its raw energy is larger. Global Top-K then uses the shared sparse budget to keep the most informative patches across the whole sampled sequence." data-zh="一个更容易理解这套设计的方式是：按帧归一化和 global Top-K 其实在做<strong>两件不同的事</strong>。归一化先帮助不同帧落到更可比较的尺度上，这样某一帧不会仅仅因为原始能量更大就把预算都占走；而 global Top-K 再在共享的稀疏预算下，从整个采样序列里挑出最有信息量的 patch。">A simple way to read this design is that frame-wise normalization and global Top-K are doing <strong>different jobs</strong>. Normalization helps put different frames onto a more comparable scale, so one unusually strong frame does not dominate just because its raw energy is larger. Global Top-K then uses the shared sparse budget to keep the most informative patches across the whole sampled sequence.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#0f766e"></span>
+                <span class="lang-span" data-en="Direct Answers to the Issue" data-zh="对 Issue 问题的直接回答">Direct Answers to the Issue</span>
+            </h2>
+            <div class="qa-grid">
+                <div class="qa-card">
+                    <div class="q-label">
+                        <span class="lang-span" data-en="Question 1" data-zh="问题 1">Question 1</span>
+                    </div>
+                    <h3>
+                        <span class="lang-span" data-en="Does per-frame normalization flatten differences across frames?" data-zh="按帧归一化会把不同帧之间的差异拉平吗？">Does per-frame normalization flatten differences across frames?</span>
+                    </h3>
+                    <p>
+                        <span class="lang-span" data-en="Not in the way that matters for selection. What normalization mainly changes is the <strong>overall scale</strong> of each frame, not the internal pattern of which regions are more or less informative. So after normalization, patches that were relatively important inside the same frame are still likely to stay important." data-zh="在真正影响选择的意义上，并不会。归一化主要改变的是每一帧的<strong>整体尺度</strong>，而不是这一帧内部“哪里更重要、哪里没那么重要”的相对模式。所以归一化之后，那些在同一帧内部本来就更重要的 patch，通常仍然会保持更高的重要性。">Not in the way that matters for selection. What normalization mainly changes is the <strong>overall scale</strong> of each frame, not the internal pattern of which regions are more or less informative. So after normalization, patches that were relatively important inside the same frame are still likely to stay important.</span>
+                    </p>
+                </div>
+                <div class="qa-card">
+                    <div class="q-label">
+                        <span class="lang-span" data-en="Question 2" data-zh="问题 2">Question 2</span>
+                    </div>
+                    <h3>
+                        <span class="lang-span" data-en="Why still use global Top-K after normalization?" data-zh="既然归一化了，为什么还要用 global Top-K？">Why still use global Top-K after normalization?</span>
+                    </h3>
+                    <p>
+                        <span class="lang-span" data-en="Because in the end the model still works with a <strong>single shared patch budget</strong> across all 64 sampled frames. Global Top-K is the step that enforces that budget: it ranks all candidate patches together and keeps only the strongest ones. Without it, each frame would effectively choose patches on its own, and the total count would become hard to control." data-zh="因为最终模型面对的仍然是所有 64 个采样帧共享的<strong>同一个 patch 预算</strong>。Global Top-K 的作用就是把这份预算真正执行下来：它把所有候选 patch 放到一起排序，只留下最强的那一部分。如果没有这一步，每一帧实际上都会更像是在各自决定保留多少 patch，总数量就会变得难以控制。">Because in the end the model still works with a <strong>single shared patch budget</strong> across all 64 sampled frames. Global Top-K is the step that enforces that budget: it ranks all candidate patches together and keeps only the strongest ones. Without it, each frame would effectively choose patches on its own, and the total count would become hard to control.</span>
+                    </p>
+                </div>
+            </div>
+            <div class="mini-note">
+                <span class="lang-span" data-en="So the easiest one-line summary is: normalization makes frames easier to compare, and global Top-K decides how the final sparse budget is spent." data-zh="如果想用一句话来记住它：归一化让不同帧更容易比较，而 global Top-K 决定最终这份稀疏预算应该花在哪些 patch 上。">So the easiest one-line summary is: normalization makes frames easier to compare, and global Top-K decides how the final sparse budget is spent.</span>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-blue)"></span>
+                <span class="lang-span" data-en="What the Code Actually Does" data-zh="代码实际在做什么">What the Code Actually Does</span>
+            </h2>
+            <div class="card">
+                <div style="margin-bottom:10px;">
+                    <span class="tag tag-blue">per-frame norm</span>
+                    <span class="tag tag-emerald">global top-k</span>
+                    <span class="tag tag-amber">sparse selection</span>
+                </div>
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="For every sampled frame, the script computes motion-vector energy and residual energy, then <strong>independently normalizes</strong> each map to [0,1] using a percentile-based scaling." data-zh="对于每个采样帧，脚本先计算运动向量能量和残差能量，然后用基于百分位数的缩放<strong>独立归一化</strong>到 [0,1] 范围。">For every sampled frame, the script computes motion-vector energy and residual energy, then <strong>independently normalizes</strong> each map to [0,1] using a percentile-based scaling.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="These normalized maps are fused into a single energy map per frame." data-zh="这些归一化后的图被融合成每帧一张能量图。">These normalized maps are fused into a single energy map per frame.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="All fused frames are stacked into a tensor of shape <code class=&quot;file-ref">(T, H, W)</code> and passed to <code class=&quot;file-ref">mask_by_residual_topk</code>." data-zh="所有融合后的帧被堆叠成 <code class=&quot;file-ref">(T, H, W)</code> 的张量，传入 <code class=&quot;file-ref">mask_by_residual_topk</code>。">All fused frames are stacked into a tensor of shape <code class="file-ref">(T, H, W)</code> and passed to <code class="file-ref">mask_by_residual_topk</code>.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Inside <code class=&quot;file-ref">mask_by_residual_topk</code>, patch scores are computed for the <strong>entire sequence</strong> and a single <code class=&quot;file-ref">torch.topk</code> selects the global top-K patches." data-zh="在 <code class=&quot;file-ref">mask_by_residual_topk</code> 内部，patch 分数是在<strong>整个序列</strong>上计算的，然后用一次 <code class=&quot;file-ref">torch.topk</code> 选出全局 top-K patch。">Inside <code class="file-ref">mask_by_residual_topk</code>, patch scores are computed for the <strong>entire sequence</strong> and a single <code class="file-ref">torch.topk</code> selects the global top-K patches.</span>
+                    </li>
+                </ul>
+                <p style="margin-top:12px;font-size:14px;color:var(--muted);">
+                    <span class="lang-span" data-en="In other words, normalization happens <em>before</em> fusion (per modality, per frame), while Top-K happens <em>after</em> fusion (across all frames)." data-zh="换句话说，归一化发生在融合<em>之前</em>（按模态、按帧），而 Top-K 发生在融合<em>之后</em>（跨所有帧）。">In other words, normalization happens <em>before</em> fusion (per modality, per frame), while Top-K happens <em>after</em> fusion (across all frames).</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-pink)"></span>
+                <span class="lang-span" data-en="Visual Demo" data-zh="可视化 Demo">Visual Demo</span>
+            </h2>
+            <p style="font-size:14px;color:var(--muted);margin:0 0 12px;">
+                <span class="lang-span" data-en="The two small examples below are meant to show the contrast directly: the left side keeps raw magnitudes, while the right side first normalizes each frame and then applies the same global Top-K budget." data-zh="下面这两个小例子主要是想把对比直接展示出来：左边保留原始幅值，右边则先对每一帧做归一化，再在同样的全局 Top-K 预算下进行选择。">The two small examples below are meant to show the contrast directly: the left side keeps raw magnitudes, while the right side first normalizes each frame and then applies the same global Top-K budget.</span>
+            </p>
+            <div class="side-by-side">
+                <div class="card">
+                    <h3><span class="lang-span" data-en="A. Raw energy + global Top-K" data-zh="A. 原始 energy + 全局 Top-K">A. Raw energy + global Top-K</span></h3>
+                    <p><span class="lang-span" data-en="Frame 2 has much larger raw values, so it dominates the final Top-K almost by itself." data-zh="Frame 2 的原始值整体更大，因此几乎单独主导了最终的 Top-K。">Frame 2 has much larger raw values, so it dominates the final Top-K almost by itself.</span></p>
+                    <div class="matrix-wrap">
+                        <div class="matrix" id="raw-matrix"></div>
+                    </div>
+                    <div class="legend">
+                        <span><i class="swatch" style="background:#cbd5e1"></i><span class="lang-span" data-en="normal cell" data-zh="普通单元">normal cell</span></span>
+                        <span><i class="swatch" style="background:#93c5fd"></i><span class="lang-span" data-en="Top-K selected" data-zh="被 Top-K 选中">Top-K selected</span></span>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3><span class="lang-span" data-en="B. Per-frame normalization + global Top-K" data-zh="B. 按帧归一化 + 全局 Top-K">B. Per-frame normalization + global Top-K</span></h3>
+                    <p><span class="lang-span" data-en="After per-frame normalization, frames become more comparable. Global Top-K selects the best patches overall, but no single high-energy frame dominates by scale alone." data-zh="按帧归一化之后，不同帧变得更可比较。global Top-K 依然在整体上选最好的 patch，但不会再因为尺度差异而被某一帧垄断。">After per-frame normalization, frames become more comparable. Global Top-K selects the best patches overall, but no single high-energy frame dominates by scale alone.</span></p>
+                    <div class="matrix-wrap">
+                        <div class="matrix" id="norm-matrix"></div>
+                    </div>
+                    <div class="legend">
+                        <span><i class="swatch" style="background:#cbd5e1"></i><span class="lang-span" data-en="normal cell" data-zh="普通单元">normal cell</span></span>
+                        <span><i class="swatch" style="background:#93c5fd"></i><span class="lang-span" data-en="Top-K selected" data-zh="被 Top-K 选中">Top-K selected</span></span>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:14px;">
+                <h3><span class="lang-span" data-en="What changed after normalization?" data-zh="归一化之后，到底变了什么？">What changed after normalization?</span></h3>
+                <ul>
+                    <li><span class="lang-span" data-en="We are no longer comparing raw magnitudes directly." data-zh="我们不再直接比较原始幅值。">We are no longer comparing raw magnitudes directly.</span></li>
+                    <li><span class="lang-span" data-en="We are comparing how informative a patch is <strong>relative to other patches in the same frame</strong>." data-zh="我们比较的是：一个 patch <strong>相对于同一帧里其他 patch</strong> 有多重要。">We are comparing how informative a patch is <strong>relative to other patches in the same frame</strong>.</span></li>
+                    <li><span class="lang-span" data-en="Then we still need a single global ranking, because the final patch budget is <strong>shared across all sampled frames</strong>." data-zh="但由于最终 patch 预算是<strong>所有采样帧共享的</strong>，所以我们仍然需要一个全局排序。">Then we still need a single global ranking, because the final patch budget is <strong>shared across all sampled frames</strong>.</span></li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:var(--accent-indigo)"></span>
+                <span class="lang-span" data-en="Pipeline Overview" data-zh="流程总览">Pipeline Overview</span>
+            </h2>
+            <div class="card">
+                <div class="pipeline">
+                    <div class="p-step">
+                        <div class="p-num">1</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Extract MV &amp; Residual per frame" data-zh="逐帧提取 MV 与残差">Extract MV &amp; Residual per frame</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Read motion vectors and residual signals from the HEVC stream at each sampled temporal position." data-zh="在每个采样时间位置从 HEVC 码流中读取运动向量和残差信号。">Read motion vectors and residual signals from the HEVC stream at each sampled temporal position.</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">2</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Per-frame normalization" data-zh="按帧归一化">Per-frame normalization</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Scale MV magnitude and residual energy to [0,1] based on their own 95th percentile (per frame, per modality)." data-zh="根据每帧、每模态自身的 95 分位数，将 MV 幅值和残差能量缩放到 [0,1] 范围。">Scale MV magnitude and residual energy to [0,1] based on their own 95th percentile (per frame, per modality).</span>
+                            </span>
+                            <span class="p-chip">_mv_energy_norm / _residual_energy_norm</span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">3</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Fuse normalized energies" data-zh="融合归一化后的能量">Fuse normalized energies</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Combine MV and residual cues into a single spatial importance map for each frame." data-zh="将 MV 和残差信号融合成每帧一张空间重要性图。">Combine MV and residual cues into a single spatial importance map for each frame.</span>
+                            </span>
+                            <span class="p-chip">_fuse_energy</span>
+                        </div>
+                    </div>
+                    <div class="p-step">
+                        <div class="p-num">4</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Global Top-K patch selection" data-zh="全局 Top-K Patch 选择">Global Top-K patch selection</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Stack all fused frames, score every patch across the whole sequence, and select the top-K patches globally." data-zh="将所有融合帧堆叠，对整个序列里的每个 patch 打分，然后全局选出 top-K patch。">Stack all fused frames, score every patch across the whole sequence, and select the top-K patches globally.</span>
+                            </span>
+                            <span class="p-chip">mask_by_residual_topk</span>
+                        </div>
+                    </div>
+                    <div class="p-step is-output">
+                        <div class="p-num">5</div>
+                        <div class="p-card">
+                            <p class="p-title">
+                                <span class="lang-span" data-en="Sparse patch index" data-zh="稀疏 Patch 索引">Sparse patch index</span>
+                            </p>
+                            <span class="p-desc">
+                                <span class="lang-span" data-en="Output a single index file (.visidx.npy) that tells the training loader which patches to keep." data-zh="输出单个索引文件（.visidx.npy），告诉训练加载器保留哪些 patch。">Output a single index file (.visidx.npy) that tells the training loader which patches to keep.</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#7c3aed"></span>
+                <span class="lang-span" data-en="Why Both Steps Are Necessary" data-zh="为什么两步都必不可少">Why Both Steps Are Necessary</span>
+            </h2>
+            <div class="three-up">
+                <div class="compare-card">
+                    <h3><span class="lang-span" data-en="Without normalization" data-zh="不做归一化">Without normalization</span></h3>
+                    <p>
+                        <span class="lang-span" data-en="A frame with camera shake or a large scene transition can have 10x higher raw energy. Its patches would swamp the global Top-K, pushing out informative patches from calmer frames." data-zh="如果某一帧有镜头抖动或大场景切换，其原始能量可能高出 10 倍。它的 patch 会淹没全局 Top-K，把平静帧里同样有信息量的 patch 挤掉。">A frame with camera shake or a large scene transition can have 10x higher raw energy. Its patches would swamp the global Top-K, pushing out informative patches from calmer frames.</span>
+                    </p>
+                    <strong><span class="lang-span" data-en="Result: unfair, frame-scale-dominated selection" data-zh="结果：不公平，被帧尺度主导的选取">Result: unfair, frame-scale-dominated selection</span></strong>
+                </div>
+                <div class="compare-card">
+                    <h3><span class="lang-span" data-en="Without global Top-K" data-zh="不做全局 Top-K">Without global Top-K</span></h3>
+                    <p>
+                        <span class="lang-span" data-en="If each frame independently kept its own top patches, the total number of patches would scale with the number of frames. The model would receive a variable-length input, breaking the fixed token budget." data-zh="如果每帧独立保留自己的 top patch，总 patch 数会随帧数增长。模型将收到变长输入，破坏固定的 token 预算。">If each frame independently kept its own top patches, the total number of patches would scale with the number of frames. The model would receive a variable-length input, breaking the fixed token budget.</span>
+                    </p>
+                    <strong><span class="lang-span" data-en="Result: no shared budget, variable length" data-zh="结果：没有共享预算，长度不固定">Result: no shared budget, variable length</span></strong>
+                </div>
+                <div class="compare-card">
+                    <h3><span class="lang-span" data-en="With both steps" data-zh="两步都做">With both steps</span></h3>
+                    <p>
+                        <span class="lang-span" data-en="Every frame competes on a level playing field, and the final selection still respects a single global patch budget. Informative regions from any frame can win, regardless of the original raw scale." data-zh="每帧都在公平的尺度上竞争，最终选择仍遵守单一全局 patch 预算。任何帧里信息丰富的区域都能胜出，无论原始幅值大小。">Every frame competes on a level playing field, and the final selection still respects a single global patch budget. Informative regions from any frame can win, regardless of the original raw scale.</span>
+                    </p>
+                    <strong><span class="lang-span" data-en="Result: fair + budget-controlled" data-zh="结果：公平且受预算控制">Result: fair + budget-controlled</span></strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#64748b"></span>
+                <span class="lang-span" data-en="Code Walkthrough" data-zh="代码走读">Code Walkthrough</span>
+            </h2>
+            <div class="card">
+                <p><span class="file-ref">tools/tools_for_hevc/step3_generate_video_mv_residual_index.py</span></p>
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="Lines 146–152: <code class=&quot;file-ref&quot;>_residual_energy_norm</code> — normalizes residual energy per frame using the 95th percentile." data-zh="第 146–152 行：<code class=&quot;file-ref&quot;>_residual_energy_norm</code> — 使用 95 分位数对每帧残差能量进行归一化。">Lines 146–152: <code class="file-ref">_residual_energy_norm</code> — normalizes residual energy per frame using the 95th percentile.</span>
+                        <pre class="code">a = <span class="fn">float</span>(np.<span class="fn">percentile</span>(x, pct))
+a = <span class="fn">max</span>(a, <span class="num">1.0</span>)
+norm = np.<span class="fn">clip</span>(x / a, <span class="num">0.0</span>, <span class="num">1.0</span>)</pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Lines 154–170: <code class=&quot;file-ref&quot;>_mv_energy_norm</code> — computes MV magnitude and normalizes it per frame using the 95th percentile." data-zh="第 154–170 行：<code class=&quot;file-ref&quot;>_mv_energy_norm</code> — 计算 MV 幅值并按帧用 95 分位数归一化。">Lines 154–170: <code class="file-ref">_mv_energy_norm</code> — computes MV magnitude and normalizes it per frame using the 95th percentile.</span>
+                        <pre class="code">a = <span class="fn">float</span>(np.<span class="fn">percentile</span>(mag, pct))
+a = <span class="fn">max</span>(a, <span class="num">1e-6</span>)
+norm = np.<span class="fn">clip</span>(mag / a, <span class="num">0.0</span>, <span class="num">1.0</span>)</pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Lines 312–323: inside the frame loop, both normalized maps are fused into a single energy map." data-zh="第 312–323 行：在帧循环内部，两张归一化图被融合成一张能量图。">Lines 312–323: inside the frame loop, both normalized maps are fused into a single energy map.</span>
+                        <pre class="code">mv_norm, _ = <span class="fn">_mv_energy_norm</span>(...)
+res_norm, _ = <span class="fn">_residual_energy_norm</span>(...)
+fused = <span class="fn">_fuse_energy</span>(mv_norm, res_norm, ...)</pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Lines 398–399: after all frames are fused and resized, a single global Top-K is applied." data-zh="第 398–399 行：所有帧融合并 resize 后，执行一次全局 Top-K。">Lines 398–399: after all frames are fused and resized, a single global Top-K is applied.</span>
+                        <pre class="code">vis_idx = <span class="fn">mask_by_residual_topk</span>(res_torch, K, patch_size)</pre>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="Lines 207–225: <code class=&quot;file-ref&quot;>mask_by_residual_topk</code> — reshapes all patch scores across the full sequence and selects the global top-K." data-zh="第 207–225 行：<code class=&quot;file-ref&quot;>mask_by_residual_topk</code> — 将整段序列的所有 patch 分数展平后选出全局 top-K。">Lines 207–225: <code class="file-ref">mask_by_residual_topk</code> — reshapes all patch scores across the full sequence and selects the global top-K.</span>
+                        <pre class="code">scores = res_abs.reshape(B, T, hb, ph, wb, pw).<span class="fn">sum</span>(dim=(<span class="num">3</span>,<span class="num">5</span>)).reshape(B, L)
+topk_idx = torch.<span class="fn">topk</span>(scores, k=K, dim=<span class="num">1</span>, largest=<span class="kw">True</span>, sorted=<span class="kw">False</span>).indices</pre>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#d97706"></span>
+                <span class="lang-span" data-en="A Direction We Find Interesting" data-zh="一个我们觉得很有意思的方向">A Direction We Find Interesting</span>
+            </h2>
+            <div class="card">
+                <p>
+                    <span class="lang-span" data-en="One thing we have also been thinking about is how the current patch score is constructed. Right now, MV and residual are still two different kinds of codec signals. They come from different sources, behave differently numerically, and do not naturally live on exactly the same scale. In the current pipeline, we first normalize them separately and then fuse them into one value with manually chosen weights." data-zh="我们也一直在思考当前 patch 分数是怎么构造出来的。现在的 MV 和 residual 本质上还是两类不同的 codec 信号：它们来源不同、数值行为不同，也不是天然处在完全一致的尺度上。在当前流程里，我们会先分别做归一化，再通过手动设置权重把它们融合成一个值。">One thing we have also been thinking about is how the current patch score is constructed. Right now, MV and residual are still two different kinds of codec signals. They come from different sources, behave differently numerically, and do not naturally live on exactly the same scale. In the current pipeline, we first normalize them separately and then fuse them into one value with manually chosen weights.</span>
+                </p>
+                <p>
+                    <span class="lang-span" data-en="That design works reasonably well in practice, but part of the scoring rule is still hand-crafted. A direction we find more promising for the future is to use the bit consumption after entropy coding of codec-side information such as MV / residual directly as the score, or at least as a much more central signal." data-zh="这种设计在实践里是有效的，但分数规则里仍然有一部分是人工设定出来的。我们后续更想推进的方向，是直接使用像 MV / residual 这类编码侧信息在熵编码之后的 bits 消耗来作为分数，或者至少把它作为一个更核心的信号。">That design works reasonably well in practice, but part of the scoring rule is still hand-crafted. A direction we find more promising for the future is to use the bit consumption after entropy coding of codec-side information such as MV / residual directly as the score, or at least as a much more central signal.</span>
+                </p>
+                <p>
+                    <span class="lang-span" data-en="The reason this feels attractive to us is that bit cost already lives in a more unified coding-space unit. Compared with manually balancing different variables, it may give us a cleaner and more consistent way to measure how much information a region really carries from the codec's point of view." data-zh="这样做吸引我们的地方在于，bit cost 本身已经落在一个更统一的编码空间单位里。相比手动去平衡不同变量，它有机会更自然、更一致地衡量某个区域从 codec 角度到底携带了多少信息。">The reason this feels attractive to us is that bit cost already lives in a more unified coding-space unit. Compared with manually balancing different variables, it may give us a cleaner and more consistent way to measure how much information a region really carries from the codec's point of view.</span>
+                </p>
+                <p>
+                    <span class="lang-span" data-en="We are still actively exploring this direction, and we plan to keep updating this part of the work as it becomes more mature." data-zh="我们也还在持续推进这个方向，后续如果这部分工作进一步成熟，我们会继续更新。">We are still actively exploring this direction, and we plan to keep updating this part of the work as it becomes more mature.</span>
+                </p>
+            </div>
+        </section>
+
+        <section class="reveal">
+            <h2><span class="dot" style="background:#d97706"></span>
+                <span class="lang-span" data-en="FAQ for Readers" data-zh="读者常见问题">FAQ for Readers</span>
+            </h2>
+            <div class="card">
+                <ul>
+                    <li>
+                        <span class="lang-span" data-en="<strong>Does normalization throw away inter-frame differences?</strong> Not really. It mainly rescales magnitudes, while the relative spatial ordering inside each frame is still preserved." data-zh="<strong>归一化会丢掉帧间差异吗？</strong> 严格来说不会。它主要是在重新缩放幅值，而每帧内部的相对空间排序仍然会保留下来。"><strong>Does normalization throw away inter-frame differences?</strong> Not really. It mainly rescales magnitudes, while the relative spatial ordering inside each frame is still preserved.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="<strong>Could we use global normalization instead of per-frame normalization?</strong> In principle yes, but it would make the pipeline much more sensitive to outlier frames. That is why the per-frame version is usually the safer choice." data-zh="<strong>可以用全局归一化代替按帧归一化吗？</strong> 理论上可以，但那样会让整条流程更容易受到异常帧的影响，所以按帧归一化通常会是更稳妥的选择。"><strong>Could we use global normalization instead of per-frame normalization?</strong> In principle yes, but it would make the pipeline much more sensitive to outlier frames. That is why the per-frame version is usually the safer choice.</span>
+                    </li>
+                    <li>
+                        <span class="lang-span" data-en="<strong>Why percentile-based scaling instead of min-max?</strong> Mostly because it is gentler with extreme outliers, such as one unusually bright residual region, so the final scale is more stable." data-zh="<strong>为什么用百分位数缩放而不是 min-max？</strong> 主要是因为它对极端异常值会更温和一些，比如某一块特别亮的残差区域不会把整体尺度拉得太夸张，所以结果更稳定。"><strong>Why percentile-based scaling instead of min-max?</strong> Mostly because it is gentler with extreme outliers, such as one unusually bright residual region, so the final scale is more stable.</span>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <footer class="reveal">
+            <p>
+                <span class="lang-span" data-en="Built for OneVision-Encoder · Issue #116" data-zh="为 OneVision-Encoder 构建 · Issue #116">Built for OneVision-Encoder · Issue #116</span>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        let currentLang = 'en';
+        function toggleLanguage(lang) {
+            currentLang = lang;
+            document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+            document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+            document.querySelectorAll('.lang-span').forEach(el => {
+                const text = el.getAttribute('data-' + lang);
+                if (text !== null) el.innerHTML = text;
+            });
+            document.title = lang === 'zh' ? 'Issue #116 解释页' : 'Issue #116 Explainer';
+        }
+
+        // Scroll reveal
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+        }, { threshold: 0.1 });
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+        // Matrix demo logic (from original issue-116)
+        function colorForValue(v, maxV) {
+            const ratio = maxV === 0 ? 0 : v / maxV;
+            const light = 95 - ratio * 45;
+            return `hsl(220 90% ${light}%)`;
+        }
+
+        function buildMatrix(containerId, rows, topkCoords) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            const maxV = Math.max(...rows.flatMap(r => r.values));
+            rows.forEach((row, rIdx) => {
+                const label = document.createElement('div');
+                label.className = 'matrix-label';
+                label.textContent = row.label;
+                container.appendChild(label);
+                row.values.forEach((v, cIdx) => {
+                    const cell = document.createElement('div');
+                    cell.className = 'matrix-cell';
+                    const isTopK = topkCoords.some(([rr, cc]) => rr === rIdx && cc === cIdx);
+                    if (isTopK) cell.classList.add('topk');
+                    cell.style.background = isTopK ? '#93c5fd' : colorForValue(v, maxV);
+                    cell.textContent = Number.isInteger(v) ? v : v.toFixed(2);
+                    container.appendChild(cell);
+                });
+            });
+        }
+
+        function globalTopK(rows, k) {
+            const items = [];
+            rows.forEach((row, r) => {
+                row.values.forEach((v, c) => {
+                    items.push({ r, c, v });
+                });
+            });
+            items.sort((a, b) => b.v - a.v);
+            return items.slice(0, k).map(x => [x.r, x.c]);
+        }
+
+        function normalizeRows(rows) {
+            return rows.map(row => {
+                const maxV = Math.max(...row.values);
+                return {
+                    label: row.label,
+                    values: row.values.map(v => maxV === 0 ? 0 : v / maxV)
+                };
+            });
+        }
+
+        const rawRows = [
+            { label: 'Frame 1', values: [2, 4, 3, 5, 4, 6] },
+            { label: 'Frame 2', values: [20, 18, 16, 22, 15, 19] },
+            { label: 'Frame 3', values: [1, 7, 2, 8, 3, 6] }
+        ];
+
+        const normRows = normalizeRows(rawRows);
+
+        window.addEventListener('load', () => {
+            const rawTopK = globalTopK(rawRows, 4);
+            const normTopK = globalTopK(normRows, 4);
+            buildMatrix('raw-matrix', rawRows, rawTopK);
+            buildMatrix('norm-matrix', normRows, normTopK);
+            toggleLanguage('en');
+        });
+    </script>
+</body>
+</html>
