@@ -106,8 +106,8 @@ class DALIWarperV2(object):
 
     def __next__(self):
         data_dict = self.iter.__next__()[0]
-        tensor_data = data_dict["data"].cuda()
-        tensor_label = data_dict["label"].long().cuda()
+        tensor_data = data_dict["data"]
+        tensor_label = data_dict["label"].long()
 
         if self.label_select is None:
             return {"pixel_values": tensor_data, "labels": tensor_label}
@@ -142,7 +142,7 @@ def dali_dataloader(
     num_shards=None,
     shard_id=None,
 ):
-    local_rank = int(os.environ.get("LOCAL_RANK", "1"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 
     if num_shards is None:
         num_shards = int(os.environ.get("WORLD_SIZE", "1"))
@@ -161,9 +161,9 @@ def dali_dataloader(
 
     pipe = Pipeline(
         batch_size=batch_size,
-        num_threads=2,
+        num_threads=max(1, workers),
         device_id=local_rank % 8,
-        prefetch_queue_depth=1,
+        prefetch_queue_depth=3,
         seed=seed,
     )
     device_memory_padding = 211025920
