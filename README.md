@@ -14,7 +14,8 @@
 🤗 **[Models](https://huggingface.co/collections/lmms-lab-encoder/onevision-encoder)** |
 📄 **[Tech Report](https://arxiv.org/abs/2602.08683)** |
 📋 **[Model Card](docs/model_card.md)** |
-📊 **[Data Card](docs/data_card.md)**
+📊 **[Data Card](docs/data_card.md)** |
+💬 **[Discord](https://discord.gg/PmdGHMFNP)**
 
 </div>
 
