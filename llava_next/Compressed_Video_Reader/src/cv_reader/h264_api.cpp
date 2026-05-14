@@ -531,7 +531,11 @@ static PyObject *decode_h264(AVFormatContext *fmt_ctx, bool with_residual, int m
     int ret;
     AVStream *st;
     AVCodecContext *dec_ctx = nullptr;
+    #if LIBAVFORMAT_VERSION_MAJOR >= 59
     const AVCodec *dec = nullptr;
+#else
+    AVCodec *dec = nullptr;
+#endif
     AVDictionary *opts = nullptr;
     AVPacket *pkt = nullptr;
     AVFrame *frame = nullptr;
@@ -622,7 +626,11 @@ static PyObject *decode_h264_cb(AVFormatContext *fmt_ctx,
     int ret;
     AVStream *st;
     AVCodecContext *dec_ctx = nullptr;
+    #if LIBAVFORMAT_VERSION_MAJOR >= 59
     const AVCodec *dec = nullptr;
+#else
+    AVCodec *dec = nullptr;
+#endif
     AVDictionary *opts = nullptr;
     AVPacket *pkt = nullptr;
     AVFrame *frame = nullptr;
